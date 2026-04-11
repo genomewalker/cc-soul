@@ -456,12 +456,31 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
-    <!-- 5.14.0 -->
+    <!-- 5.16.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.16.0</span>
+        <span class="version-date">April 11, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Intervention/Outcome/Attribution Ledger (Layer 7)</strong> &mdash; WAL-backed organ tracking agent actions before execution, observations during execution, and causal attribution after outcome.</li>
+          <li><strong>10-class AttributionClass taxonomy</strong> &mdash; <code>MemoryRecallError</code>, <code>SourceTrustError</code>, <code>ProcedureError</code>, <code>ToolExecutionError</code>, <code>EnvironmentShift</code>, <code>HiddenPrecondition</code>, <code>AmbiguousState</code>, <code>GoalSpecError</code>, <code>UserOverride</code>, <code>ExternalNondeterminism</code>. Each class routes to a different learning subsystem.</li>
+          <li><strong>Attribution routing</strong> &mdash; <code>MemoryRecallError</code> &rarr; surprise credit; <code>SourceTrustError</code> &rarr; integration kernel source weight decrease; <code>ProcedureError</code> &rarr; skill memory demotion. Secondary class supported at 0.5&times; confidence.</li>
+          <li><strong>8 new MCP tools</strong> &mdash; <code>start_intervention</code>, <code>add_observation</code>, <code>close_intervention</code>, <code>record_attribution</code>, <code>query_interventions</code>, <code>get_intervention</code>, <code>intervention_stats</code>, <code>list_open_interventions</code>.</li>
+          <li><strong>4 new WAL op codes</strong> &mdash; <code>OP_START_INTERVENTION=49</code> through <code>OP_RECORD_ATTRIBUTION=52</code>. Full WAL replay for crash recovery.</li>
+          <li><strong>Stale intervention auto-close</strong> &mdash; subconscious learning cycle closes interventions open longer than 30 minutes.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.15.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.15.0</span>
         <span class="version-date">April 11, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>

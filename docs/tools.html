@@ -149,6 +149,7 @@
     <a href="#cat-io" class="submenu-toc-link" data-section="cat-io">Import / Export</a>
     <a href="#cat-background" class="submenu-toc-link" data-section="cat-background">Background Processing</a>
     <a href="#cat-learning" class="submenu-toc-link" data-section="cat-learning">Learning &amp; Tracking</a>
+    <a href="#cat-intervention" class="submenu-toc-link" data-section="cat-intervention">Intervention Ledger</a>
     <a href="#cat-explore" class="submenu-toc-link" data-section="cat-explore">Exploration</a>
     <a href="#cat-longtask" class="submenu-toc-link" data-section="cat-longtask">Long Tasks</a>
     <a href="#cat-anticipation" class="submenu-toc-link" data-section="cat-anticipation">Anticipation &amp; Habits</a>
@@ -1021,6 +1022,28 @@
       </div>
     </div>
 
+    <!-- INTERVENTION LEDGER (Layer 7) -->
+    <div class="tools-category collapsed" id="cat-intervention">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="14" height="12" rx="1.5" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/><line x1="7" y1="8" x2="13" y2="8" stroke="#9DB2D9" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="11" x2="11" y2="11" stroke="#9DB2D9" stroke-width="0.75" opacity="0.6"/><path d="M10 3v4" stroke="#9DB2D9" stroke-width="1" opacity="0.4" stroke-linecap="round"/></svg>
+        </div>
+        <span class="tools-category-name">Intervention Ledger (Layer 7)</span>
+        <span class="tools-category-count">8 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">start_intervention</span><span class="tool-desc">Begin tracking an agent intervention &mdash; record intent, action type, preconditions and expected observables before execution</span></div>
+        <div class="tool-row"><span class="tool-name">add_observation</span><span class="tool-desc">Record an observation during an open intervention (stdout, test result, diff, etc.)</span></div>
+        <div class="tool-row"><span class="tool-name">close_intervention</span><span class="tool-desc">Close an intervention with its final outcome status (Open=0 Succeeded=1 Failed=2 Partial=3 Aborted=4)</span></div>
+        <div class="tool-row"><span class="tool-name">record_attribution</span><span class="tool-desc">Attribute a closed intervention to a causal class &mdash; routes feedback to the appropriate learning subsystem</span></div>
+        <div class="tool-row"><span class="tool-name">query_interventions</span><span class="tool-desc">Query the intervention ledger with optional realm/session/status filters</span></div>
+        <div class="tool-row"><span class="tool-name">get_intervention</span><span class="tool-desc">Get a single intervention record with its observations and attributions</span></div>
+        <div class="tool-row"><span class="tool-name">intervention_stats</span><span class="tool-desc">Intervention ledger statistics &mdash; total, open, succeeded, failed, aborted counts</span></div>
+        <div class="tool-row"><span class="tool-name">list_open_interventions</span><span class="tool-desc">List all currently open (in-progress) interventions</span></div>
+      </div>
+    </div>
+
     <!-- DEBUG (hidden in collapsed by default) -->
     <div class="tools-category collapsed" id="cat-debug">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
@@ -1781,6 +1804,43 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
       {name: 'source', type: 'string', req: true, desc: 'Source name'},
       {name: 'domain', type: 'string', req: false, desc: 'Domain (default general)'},
       {name: 'weight', type: 'number', req: false, desc: 'New weight [0-2] (default 1.0)'}
+    ],
+    // Intervention Ledger (Layer 7)
+    start_intervention: [
+      {name: 'action_type', type: 'integer', req: true, desc: '0=ToolCall 1=FileWrite 2=ShellExec 3=NetworkRequest 4=DaemonCall 5=UserQuery 6=MemoryWrite 7=SkillExec 8=Reasoning 9=Other'},
+      {name: 'realm', type: 'string', req: false, desc: 'Realm context (default coding)'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Session identifier'},
+      {name: 'task_id', type: 'string', req: false, desc: 'Optional task ID'},
+      {name: 'agent_id', type: 'string', req: false, desc: 'Optional agent identifier'},
+      {name: 'domain', type: 'string', req: false, desc: 'Domain hint'},
+      {name: 'intent', type: 'string', req: false, desc: 'Natural language intent description'},
+      {name: 'reversal_cost', type: 'integer', req: false, desc: '0=Free 1=LowCost 2=MediumCost 3=HighCost 4=Irreversible'}
+    ],
+    add_observation: [
+      {name: 'intervention_id', type: 'integer', req: true, desc: 'Intervention ID from start_intervention'},
+      {name: 'kind', type: 'integer', req: true, desc: '0=ToolOutput 1=UserFeedback 2=EnvironmentState 3=SideEffect 4=ErrorSignal 5=SuccessSignal 6=Intermediate'},
+      {name: 'content', type: 'string', req: false, desc: 'Observation content'},
+      {name: 'confidence', type: 'number', req: false, desc: 'Confidence in observation (default 1.0)'}
+    ],
+    close_intervention: [
+      {name: 'intervention_id', type: 'integer', req: true, desc: 'Intervention ID to close'},
+      {name: 'status', type: 'integer', req: true, desc: '0=Open 1=Succeeded 2=Failed 3=Partial 4=Aborted'}
+    ],
+    record_attribution: [
+      {name: 'intervention_id', type: 'integer', req: true, desc: 'Intervention ID'},
+      {name: 'primary_class', type: 'integer', req: true, desc: '0=MemoryRecallError 1=SourceTrustError 2=ProcedureError 3=ToolExecutionError 4=EnvironmentShift 5=HiddenPrecondition 6=AmbiguousState 7=GoalSpecError 8=UserOverride 9=ExternalNondeterminism'},
+      {name: 'secondary_class', type: 'integer', req: false, desc: 'Optional secondary class (same enum, 0.5x confidence)'},
+      {name: 'confidence_delta', type: 'number', req: false, desc: 'Learning signal magnitude 0.0-1.0'},
+      {name: 'note', type: 'string', req: false, desc: 'Optional human-readable note'}
+    ],
+    query_interventions: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Filter by session ID'},
+      {name: 'status', type: 'integer', req: false, desc: 'Filter by status (0-4)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default 50)'}
+    ],
+    get_intervention: [
+      {name: 'intervention_id', type: 'integer', req: true, desc: 'Intervention ID'}
     ]
   };
 
