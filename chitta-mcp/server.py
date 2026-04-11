@@ -185,6 +185,10 @@ ADVANCED_TOOLS = {
     "start_intervention", "add_observation", "close_intervention",
     "record_attribution", "query_interventions", "get_intervention",
     "intervention_stats", "list_open_interventions",
+    # Layer 8: Agent Protocol Memory
+    "register_task", "update_task", "add_delegation", "link_evidence",
+    "add_probe", "resolve_probe", "set_criterion",
+    "get_task", "query_tasks", "agent_protocol_stats",
 }
 
 # Combined set of tools to hide from listing (but still callable)

@@ -772,6 +772,19 @@ void Subconscious::run_learning_cycle() {
                 stats_.interventions_auto_closed += static_cast<size_t>(closed);
             }
         }
+
+        // Move: Auto-complete tasks whose all criteria are met
+        {
+            auto* raw = cf_auto_complete_tasks(field_store_->handle());
+            if (raw) {
+                auto result = nlohmann::json::parse(raw, nullptr, false);
+                cf_free_string(raw);
+                if (!result.is_discarded()) {
+                    auto count = result.value("completed_count", 0ULL);
+                    if (count > 0) stats_.tasks_auto_completed += count;
+                }
+            }
+        }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Learning cycle failed: " << e.what() << "\n";
     }

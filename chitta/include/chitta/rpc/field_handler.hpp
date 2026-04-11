@@ -592,6 +592,7 @@ private:
     #include "handlers/meta_memory.hpp"
     #include "handlers/learning.hpp"
     #include "handlers/intervention.hpp"
+    #include "handlers/agent_protocol.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2639,6 +2640,95 @@ private:
             {"inputSchema",{{"type","object"}}}});
         handlers_["list_open_interventions"] = [this](const json& p) { return tool_list_open_interventions(field_store_, p); };
 
+        // ── Layer 8: Agent Protocol Memory ───────────────────────────────────
+        tools_.push_back({{"name","register_task"},{"description","Register a task contract — records goal, constraints, acceptance criteria, priority, and optional deadline for an ongoing agent task"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"session_id",{{"type","string"},{"description","Session this task belongs to"}}},
+                {"realm",{{"type","string"},{"description","Realm: coding, research, planning (default: coding)"}}},
+                {"goal",{{"type","string"},{"description","Task goal description"}}},
+                {"constraints",{{"type","array"},{"items",{{"type","string"}}},{"description","Constraints that must be respected"}}},
+                {"acceptance_criteria",{{"type","array"},{"items",{{"type","string"}}},{"description","Criteria for task completion"}}},
+                {"priority",{{"type","integer"},{"description","Priority 1-10 (default 5)"}}},
+                {"parent_task_id",{{"type","integer"},{"description","Parent task ID for subtasks"}}},
+                {"tags",{{"type","array"},{"items",{{"type","string"}}},{"description","Optional tags"}}},
+                {"deadline_ms",{{"type","integer"},{"description","Optional deadline as Unix ms timestamp"}}}
+            }},{"required",{"goal"}}}}});
+        handlers_["register_task"] = [this](const json& p) { return tool_register_task(field_store_, p); };
+
+        tools_.push_back({{"name","update_task"},{"description","Update task status (Active=0, Blocked=1, Completed=2, Failed=3, Abandoned=4), optionally attach an intervention ID or add a tag"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}},
+                {"status",{{"type","integer"},{"description","0=Active 1=Blocked 2=Completed 3=Failed 4=Abandoned"}}},
+                {"add_intervention_id",{{"type","integer"},{"description","Attach intervention to task"}}},
+                {"add_tag",{{"type","string"},{"description","Add a tag to the task"}}}
+            }},{"required",{"task_id","status"}}}}});
+        handlers_["update_task"] = [this](const json& p) { return tool_update_task(field_store_, p); };
+
+        tools_.push_back({{"name","add_delegation"},{"description","Record a delegation edge — tracks which agent handed off to which, with optional handoff note"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}},
+                {"from_agent",{{"type","string"},{"description","Delegating agent name"}}},
+                {"to_agent",{{"type","string"},{"description","Receiving agent name"}}},
+                {"handoff_note",{{"type","string"},{"description","Optional context passed at handoff"}}}
+            }},{"required",{"task_id","from_agent","to_agent"}}}}});
+        handlers_["add_delegation"] = [this](const json& p) { return tool_add_delegation(field_store_, p); };
+
+        tools_.push_back({{"name","link_evidence"},{"description","Link a memory to a task as evidence — records which agent produced it and evidence kind"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}},
+                {"memory_id",{{"type","integer"},{"description","Memory ID to link"}}},
+                {"produced_by",{{"type","string"},{"description","Agent that produced this evidence"}}},
+                {"evidence_kind",{{"type","integer"},{"description","0=Observation 1=Artifact 2=Result 3=Analysis 4=UserFeedback"}}},
+                {"relevance",{{"type","number"},{"description","Relevance score 0-1 (default 1.0)"}}}
+            }},{"required",{"task_id","memory_id"}}}}});
+        handlers_["link_evidence"] = [this](const json& p) { return tool_link_evidence(field_store_, p); };
+
+        tools_.push_back({{"name","add_probe"},{"description","Add a pending probe — an open question that must be answered to unblock or complete a task"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}},
+                {"question",{{"type","string"},{"description","Open question to be answered"}}},
+                {"expected_answerer",{{"type","string"},{"description","Agent or role expected to answer"}}},
+                {"priority",{{"type","integer"},{"description","Priority 1-10 (default 5)"}}}
+            }},{"required",{"task_id","question"}}}}});
+        handlers_["add_probe"] = [this](const json& p) { return tool_add_probe(field_store_, p); };
+
+        tools_.push_back({{"name","resolve_probe"},{"description","Resolve a pending probe — mark as Answered (1) or Dismissed (2) and optionally record the answer"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"probe_id",{{"type","integer"},{"description","Probe ID"}}},
+                {"status",{{"type","integer"},{"description","1=Answered 2=Dismissed"}}},
+                {"answer",{{"type","string"},{"description","Optional answer text"}}}
+            }},{"required",{"probe_id","status"}}}}});
+        handlers_["resolve_probe"] = [this](const json& p) { return tool_resolve_probe(field_store_, p); };
+
+        tools_.push_back({{"name","set_criterion"},{"description","Upsert a completion criterion for a task — creates if new, updates if existing criterion text matches"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}},
+                {"criterion",{{"type","string"},{"description","Criterion description"}}},
+                {"is_met",{{"type","boolean"},{"description","Whether criterion is met (default false)"}}},
+                {"evidence_note",{{"type","string"},{"description","Optional evidence supporting the criterion check"}}}
+            }},{"required",{"task_id","criterion"}}}}});
+        handlers_["set_criterion"] = [this](const json& p) { return tool_set_criterion(field_store_, p); };
+
+        tools_.push_back({{"name","get_task"},{"description","Get full task view — contract, delegations, evidence links, pending probes, and completion criteria"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"task_id",{{"type","integer"},{"description","Task ID"}}}
+            }},{"required",{"task_id"}}}}});
+        handlers_["get_task"] = [this](const json& p) { return tool_get_task(field_store_, p); };
+
+        tools_.push_back({{"name","query_tasks"},{"description","Query task contracts — filter by realm, session, status, or tag"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"session_id",{{"type","string"},{"description","Filter by session ID"}}},
+                {"status",{{"type","integer"},{"description","Filter by status (0-4)"}}},
+                {"tag",{{"type","string"},{"description","Filter by tag"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_tasks"] = [this](const json& p) { return tool_query_tasks(field_store_, p); };
+
+        tools_.push_back({{"name","agent_protocol_stats"},{"description","Show agent protocol memory statistics — total tasks, delegations, evidence links, probes, criteria counts"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["agent_protocol_stats"] = [this](const json& p) { return tool_agent_protocol_stats(field_store_, p); };
+
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
             {"inputSchema",{{"type","object"},{"properties",{
@@ -2911,7 +3001,11 @@ private:
             // Layer 7: Intervention Ledger
             "start_intervention", "add_observation", "close_intervention",
             "record_attribution", "query_interventions", "get_intervention",
-            "intervention_stats", "list_open_interventions"
+            "intervention_stats", "list_open_interventions",
+            // Layer 8: Agent Protocol Memory
+            "register_task", "update_task", "add_delegation", "link_evidence",
+            "add_probe", "resolve_probe", "set_criterion",
+            "get_task", "query_tasks", "agent_protocol_stats"
         };
 
         for (const auto& name : internal_tools) tool_visibility_[name] = "internal";
