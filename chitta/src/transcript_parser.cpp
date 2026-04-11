@@ -1,5 +1,6 @@
 #include "../include/chitta/transcript_parser.hpp"
 #include <sstream>
+#include <unordered_set>
 
 namespace chitta {
 
@@ -101,7 +102,26 @@ std::string TranscriptParser::extract_content(const nlohmann::json& entry, bool 
                     content += "<thinking>\n" + thinking + "\n</thinking>";
                 }
             }
-            // Skip tool_use, tool_result - just noise for distillation
+            else if (block_type == "tool_use" && block.contains("name") && block.contains("input")) {
+                std::string tool_name = block.value("name", "");
+                static const std::unordered_set<std::string> ops = {"Bash","Read","Write","Edit","Glob","Grep"};
+                if (ops.count(tool_name)) {
+                    std::string input_str;
+                    for (const auto& key : {"command", "file_path", "pattern"}) {
+                        if (block["input"].contains(key)) {
+                            if (!input_str.empty()) input_str += " ";
+                            std::string val = block["input"][key].get<std::string>();
+                            if (val.size() > 200) val = val.substr(0, 200);
+                            input_str += std::string(key) + "=" + val;
+                        }
+                    }
+                    if (!input_str.empty()) {
+                        if (!content.empty()) content += "\n";
+                        content += "[tool:" + tool_name + "] " + input_str;
+                    }
+                }
+            }
+            // Skip tool_result - just noise for distillation
         }
     }
 

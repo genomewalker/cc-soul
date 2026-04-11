@@ -55,6 +55,7 @@ Types:
 | [FAILURE] | 2 | What did not work and why |
 | [CORRECTION] | 1 | Updates to prior beliefs: supersedes earlier knowledge |
 | [EVENT] | 2 | Significant action taken this session (deployed, merged, configured) |
+| [OPERATIONAL] | 1 | Working-state facts: paths, configs, env vars, versions, active states |
 
 SSL symbols:
 

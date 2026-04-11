@@ -120,7 +120,8 @@
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
         float threshold   = params.value("threshold", 0.90f);
 
-        auto pairs = find_dup_pairs(realm, 200, threshold);
+        size_t candidates = static_cast<size_t>(params.value("candidates", 1000));
+        auto pairs = find_dup_pairs(realm, candidates, threshold);
         if (pairs.size() > limit) pairs.resize(limit);
 
         json pairs_json = json::array();
@@ -153,7 +154,8 @@
         bool dry_run      = params.value("dry_run", true);
         size_t limit      = static_cast<size_t>(params.value("limit", 10));
 
-        auto pairs = find_dup_pairs(realm, 200, threshold);
+        size_t candidates = static_cast<size_t>(params.value("candidates", 1000));
+        auto pairs = find_dup_pairs(realm, candidates, threshold);
         if (pairs.size() > limit) pairs.resize(limit);
 
         size_t merged = 0;
