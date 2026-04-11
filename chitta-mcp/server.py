@@ -167,6 +167,14 @@ ADVANCED_TOOLS = {
     "trigger_add", "trigger_list", "trigger_fire", "trigger_dismiss",
     # Layer 3: Predictive Memory
     "predict_needed",
+    # Layer 4: Surprise Memory
+    "record_surprise", "query_surprises", "get_blind_spots", "surprise_stats",
+    # Layer 5: Epistemic Debt
+    "register_debt", "resolve_debt", "defer_debt", "query_debts",
+    "get_fragile_decisions", "debt_stats",
+    # Layer 6: Integration Kernel
+    "record_feedback", "get_source_weights", "update_source_weight",
+    "integration_stats",
 }
 
 # Combined set of tools to hide from listing (but still callable)

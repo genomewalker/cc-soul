@@ -1592,4 +1592,137 @@ Curiosity-driven research tools for finding topics to investigate, storing findi
 
 ---
 
+## Meta-Memory (Layers 4-6)
+
+### record_surprise
+
+Record a prediction error event — what was expected vs what actually happened.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `context_sketch` | string | No | What was happening when the surprise occurred |
+| `action` | string | No | What action was taken |
+| `expected` | string | No | What was predicted/expected |
+| `actual` | string | Yes | What actually happened |
+| `surprise_magnitude` | number | No | How surprising [0-1] (default 0.5) |
+| `domain` | string | No | Domain: recall, tool, user_correction, constraint (default general) |
+| `realm` | string | No | Realm filter (default global) |
+| `session_id` | string | No | Session ID |
+| `source_memory_id` | integer | No | Related memory ID |
+
+### query_surprises
+
+Query recorded surprise/prediction-error events with filters.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `domain` | string | No | Filter by domain |
+| `realm` | string | No | Filter by realm |
+| `min_magnitude` | number | No | Minimum surprise magnitude |
+| `since_ms` | integer | No | Only events after this timestamp (ms) |
+| `limit` | integer | No | Max results (default 50) |
+
+### get_blind_spots
+
+Identify recurring surprise patterns — domains/actions where predictions consistently fail.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `limit` | integer | No | Max blind spots (default 10) |
+
+### surprise_stats
+
+Summary statistics for surprise memory: counts, avg magnitude, domain breakdown. No parameters.
+
+### register_debt
+
+Register an epistemic uncertainty — competing hypotheses that need resolution.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pattern` | string | Yes | The uncertain pattern/belief |
+| `competing_hypotheses` | string[] | No | Competing explanations |
+| `discriminating_test` | string | No | How to distinguish between hypotheses |
+| `fragility_score` | number | No | How fragile this belief is [0-1] (default 0.5) |
+| `domain` | string | No | Domain (default general) |
+| `realm` | string | No | Realm (default global) |
+| `session_id` | string | No | Session ID |
+
+### resolve_debt
+
+Mark an epistemic debt as resolved with a resolution.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `debt_id` | integer | Yes | Debt ID to resolve |
+| `resolution` | string | Yes | How the uncertainty was resolved |
+
+### defer_debt
+
+Defer an epistemic debt for later investigation.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `debt_id` | integer | Yes | Debt ID to defer |
+
+### query_debts
+
+Query epistemic debts with filters.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `status` | string | No | Filter: open, resolved, deferred |
+| `domain` | string | No | Filter by domain |
+| `realm` | string | No | Filter by realm |
+| `min_fragility` | number | No | Minimum fragility score |
+| `limit` | integer | No | Max results (default 50) |
+
+### get_fragile_decisions
+
+List open epistemic debts sorted by fragility — decisions most likely to be wrong.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `threshold` | number | No | Minimum fragility threshold (default 0.5) |
+| `limit` | integer | No | Max results (default 20) |
+
+### debt_stats
+
+Summary statistics for epistemic debt: counts by status, avg fragility. No parameters.
+
+### record_feedback
+
+Record whether a recall source was useful — updates learned source weights.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query_domain` | string | No | Domain of the query (default general) |
+| `source` | string | Yes | Source: semantic, keyword, temporal, artifact, association |
+| `was_useful` | boolean | No | Whether the source's results were useful (default true) |
+
+### get_source_weights
+
+View learned recall source weights — how much each source is trusted per domain.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `domain` | string | No | Filter by domain (omit for all) |
+
+### update_source_weight
+
+Manually override a recall source weight.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source` | string | Yes | Source name |
+| `domain` | string | No | Domain (default general) |
+| `weight` | number | No | New weight [0-2] (default 1.0) |
+
+### integration_stats
+
+Per-source success rates and learned weights across all domains. No parameters.
+
+---
+
 *100+ tools. One soul.*

@@ -456,12 +456,55 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.14.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.14.0</span>
+        <span class="version-date">April 11, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Surprise Memory (Layer 4)</strong> &mdash; Prediction error tuples that reveal blind spots. Record what was expected vs what actually happened; query recurring surprise patterns; identify domains where predictions consistently fail. <code>SurpriseDomainFactor</code> in scoring pipeline boosts &ldquo;actual&rdquo; outcomes and suppresses wrong &ldquo;expected&rdquo; predictions. <em>Friston (2010).</em></li>
+          <li><strong>Epistemic Debt (Layer 5)</strong> &mdash; Uncertainty boundaries and competing hypotheses. Register fragile beliefs with competing explanations and discriminating tests; resolve or defer debts as evidence accumulates. <code>EpistemicDebtFactor</code> boosts memories in uncertain domains. <em>Sperber et al. (2010).</em></li>
+          <li><strong>Integration Kernel (Layer 6)</strong> &mdash; Recall source arbitration with learned weights. Track which recall sources (semantic, keyword, temporal, artifact, association) are useful per domain; weights update via Bayesian feedback. <code>IntegrationWeightFactor</code> applies learned source weight as multiplier. <em>Shazeer et al. (2017).</em></li>
+          <li><strong>14 new MCP tools</strong> &mdash; <code>record_surprise</code>, <code>query_surprises</code>, <code>get_blind_spots</code>, <code>surprise_stats</code>, <code>register_debt</code>, <code>resolve_debt</code>, <code>defer_debt</code>, <code>query_debts</code>, <code>get_fragile_decisions</code>, <code>debt_stats</code>, <code>record_feedback</code>, <code>get_source_weights</code>, <code>update_source_weight</code>, <code>integration_stats</code>.</li>
+          <li><strong>18-factor scoring pipeline</strong> &mdash; 3 new factors (SurpriseDomain, EpistemicDebt, IntegrationWeight) extend the pipeline from 15 to 18 composable factors. New config params in <code>scoring.json</code>.</li>
+          <li><strong>5 new WAL op codes</strong> &mdash; <code>OP_RECORD_SURPRISE=39</code>, <code>OP_REGISTER_DEBT=40</code>, <code>OP_UPDATE_DEBT=41</code>, <code>OP_UPDATE_SOURCE_WEIGHT=42</code>, <code>OP_RECORD_FEEDBACK=43</code>. All replay from WAL &mdash; no snapshot version bump needed.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.12.0–5.13.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.12.0&ndash;5.13.0</span>
+        <span class="version-date">April 11, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Executable Constraints (Layer 1)</strong> &mdash; Prolog-style logic engine. Assert/retract facts, unify variables, chain queries. Supports hypothetical branches for what-if reasoning.</li>
+          <li><strong>Trigger Tissue (Layer 2)</strong> &mdash; Event-condition-action rules that fire automatically when patterns match. Define triggers on memory events; the daemon evaluates conditions and fires actions.</li>
+          <li><strong>Predictive Memory (Layer 3)</strong> &mdash; Markov chain access predictor. Learns transition probabilities between memory accesses; pre-warms predicted-next-needed memories. <code>PredictionBoost</code> scoring factor.</li>
+          <li><strong>Three-layer paradigm</strong> &mdash; Constraints, triggers, and predictors follow the organ pattern: Rust store &rarr; WAL replay &rarr; FFI &rarr; C++ handlers &rarr; MCP tools.</li>
+          <li><strong>InterferenceDensity factor</strong> &mdash; Price of Meaning: penalty for local competitor crowding in the scoring pipeline.</li>
+          <li><strong>SpacingBoost factor</strong> &mdash; Geometry of Forgetting: well-spaced accesses boost recall.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Filter empty-content ghosts from all Rust recall paths (semantic, keyword, temporal, artifact).</li>
+          <li>Missing <code>trajectory_compact.hpp</code> header broke CI.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.11.0–5.11.2 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.11.0&ndash;5.11.2</span>
         <span class="version-date">April 10&ndash;11, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>

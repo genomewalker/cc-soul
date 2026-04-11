@@ -85,6 +85,26 @@ char* cf_predict_needed(const struct CfHandle* h, size_t k);
 int cf_retrain_predictor(struct CfHandle* h);
 char* cf_constraint_stats(const struct CfHandle* h);
 
+// Surprise memory FFI (Layer 4)
+char* cf_record_surprise(struct CfHandle* h, const char* params_json);
+char* cf_query_surprises(const struct CfHandle* h, const char* params_json);
+char* cf_get_blind_spots(const struct CfHandle* h, const char* params_json);
+char* cf_surprise_stats(const struct CfHandle* h);
+
+// Epistemic debt FFI (Layer 5)
+char* cf_register_debt(struct CfHandle* h, const char* params_json);
+int cf_resolve_debt(struct CfHandle* h, uint64_t debt_id, const char* resolution_json);
+int cf_defer_debt(struct CfHandle* h, uint64_t debt_id);
+char* cf_query_debts(const struct CfHandle* h, const char* params_json);
+char* cf_get_fragile_decisions(const struct CfHandle* h, const char* params_json);
+char* cf_debt_stats(const struct CfHandle* h);
+
+// Integration kernel FFI (Layer 6)
+char* cf_record_feedback(struct CfHandle* h, const char* params_json);
+char* cf_get_source_weights(const struct CfHandle* h, const char* params_json);
+int cf_update_source_weight(struct CfHandle* h, const char* params_json);
+char* cf_integration_stats(const struct CfHandle* h);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);

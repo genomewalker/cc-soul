@@ -421,22 +421,28 @@ struct DuckDBResonanceConfig {
 
 ### ScoringPipeline (v5.11+)
 
-Post-resonance scoring is handled by the `ScoringPipeline`, a neuroplastic trait-based architecture that replaces the previous hardcoded scoring constants. The pipeline applies 12 composable scoring factors in sequence:
+Post-resonance scoring is handled by the `ScoringPipeline`, a neuroplastic trait-based architecture that replaces the previous hardcoded scoring constants. The pipeline applies 18 composable scoring factors in sequence:
 
-| Factor | Source | Description |
-|--------|--------|-------------|
-| Relevance | Cosine similarity | Base semantic match score |
-| ACT-R | Access history | Anderson & Schooler (1991) power-law decay over access timestamps |
-| Strength | Memory strength | Reinforcement from repeated access |
-| Confidence | Bayesian confidence | Mean of beta posterior over observation history |
-| Surprise | FEP §2.3 | Reconstruction error as surprise signal |
-| Arousal | Affect dimensions | Flashbulb memory effect: high-arousal memories boosted |
-| MoodCongruence | Query affect | Bower (1981): valence/arousal alignment between query and memory |
-| FrustrationEscalation | Query affect | Negative valence + high arousal boosts corrections/preferences |
-| Status | Demotion tier | Tier-based weight (hot > warm > cool > cold) |
-| Epistemic | Node type | Type-based multiplier (corrections, preferences weighted higher) |
-| Kind | Node kind | Fine-grained kind multiplier |
-| RealmReliability | Realm stats | Per-realm reliability based on historical feedback |
+| # | Factor | Source | Description |
+|---|--------|--------|-------------|
+| 1 | Relevance | Cosine similarity | Base semantic match score |
+| 2 | ACT-R | Access history | Anderson & Schooler (1991) power-law decay over access timestamps |
+| 3 | Strength | Memory strength | Reinforcement from repeated access |
+| 4 | Confidence | Bayesian confidence | Mean of beta posterior over observation history |
+| 5 | Surprise | FEP §2.3 | Reconstruction error as surprise signal |
+| 6 | Arousal | Affect dimensions | Flashbulb memory effect: high-arousal memories boosted |
+| 7 | MoodCongruence | Query affect | Bower (1981): valence/arousal alignment between query and memory |
+| 8 | FrustrationEscalation | Query affect | Negative valence + high arousal boosts corrections/preferences |
+| 9 | Status | Demotion tier | Tier-based weight (hot > warm > cool > cold) |
+| 10 | Epistemic | Node type | Type-based multiplier (corrections, preferences weighted higher) |
+| 11 | Kind | Node kind | Fine-grained kind multiplier |
+| 12 | RealmReliability | Realm stats | Per-realm reliability based on historical feedback |
+| 13 | InterferenceDensity | Competitor crowding | Price of Meaning: penalty for local competitor density |
+| 14 | SpacingBoost | Access spacing | Geometry of Forgetting: well-spaced accesses boost recall |
+| 15 | PredictionBoost | Markov chain | Layer 3: predicted-next-needed memories get boosted |
+| 16 | SurpriseDomain | Surprise Memory | Layer 4: memories that were "actual" in a surprise event get boosted; "expected" get suppressed |
+| 17 | EpistemicDebt | Epistemic Debt | Layer 5: memories in domains with open uncertainty get boosted |
+| 18 | IntegrationWeight | Integration Kernel | Layer 6: learned recall source weight applied as multiplier |
 
 Each factor has independent `weight`, `bias`, and type-specific parameters. All configuration lives in `scoring.json` with hot-reload support — no rebuild required to tune scoring behavior.
 
@@ -943,6 +949,100 @@ Theoretical foundations and inspirations cited throughout the codebase.
 | HNSW | Malkov, Y.A. & Yashunin, D.A. (2020). "Efficient and robust approximate nearest neighbor search using HNSW graphs." *IEEE TPAMI*. | `chitta-field/src/store.rs` — semantic recall index |
 | MAD thresholding | Leys, C. et al. (2013). "Detecting outliers: Do not use standard deviation around the mean." *Journal of Experimental Social Psychology*. | `trajectory_compact.hpp` — adaptive turn selection threshold |
 
+### Meta-Memory (Layers 4-6)
+
+| Concept | Source | Used In |
+|---------|--------|---------|
+| Free Energy Principle (prediction error) | Friston, K. (2010). "The free-energy principle: a unified brain theory?" *Nature Reviews Neuroscience*, 11(2), 127–138. | `chitta-field/src/organ/surprise.rs` — surprise memory store; `scoring/factors.rs` — SurpriseDomainFactor |
+| Epistemic vigilance | Sperber, D. et al. (2010). "Epistemic vigilance." *Mind & Language*, 25(4), 359–393. | `chitta-field/src/organ/epistemic_debt.rs` — uncertainty tracking with fragility scores |
+| Mixture of Experts gating | Shazeer, N. et al. (2017). "Outrageously large neural networks: the sparsely-gated mixture-of-experts layer." *ICLR 2017*. | `chitta-field/src/organ/integration.rs` — learned recall source weights |
+
 ---
 
-*Version 4.0 — chitta-field backend (Rust organic substrate), ANN semantic index (IVF + LSH), SDR cortical index, 8-phase resonance, self-tuning, xMemory themes, cross-session messaging.*
+## Meta-Memory Layers (v5.13+)
+
+Six organ layers extend core recall with structured metacognition. Each layer follows the organ pattern: Rust store → WAL replay → FFI → C++ handlers → MCP tools.
+
+### Layer 1: Executable Constraints
+
+Prolog-style logic engine embedded in chitta-field. Facts are asserted/retracted at runtime; unification and chain queries execute against the fact base.
+
+| Tool | Description |
+|------|-------------|
+| `assert_fact` | Assert a Prolog-style fact (e.g., `prefers(user, rust)`) |
+| `retract_fact` | Retract a previously asserted fact |
+| `query_unify` | Unify a query pattern against the fact base |
+| `query_chain` | Chain multiple query patterns with shared variables |
+| `explain_fact` | Show provenance chain for a derived fact |
+| `branch_create` | Create a hypothetical branch of the fact base |
+| `branch_resolve` | Merge or discard a hypothetical branch |
+
+### Layer 2: Trigger Tissue
+
+Event-condition-action rules that fire automatically when conditions are met.
+
+| Tool | Description |
+|------|-------------|
+| `trigger_add` | Define a trigger with event pattern, condition, and action |
+| `trigger_list` | List active triggers with match counts |
+| `trigger_fire` | Manually fire a trigger |
+| `trigger_dismiss` | Dismiss/deactivate a trigger |
+
+### Layer 3: Predictive Memory
+
+Markov chain access predictor that learns transition probabilities between memory accesses.
+
+| Tool | Description |
+|------|-------------|
+| `predict_needed` | Get predicted next-needed memories from the access predictor |
+
+### Layer 4: Surprise Memory
+
+Prediction error tuples that reveal blind spots. Records what was expected vs what actually happened. Recurring surprise patterns surface as "blind spots" — domains/actions where predictions consistently fail.
+
+**WAL op code**: `OP_RECORD_SURPRISE = 39`
+
+**Scoring**: `SurpriseDomainFactor` — memories that were the "actual" outcome in a surprise event get boosted (`1 + 0.15 * magnitude`); memories that were the "expected" (wrong) prediction get suppressed (`1 - 0.10 * magnitude`).
+
+| Tool | Description |
+|------|-------------|
+| `record_surprise` | Record a prediction error event with context, action, expected/actual, magnitude, domain |
+| `query_surprises` | Filter surprise events by domain, realm, magnitude, time |
+| `get_blind_spots` | Aggregated surprise patterns — domains/actions where predictions consistently fail |
+| `surprise_stats` | Summary statistics: counts, avg magnitude, domain breakdown |
+
+### Layer 5: Epistemic Debt
+
+Uncertainty boundaries and competing hypotheses. Tracks beliefs that are fragile — where multiple explanations compete and no discriminating test has been applied.
+
+**WAL op codes**: `OP_REGISTER_DEBT = 40`, `OP_UPDATE_DEBT = 41`
+
+**Scoring**: `EpistemicDebtFactor` — memories in domains with open epistemic debt get a `1.1x` boost (surfacing relevant context when uncertainty is active).
+
+| Tool | Description |
+|------|-------------|
+| `register_debt` | Register an uncertainty with competing hypotheses and fragility score |
+| `resolve_debt` | Mark a debt as resolved with explanation |
+| `defer_debt` | Defer a debt for later investigation |
+| `query_debts` | Filter debts by status, domain, fragility |
+| `get_fragile_decisions` | Open debts sorted by fragility — decisions most likely to be wrong |
+| `debt_stats` | Summary statistics: counts by status, avg fragility |
+
+### Layer 6: Integration Kernel
+
+Recall source arbitration with learned weights. Tracks which recall sources (semantic, keyword, temporal, artifact, association) are useful per domain, updating weights via Bayesian feedback.
+
+**WAL op codes**: `OP_UPDATE_SOURCE_WEIGHT = 42`, `OP_RECORD_FEEDBACK = 43`
+
+**Scoring**: `IntegrationWeightFactor` — applies the learned source weight as a multiplier (default 1.0, range [0, 2]).
+
+| Tool | Description |
+|------|-------------|
+| `record_feedback` | Record whether a recall source was useful for a domain |
+| `get_source_weights` | View learned source weights per domain |
+| `update_source_weight` | Manual weight override |
+| `integration_stats` | Per-source success rates across all domains |
+
+---
+
+*Version 5.14 — Meta-memory layers (surprise, epistemic debt, integration kernel), 18-factor scoring pipeline, chitta-field organic substrate.*

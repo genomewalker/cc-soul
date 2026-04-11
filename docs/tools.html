@@ -159,6 +159,9 @@
     <a href="#cat-curiosity" class="submenu-toc-link" data-section="cat-curiosity">Curiosity &amp; Research</a>
     <a href="#cat-suggestions" class="submenu-toc-link" data-section="cat-suggestions">Suggestions</a>
     <a href="#cat-insights" class="submenu-toc-link" data-section="cat-insights">Insights</a>
+    <a href="#cat-surprise" class="submenu-toc-link" data-section="cat-surprise">Surprise Memory</a>
+    <a href="#cat-debt" class="submenu-toc-link" data-section="cat-debt">Epistemic Debt</a>
+    <a href="#cat-integration" class="submenu-toc-link" data-section="cat-integration">Integration Kernel</a>
   </div>
 </nav>
 
@@ -939,6 +942,62 @@
       </div>
     </div>
 
+    <!-- SURPRISE MEMORY (Layer 4) -->
+    <div class="tools-category" id="cat-surprise">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#D46A4C" stroke-width="1.2"/><line x1="10" y1="6" x2="10" y2="11" stroke="#D46A4C" stroke-width="1.5"/><circle cx="10" cy="14" r="1" fill="#D46A4C"/></svg>
+        </div>
+        <span class="tools-category-name">Surprise Memory (Layer 4)</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">record_surprise</span><span class="tool-desc">Record a prediction error &mdash; what was expected vs what actually happened, with magnitude and domain</span></div>
+        <div class="tool-row"><span class="tool-name">query_surprises</span><span class="tool-desc">Filter surprise events by domain, realm, magnitude threshold, and time range</span></div>
+        <div class="tool-row"><span class="tool-name">get_blind_spots</span><span class="tool-desc">Identify recurring surprise patterns &mdash; domains/actions where predictions consistently fail</span></div>
+        <div class="tool-row"><span class="tool-name">surprise_stats</span><span class="tool-desc">Summary statistics: event counts, average magnitude, domain breakdown</span></div>
+      </div>
+    </div>
+
+    <!-- EPISTEMIC DEBT (Layer 5) -->
+    <div class="tools-category" id="cat-debt">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M5 10 L10 3 L15 10 L10 17 Z" stroke="#CBAF86" stroke-width="1.2"/><line x1="10" y1="7" x2="10" y2="11" stroke="#CBAF86" stroke-width="1"/><circle cx="10" cy="13.5" r="0.75" fill="#CBAF86"/></svg>
+        </div>
+        <span class="tools-category-name">Epistemic Debt (Layer 5)</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">register_debt</span><span class="tool-desc">Register an epistemic uncertainty &mdash; competing hypotheses with fragility score and discriminating test</span></div>
+        <div class="tool-row"><span class="tool-name">resolve_debt</span><span class="tool-desc">Mark an epistemic debt as resolved with explanation</span></div>
+        <div class="tool-row"><span class="tool-name">defer_debt</span><span class="tool-desc">Defer a debt for later investigation</span></div>
+        <div class="tool-row"><span class="tool-name">query_debts</span><span class="tool-desc">Filter debts by status (open/resolved/deferred), domain, realm, fragility</span></div>
+        <div class="tool-row"><span class="tool-name">get_fragile_decisions</span><span class="tool-desc">Open debts sorted by fragility &mdash; decisions most likely to be wrong</span></div>
+        <div class="tool-row"><span class="tool-name">debt_stats</span><span class="tool-desc">Summary statistics: counts by status, average fragility score</span></div>
+      </div>
+    </div>
+
+    <!-- INTEGRATION KERNEL (Layer 6) -->
+    <div class="tools-category" id="cat-integration">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="6" cy="10" r="2.5" stroke="#9DB2D9" stroke-width="1"/><circle cx="14" cy="10" r="2.5" stroke="#9DB2D9" stroke-width="1"/><circle cx="10" cy="5" r="2.5" stroke="#9DB2D9" stroke-width="1"/><line x1="8" y1="8" x2="10" y2="7" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="12" y1="8" x2="10" y2="7" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="8" y1="10" x2="12" y2="10" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Integration Kernel (Layer 6)</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">record_feedback</span><span class="tool-desc">Record whether a recall source was useful &mdash; updates learned source weights via Bayesian feedback</span></div>
+        <div class="tool-row"><span class="tool-name">get_source_weights</span><span class="tool-desc">View learned recall source weights per domain &mdash; how much each source is trusted</span></div>
+        <div class="tool-row"><span class="tool-name">update_source_weight</span><span class="tool-desc">Manually override a recall source weight [0&ndash;2]</span></div>
+        <div class="tool-row"><span class="tool-name">integration_stats</span><span class="tool-desc">Per-source success rates and learned weights across all domains</span></div>
+      </div>
+    </div>
+
     <!-- DEBUG (hidden in collapsed by default) -->
     <div class="tools-category collapsed" id="cat-debug">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
@@ -1634,6 +1693,71 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     sql_query: [
       {name: 'query', type: 'string', req: true, desc: 'SQL query (SELECT only)'},
       {name: 'limit', type: 'integer', req: false, desc: 'Max rows (default: 100)'}
+    ],
+    // Surprise Memory (Layer 4)
+    record_surprise: [
+      {name: 'context_sketch', type: 'string', req: false, desc: 'What was happening when the surprise occurred'},
+      {name: 'action', type: 'string', req: false, desc: 'What action was taken'},
+      {name: 'expected', type: 'string', req: false, desc: 'What was predicted/expected'},
+      {name: 'actual', type: 'string', req: true, desc: 'What actually happened'},
+      {name: 'surprise_magnitude', type: 'number', req: false, desc: 'How surprising [0-1] (default 0.5)'},
+      {name: 'domain', type: 'string', req: false, desc: 'Domain: recall, tool, user_correction, constraint (default general)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Realm filter (default global)'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Session ID'},
+      {name: 'source_memory_id', type: 'integer', req: false, desc: 'Related memory ID'}
+    ],
+    query_surprises: [
+      {name: 'domain', type: 'string', req: false, desc: 'Filter by domain'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'min_magnitude', type: 'number', req: false, desc: 'Minimum surprise magnitude'},
+      {name: 'since_ms', type: 'integer', req: false, desc: 'Only events after this timestamp (ms)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default 50)'}
+    ],
+    get_blind_spots: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max blind spots (default 10)'}
+    ],
+    // Epistemic Debt (Layer 5)
+    register_debt: [
+      {name: 'pattern', type: 'string', req: true, desc: 'The uncertain pattern/belief'},
+      {name: 'competing_hypotheses', type: 'string[]', req: false, desc: 'Competing explanations'},
+      {name: 'discriminating_test', type: 'string', req: false, desc: 'How to distinguish between hypotheses'},
+      {name: 'fragility_score', type: 'number', req: false, desc: 'How fragile [0-1] (default 0.5)'},
+      {name: 'domain', type: 'string', req: false, desc: 'Domain (default general)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Realm (default global)'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Session ID'}
+    ],
+    resolve_debt: [
+      {name: 'debt_id', type: 'integer', req: true, desc: 'Debt ID to resolve'},
+      {name: 'resolution', type: 'string', req: true, desc: 'How the uncertainty was resolved'}
+    ],
+    defer_debt: [
+      {name: 'debt_id', type: 'integer', req: true, desc: 'Debt ID to defer'}
+    ],
+    query_debts: [
+      {name: 'status', type: 'string', req: false, desc: 'Filter: open, resolved, deferred'},
+      {name: 'domain', type: 'string', req: false, desc: 'Filter by domain'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'min_fragility', type: 'number', req: false, desc: 'Minimum fragility score'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default 50)'}
+    ],
+    get_fragile_decisions: [
+      {name: 'threshold', type: 'number', req: false, desc: 'Min fragility threshold (default 0.5)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default 20)'}
+    ],
+    // Integration Kernel (Layer 6)
+    record_feedback: [
+      {name: 'query_domain', type: 'string', req: false, desc: 'Domain of the query (default general)'},
+      {name: 'source', type: 'string', req: true, desc: 'Source: semantic, keyword, temporal, artifact, association'},
+      {name: 'was_useful', type: 'boolean', req: false, desc: 'Whether results were useful (default true)'}
+    ],
+    get_source_weights: [
+      {name: 'domain', type: 'string', req: false, desc: 'Filter by domain (omit for all)'}
+    ],
+    update_source_weight: [
+      {name: 'source', type: 'string', req: true, desc: 'Source name'},
+      {name: 'domain', type: 'string', req: false, desc: 'Domain (default general)'},
+      {name: 'weight', type: 'number', req: false, desc: 'New weight [0-2] (default 1.0)'}
     ]
   };
 

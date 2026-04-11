@@ -14,7 +14,22 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in v5.3.0
+## What's New in v5.14.0
+
+- **Surprise Memory (Layer 4)** — prediction error tuples that reveal blind spots. Record what was expected vs what actually happened; query recurring surprise patterns; identify domains where predictions consistently fail. Surprise-boosted memories surface more readily in recall. [[Friston 2010]](https://doi.org/10.1038/nrn2787)
+- **Epistemic Debt (Layer 5)** — uncertainty boundaries and competing hypotheses. Register fragile beliefs with competing explanations and discriminating tests; resolve or defer debts as evidence accumulates. Memories in uncertain domains get boosted during recall. [[Sperber et al. 2010]](https://doi.org/10.1111/j.1468-0017.2010.01394.x)
+- **Integration Kernel (Layer 6)** — recall source arbitration with learned weights. Track which recall sources (semantic, keyword, temporal, artifact, association) are useful per domain; weights update via Bayesian feedback and influence the scoring pipeline. [[Shazeer et al. 2017]](https://arxiv.org/abs/1701.06538)
+- **14 new MCP tools** — `record_surprise`, `query_surprises`, `get_blind_spots`, `surprise_stats`, `register_debt`, `resolve_debt`, `defer_debt`, `query_debts`, `get_fragile_decisions`, `debt_stats`, `record_feedback`, `get_source_weights`, `update_source_weight`, `integration_stats`
+- **3 new scoring factors** — SurpriseDomainFactor, EpistemicDebtFactor, IntegrationWeightFactor extend the scoring pipeline to 18 composable factors
+
+## What's New in v5.13.0
+
+- **Executable Constraints (Layer 1)** — Prolog-style logic engine inside chitta-field. Assert facts, retract them, unify variables, chain queries. Memories can carry formal constraints that are checked at recall time.
+- **Trigger Tissue (Layer 2)** — event-condition-action rules that fire automatically. Define triggers on memory events; the daemon evaluates conditions and fires actions without explicit invocation.
+- **Predictive Memory (Layer 3)** — Markov chain access predictor. Learns transition probabilities between memory accesses; predicts which memories will be needed next and pre-warms them.
+- **Three-layer paradigm** — constraints, triggers, and predictors follow the organ pattern: Rust store → WAL replay → FFI → C++ handlers → MCP tools. No snapshot version bump needed.
+
+## What's in v5.3.0
 
 - **FEP attractor network** — self-orthogonalizing memory representations derived from the Free Energy Principle (Spisak & Friston, 2026). Memories naturally decorrelate, resist catastrophic forgetting, and support attractor-based pattern completion.
 - **Asymmetric couplings** — prototype transitions and triplet weights now encode directionality. Sequential data produces asymmetric connections (A→B ≠ B→A), enabling non-equilibrium dynamics in the association graph.
@@ -248,6 +263,7 @@ CC-soul's memory lives in chitta-field — a pure Rust cognitive substrate that 
 - **Multi-instance writes** — multiple Claude windows share the same memory field simultaneously. Each writer owns its own segment file; no locking, no contention.
 - **Statically linked** — compiled into `libchitta_field.a`, then linked into the daemon. No database server, no IPC sockets, no NFS file handles to hang on.
 - **Surprise-modulated decay** — memories fade based on access patterns and reconstruction surprise. Unique memories resist forgetting; redundant ones fade naturally.
+- **Meta-memory layers** — six organ layers beyond core recall: executable constraints (Prolog-style logic), trigger tissue (event-condition-action rules), predictive memory (Markov chain access predictor), surprise memory (prediction error tracking), epistemic debt (uncertainty boundaries), and integration kernel (learned recall source weights).
 
 ```
 Memory written                        Memory recalled
