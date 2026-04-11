@@ -38,6 +38,9 @@ std::string SSLParser::type_to_category(const std::string& type) {
     if (type == "PREFERENCE") return "preference";
     if (type == "FAILURE") return "failure";
     if (type == "AFFECT") return "affect";
+    if (type == "CORRECTION") return "correction";
+    if (type == "EVENT") return "event";
+    if (type == "OPERATIONAL") return "operational";
     return "wisdom";
 }
 
@@ -162,7 +165,7 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
     std::vector<SSLCitation> current_citations;
 
     // Regex for typed markers
-    static const std::regex type_pattern(R"(^\[(SOLUTION|GOTCHA|DECISION|PATTERN|PREFERENCE|FAILURE|AFFECT)\]\s+(.*)$)");
+    static const std::regex type_pattern(R"(^\[(SOLUTION|GOTCHA|DECISION|PATTERN|PREFERENCE|FAILURE|AFFECT|CORRECTION|EVENT|OPERATIONAL)\]\s+(.*)$)");
     static const std::regex triplet_pattern(R"(^\[TRIPLET\]\s+(\S+)\s+(\S+)\s+(.+)$)");
     static const std::regex cite_line_pattern(R"(^\[CITE\]\s+)");
 

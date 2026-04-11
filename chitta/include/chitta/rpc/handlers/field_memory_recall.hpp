@@ -67,6 +67,12 @@
         size_t fetch_limit = tag.empty() ? limit : limit * 8;
         auto hits = field_store_->recall(embedding, fetch_limit, realm);
 
+        // Filter orphaned HNSW entries (deleted payloads with lingering vectors)
+        hits.erase(
+            std::remove_if(hits.begin(), hits.end(),
+                [](const FieldRecallHit& h) { return h.content.empty(); }),
+            hits.end());
+
         // Hard-filter by tag: keep only memories that have (id, "tagged", tag) triplet
         if (!tag.empty()) {
             std::string triplets_json = field_store_->query_object(tag);
@@ -138,8 +144,8 @@
                         ? exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
                                                   (static_cast<float>(h.access_count) + 1.0f))
                         : 0.0f;
-                    curiosity = std::min(curiosity, 0.3f);
-                    h.score = h.score * anti_perserv + curiosity;
+                    float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+                    h.score = h.score * anti_perserv * curiosity_mul;
                 }
                 std::sort(hits.begin(), hits.end(),
                           [](const FieldRecallHit& a, const FieldRecallHit& b) {
@@ -200,6 +206,10 @@
             auto qemb = embed_query(query);
             if (!qemb.empty()) {
                 auto semantic_hits = field_store_->recall(qemb, limit, realm);
+                semantic_hits.erase(
+                    std::remove_if(semantic_hits.begin(), semantic_hits.end(),
+                        [](const FieldRecallHit& h) { return h.content.empty(); }),
+                    semantic_hits.end());
                 json temporal_json = hits_to_results_json(hits);
                 json semantic_json = hits_to_results_json(semantic_hits);
                 json merged = merge_results(temporal_json, semantic_json);
@@ -252,6 +262,10 @@
         if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto semantic_hits = field_store_->recall(embedding, limit, realm);
+        semantic_hits.erase(
+            std::remove_if(semantic_hits.begin(), semantic_hits.end(),
+                [](const FieldRecallHit& h) { return h.content.empty(); }),
+            semantic_hits.end());
         auto keyword_hits  = field_store_->recall_keyword(query, limit);
 
         // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
@@ -266,8 +280,8 @@
                         float anti_perserv = 1.0f - 0.25f * saturation;
                         float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
                                                                   (static_cast<float>(h.access_count) + 1.0f));
-                        curiosity = std::min(curiosity, 0.3f);
-                        h.score = h.score * anti_perserv + curiosity;
+                        float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+                        h.score = h.score * anti_perserv * curiosity_mul;
                     }
                 };
                 apply_drift(semantic_hits);
@@ -321,8 +335,8 @@
                 float anti_perserv = 1.0f - 0.25f * saturation;
                 float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
                                                           (static_cast<float>(h.access_count) + 1.0f));
-                curiosity = std::min(curiosity, 0.3f);
-                h.score = h.score * anti_perserv + curiosity;
+                float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+                h.score = h.score * anti_perserv * curiosity_mul;
             }
         };
 
@@ -351,6 +365,10 @@
                 episode_id = 0;  // skip normal feedback
             } else {
                 auto sem_hits = field_store_->recall(embedding, limit, realm);
+                sem_hits.erase(
+                    std::remove_if(sem_hits.begin(), sem_hits.end(),
+                        [](const FieldRecallHit& h) { return h.content.empty(); }),
+                    sem_hits.end());
                 if (route == 0) {  // Semantic only
                     apply_drift_smart(sem_hits);
                     results = hits_to_results_json(sem_hits);
@@ -481,7 +499,12 @@
             passes_run = pass + 1;
 
             // Run existing resonance phases
-            json semantic = hits_to_results_json(field_store_->recall(query_embedding, k, realm));
+            auto resonate_sem = field_store_->recall(query_embedding, k, realm);
+            resonate_sem.erase(
+                std::remove_if(resonate_sem.begin(), resonate_sem.end(),
+                    [](const FieldRecallHit& h) { return h.content.empty(); }),
+                resonate_sem.end());
+            json semantic = hits_to_results_json(resonate_sem);
             json keyword  = hits_to_results_json(field_store_->recall_keyword(query, k));
             json merged   = merge_results(semantic, keyword);
             if (merged.size() > k) merged.erase(merged.begin() + static_cast<int>(k), merged.end());
