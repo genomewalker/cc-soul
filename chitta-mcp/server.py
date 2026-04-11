@@ -175,6 +175,12 @@ ADVANCED_TOOLS = {
     # Layer 6: Integration Kernel
     "record_feedback", "get_source_weights", "update_source_weight",
     "integration_stats",
+    # Autonomous Learning (Moves 1-6)
+    "surprise_learning_stats",
+    "upsert_wisdom_candidate", "update_wisdom_lifecycle",
+    "query_wisdom_candidates", "wisdom_promotion_stats",
+    "attach_debt_evidence",
+    "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights",
 }
 
 # Combined set of tools to hide from listing (but still callable)

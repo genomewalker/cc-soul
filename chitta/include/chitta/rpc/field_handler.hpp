@@ -590,6 +590,7 @@ private:
     #include "handlers/trajectory_compact.hpp"
     #include "handlers/constraint.hpp"
     #include "handlers/meta_memory.hpp"
+    #include "handlers/learning.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2501,6 +2502,71 @@ private:
             {"inputSchema",{{"type","object"}}}});
         handlers_["integration_stats"] = [this](const json& p) { return tool_integration_stats(p); };
 
+        // ── Autonomous Learning (Moves 1-6) ─────────────────────────────────
+        tools_.push_back({{"name","surprise_learning_stats"},{"description","Rolling surprise credit stats — tracked memories, gates passed, strength adjustments"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["surprise_learning_stats"] = [this](const json& p) { return tool_surprise_learning_stats(field_store_, p); };
+
+        tools_.push_back({{"name","upsert_wisdom_candidate"},{"description","Create or update a wisdom candidate from clustered surprise patterns"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"cluster_key",{{"type","string"},{"description","Unique key for this pattern cluster (domain+action+sig)"}}},
+                {"domain",{{"type","string"},{"description","Knowledge domain"}}},
+                {"action",{{"type","string"},{"description","Action or behavior pattern"}}},
+                {"summary",{{"type","string"},{"description","Human-readable summary of the wisdom"}}},
+                {"episode_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Surprise event IDs supporting this candidate"}}},
+                {"debt_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Resolved debt IDs linked to this candidate"}}},
+                {"support_count",{{"type","integer"},{"description","Number of supporting episodes"}}},
+                {"cross_session_count",{{"type","integer"},{"description","Number of distinct sessions with evidence"}}},
+                {"mean_surprise",{{"type","number"},{"description","Average surprise magnitude across episodes"}}},
+                {"promotion_score",{{"type","number"},{"description","Computed promotion readiness score 0-1"}}}
+            }},{"required",{"cluster_key"}}}}});
+        handlers_["upsert_wisdom_candidate"] = [this](const json& p) { return tool_upsert_wisdom_candidate(field_store_, p); };
+
+        tools_.push_back({{"name","update_wisdom_lifecycle"},{"description","Advance a wisdom candidate through lifecycle stages: candidate→provisional→trusted→demoted"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"candidate_id",{{"type","integer"},{"description","Wisdom candidate ID"}}},
+                {"new_state",{{"type","integer"},{"description","0=candidate, 1=provisional, 2=trusted, 3=demoted"}}}
+            }},{"required",{"candidate_id","new_state"}}}}});
+        handlers_["update_wisdom_lifecycle"] = [this](const json& p) { return tool_update_wisdom_lifecycle(field_store_, p); };
+
+        tools_.push_back({{"name","query_wisdom_candidates"},{"description","Query wisdom candidates by lifecycle stage and/or domain"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"lifecycle",{{"type","integer"},{"description","Filter by lifecycle: 0=candidate, 1=provisional, 2=trusted, 3=demoted"}}},
+                {"domain",{{"type","string"},{"description","Filter by domain"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_wisdom_candidates"] = [this](const json& p) { return tool_query_wisdom_candidates(field_store_, p); };
+
+        tools_.push_back({{"name","wisdom_promotion_stats"},{"description","Overview of wisdom promotion pipeline — total candidates by lifecycle stage"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["wisdom_promotion_stats"] = [this](const json& p) { return tool_wisdom_promotion_stats(field_store_, p); };
+
+        tools_.push_back({{"name","attach_debt_evidence"},{"description","Attach supporting evidence to an epistemic debt — memory IDs + confidence"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"debt_id",{{"type","integer"},{"description","Epistemic debt ID"}}},
+                {"memory_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Memory IDs that serve as evidence"}}},
+                {"confidence",{{"type","number"},{"description","Evidence confidence 0-1 (default 0.5)"}}},
+                {"note",{{"type","string"},{"description","Optional note about the evidence"}}}
+            }},{"required",{"debt_id"}}}}});
+        handlers_["attach_debt_evidence"] = [this](const json& p) { return tool_attach_debt_evidence(field_store_, p); };
+
+        tools_.push_back({{"name","update_scorer_model"},{"description","Apply learned weight deltas to the scoring model from outcome calibration"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"weights",{{"type","object"},{"description","Factor name → {delta, min_delta, max_delta} learned adjustments"}}},
+                {"model_version",{{"type","integer"},{"description","Monotonic version number"}}},
+                {"mean_loss",{{"type","number"},{"description","EWMA loss from calibration"}}},
+                {"outcome_count",{{"type","integer"},{"description","Total outcomes used for calibration"}}}
+            }}}}});
+        handlers_["update_scorer_model"] = [this](const json& p) { return tool_update_scorer_model(field_store_, p); };
+
+        tools_.push_back({{"name","learned_scorer_stats"},{"description","Current learned scoring model — version, factor count, loss, outcome count"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["learned_scorer_stats"] = [this](const json& p) { return tool_learned_scorer_stats(field_store_, p); };
+
+        tools_.push_back({{"name","effective_scorer_weights"},{"description","Show effective scoring weights — baseline + learned deltas for all factors"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["effective_scorer_weights"] = [this](const json& p) { return tool_effective_scorer_weights(field_store_, p); };
+
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
             {"inputSchema",{{"type","object"},{"properties",{
@@ -2764,7 +2830,12 @@ private:
             "memory_history", "memory_revert", "pin_memory", "unpin_memory", "list_pinned",
             "memory_lock", "memory_unlock", "memory_lock_status",
             "propose_change", "list_merge_queue", "resolve_merge",
-            "file_timeline", "file_at_time", "file_restore"
+            "file_timeline", "file_at_time", "file_restore",
+            "surprise_learning_stats",
+            "upsert_wisdom_candidate", "update_wisdom_lifecycle",
+            "query_wisdom_candidates", "wisdom_promotion_stats",
+            "attach_debt_evidence",
+            "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights"
         };
 
         for (const auto& name : internal_tools) tool_visibility_[name] = "internal";
