@@ -459,9 +459,30 @@ body::before {
     <!-- 5.14.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
-        <span class="version-number">v5.14.0</span>
+        <span class="version-number">v5.15.0</span>
         <span class="version-date">April 11, 2026</span>
         <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Autonomous Learning Pipeline</strong> &mdash; closes feedback loops from prediction errors to memory adaptation. Moves 1&ndash;6 push from &ldquo;remembering&rdquo; (~70%) to &ldquo;learning&rdquo; (~90%).</li>
+          <li><strong>Surprise Credit (Move 1)</strong> &mdash; hysteresis-gated strength adjustments. Rolling per-memory credit with gate threshold (|credit| &ge; 0.75, streak &ge; 2). Strength deltas clamped to &plusmn;0.08.</li>
+          <li><strong>Integration Kernel Feedback (Move 2)</strong> &mdash; repeated recall failures auto-decrease source trust via hard/soft thresholds.</li>
+          <li><strong>Debt Auto-Resolution (Move 3)</strong> &mdash; epistemic debts with sufficient evidence auto-resolved by subconscious learning cycle.</li>
+          <li><strong>Wisdom Promotion (Move 5)</strong> &mdash; clustered surprise patterns become wisdom candidates with lifecycle FSM: candidate &rarr; provisional &rarr; trusted &rarr; demoted.</li>
+          <li><strong>Learned Scorer (Move 6)</strong> &mdash; per-factor weight deltas from outcome calibration overlay the immutable scoring baseline.</li>
+          <li><strong>9 new MCP tools</strong> &mdash; <code>surprise_learning_stats</code>, <code>upsert_wisdom_candidate</code>, <code>update_wisdom_lifecycle</code>, <code>query_wisdom_candidates</code>, <code>wisdom_promotion_stats</code>, <code>attach_debt_evidence</code>, <code>update_scorer_model</code>, <code>learned_scorer_stats</code>, <code>effective_scorer_weights</code>.</li>
+          <li><strong>5 new WAL op codes</strong> &mdash; <code>OP_UPDATE_SURPRISE_CREDIT=44</code> through <code>OP_ATTACH_DEBT_EVIDENCE=48</code>. All replay from WAL.</li>
+          <li><strong>Subconscious learning cycle</strong> &mdash; 30-minute deferred job for debt auto-resolution, scorer refresh, and wisdom candidate preparation.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.14.0</span>
+        <span class="version-date">April 11, 2026</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
