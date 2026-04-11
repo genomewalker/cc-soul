@@ -419,6 +419,31 @@ struct DuckDBResonanceConfig {
 };
 ```
 
+### ScoringPipeline (v5.11+)
+
+Post-resonance scoring is handled by the `ScoringPipeline`, a neuroplastic trait-based architecture that replaces the previous hardcoded scoring constants. The pipeline applies 12 composable scoring factors in sequence:
+
+| Factor | Source | Description |
+|--------|--------|-------------|
+| Relevance | Cosine similarity | Base semantic match score |
+| ACT-R | Access history | Anderson & Schooler (1991) power-law decay over access timestamps |
+| Strength | Memory strength | Reinforcement from repeated access |
+| Confidence | Bayesian confidence | Mean of beta posterior over observation history |
+| Surprise | FEP §2.3 | Reconstruction error as surprise signal |
+| Arousal | Affect dimensions | Flashbulb memory effect: high-arousal memories boosted |
+| MoodCongruence | Query affect | Bower (1981): valence/arousal alignment between query and memory |
+| FrustrationEscalation | Query affect | Negative valence + high arousal boosts corrections/preferences |
+| Status | Demotion tier | Tier-based weight (hot > warm > cool > cold) |
+| Epistemic | Node type | Type-based multiplier (corrections, preferences weighted higher) |
+| Kind | Node kind | Fine-grained kind multiplier |
+| RealmReliability | Realm stats | Per-realm reliability based on historical feedback |
+
+Each factor has independent `weight`, `bias`, and type-specific parameters. All configuration lives in `scoring.json` with hot-reload support — no rebuild required to tune scoring behavior.
+
+```
+final_score = Σ (factor_weight × factor_score + factor_bias)
+```
+
 ---
 
 ## Theme System (xMemory)
