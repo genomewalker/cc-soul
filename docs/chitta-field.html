@@ -385,6 +385,8 @@
     <a href="#multiwrite" class="submenu-toc-link" data-section="multiwrite">Multi-Writer</a>
     <a href="#decay"      class="submenu-toc-link" data-section="decay">Organic Decay</a>
     <a href="#fep"        class="submenu-toc-link" data-section="fep">FEP Attractors</a>
+    <a href="#why-not-flat-files" class="submenu-toc-link" data-section="why-not-flat-files">Why Not Flat Files</a>
+    <a href="#organs"     class="submenu-toc-link" data-section="organs">Organs</a>
     <a href="#ops"        class="submenu-toc-link" data-section="ops">Op Catalog</a>
     <a href="#integration" class="submenu-toc-link" data-section="integration">Integration</a>
     <a href="#references"  class="submenu-toc-link" data-section="references">References</a>
@@ -676,6 +678,103 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
 </section>
 
 
+<!-- ═══ WHY NOT FLAT FILES ═══ -->
+<section class="cf-page-section alt-bg" id="why-not-flat-files">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Why not flat files?</h2></div>
+    <p class="section-intro reveal reveal-delay-1">The natural first instinct for agent memory is a <code>MEMORY.md</code> file. It works at a few hundred entries. Then it stops working &mdash; for reasons that are architectural, not incidental.</p>
+
+    <div class="cf-cards reveal reveal-delay-2">
+      <div class="cf-card">
+        <h4 class="cf-card-title">Retrieval requires selection, not ingestion</h4>
+        <p class="cf-card-desc">A markdown file must be read in full to be searched. At 10,000+ memories the context window is the binding constraint &mdash; you cannot afford to inject everything. chitta-field selects the 5&ndash;15 most relevant memories from 24,000+ in under a millisecond using hybrid recall: semantic ANN + BM25 + cortical SDR bitset intersection + graph spreading activation.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">Relevance &ne; recency</h4>
+        <p class="cf-card-desc">A flat file is ordered by insertion time. chitta-field scores each candidate on 18 composable factors &mdash; semantic similarity, ACT-R base-level activation, memory strength, confidence, epistemic status, affect valence, surprise boost, mood congruence, frustration escalation, prediction boost, integration kernel weight, and more. A two-month-old memory that perfectly matches beats a five-minute-old memory that partially matches.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">Memory needs a lifecycle</h4>
+        <p class="cf-card-desc">Flat files grow forever. chitta-field implements per-memory decay, tiered demotion, auto-deduplication by embedding similarity, contradiction tracking, and distillation from episodic memories into durable wisdom nodes. The field actively forgets what no longer matters and strengthens what repeatedly proves useful.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">Contradiction is a graph structure</h4>
+        <p class="cf-card-desc">Conflicting beliefs need operational representation &mdash; <code>contradicts</code>, <code>supersedes</code>, and <code>confirms</code> edges that are queryable and that suppress contradicted memories during scoring. Markdown can <em>describe</em> a contradiction; it cannot enforce or query one.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">Multi-writer without merge conflicts</h4>
+        <p class="cf-card-desc">Multiple Claude windows sharing one <code>MEMORY.md</code> produce merge conflicts. chitta-field gives each process its own <code>{instance_id}.seg</code> segment file. Readers replay all segments in sequence-number order. No locking, no conflicts, no D-state on NFS.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">Flat files still matter</h4>
+        <p class="cf-card-desc">cc-soul syncs bidirectionally with Claude Code&rsquo;s built-in <code>MEMORY.md</code>. What the user writes there is absorbed into chitta; what chitta knows is injected back. Flat files are a fine human-readable interface and import surface. They are not a viable primary substrate at scale.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ COGNITIVE ORGANS ═══ -->
+<section class="cf-page-section" id="organs">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Cognitive organs</h2></div>
+    <p class="section-intro reveal reveal-delay-1">chitta-field&rsquo;s in-RAM state is organized into independent <strong>organs</strong> &mdash; each a self-contained store with its own data model, WAL replay path, and query interface. No organ imports another; the coordinator wires them together.</p>
+
+    <div class="cf-feature-grid reveal reveal-delay-2">
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x25CC;</div>
+        <h3>ThemeOrgan</h3>
+        <p>Centroid-based theme clustering over memory IDs. Each <code>ThemeRecord</code> holds a mean embedding centroid, coherence score, and member set partitioned by realm. <code>recall_by_embedding</code> returns top-k themes by cosine similarity. Periodic <code>maintain()</code> splits oversized themes (k-means, k=2) and merges near-identical centroids (&gt;0.9 cosine). <em>WAL: ThemeEvent (20).</em></p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x26A1;</div>
+        <h3>SurpriseLearningStore</h3>
+        <p>Hysteresis-gated credit accumulator that translates surprise magnitude into memory strength adjustments. Evidence is quadratic: <code>((s&minus;0.20)/0.80)²</code>. Credit decays at 0.85 per event; gate requires <code>|credit| &ge; 0.75</code> and streak &ge; 2 consecutive same-direction signals before a &plusmn;0.08 max delta fires. Post-apply bleed (0.35&times;) prevents rapid re-triggering. Also drives integration-kernel feedback via hard/soft magnitude thresholds. <em>WAL: UpdateSurpriseCredit (44).</em></p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2BC0;</div>
+        <h3>WisdomPromotionStore</h3>
+        <p>Lifecycle FSM for recurring behavioral patterns: <strong>Candidate &rarr; Provisional &rarr; Trusted &rarr; Demoted</strong>. Candidates are keyed by <code>cluster_key</code> (idempotent upsert). Promotion requires support &ge; 4, cross-session &ge; 2, score &ge; 0.72, and zero contradictions. When promoted, a full memory is written and its ID stored in <code>memory_id</code>. One contradiction permanently blocks promotion until manually cleared. <em>WAL: UpsertWisdomCandidate (45), UpdateWisdomLifecycle (46).</em></p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2696;</div>
+        <h3>LearnedScoringModel</h3>
+        <p>Online weight-delta overlay on the static <code>ScoringConfig</code>. Each factor carries a learned <code>delta</code> clamped to its own <code>[min_delta, max_delta]</code> range. The scorer calls <code>effective_weight(factor, baseline)</code> to get the calibrated value. Updates are full-model atomic snapshots keyed by monotonic <code>model_version</code>. <code>baseline_version</code> detects stale deltas after config bumps. EWMA loss and outcome count track calibration health. <em>WAL: UpdateScorerModel (47).</em></p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x25A3;</div>
+        <h3>EpistemicDebt + Evidence</h3>
+        <p>Epistemic debts now carry <code>Vec&lt;DebtEvidence&gt;</code> &mdash; each with memory IDs, confidence, and optional note. <code>auto_resolve_if_ready(threshold=0.70)</code> resolves a debt when evidence meets the threshold, writing a WAL <code>UpdateDebt</code> with a human-readable resolution. The subconscious learning cycle runs this scan every 30 minutes. <em>WAL: AttachDebtEvidence (48).</em></p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F4D6;</div>
+        <h3>SkillRegistry</h3>
+        <p>Append-only versioned registry of named skill blobs. Each skill maps to an ordered list of immutable <code>SkillVersion</code> records &mdash; version numbers are 1-based positional indices. <code>deprecate()</code> marks only the latest version; <code>search(query)</code> does case-insensitive substring matching across ID, tags, and content of non-deprecated latest versions. New uploads are immutable; revision requires a new version upload.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F464;</div>
+        <h3>UserModelRegistry</h3>
+        <p>Key-value registry of typed entity records (<code>user</code>, <code>org</code>, <code>person</code>) with opaque JSON payloads and observation counting. <code>upsert()</code> performs a full overwrite; <code>observe()</code> increments the observation count without touching the payload. Supports <code>list_by_type</code> queries. State is reconstructable from higher-level WAL events rather than having its own op type.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F5C2;</div>
+        <h3>Session / Transcript / Task</h3>
+        <p>First-class domain registries for AI session management. <code>SessionRegistry</code> tracks active Claude instances with heartbeats and message queues. <code>TranscriptRegistry</code> indexes conversation turns by session with episode creation. <code>TaskRegistry</code> handles sadhana agents, long-running tasks, dream cycles, and background workers &mdash; each as a typed state machine persisted to WAL. <em>WAL: SessionEvent (16), TranscriptEvent (17), TaskEvent (18).</em></p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
 <!-- ═══ OP CATALOG ═══ -->
 <section class="cf-page-section" id="ops">
   <div class="container">
@@ -712,6 +811,21 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
         <tr><td class="op-name">ClearProject</td><td class="op-byte">22</td><td class="op-desc">Remove all code files and associated symbols for a project.</td></tr>
         <tr><td class="op-name">UpdateSymbolDescription</td><td class="op-byte">23</td><td class="op-desc">Update the description string for a symbol.</td></tr>
         <tr><td class="op-name">UpdateMemoryContent</td><td class="op-byte">24</td><td class="op-desc">Update content and/or embedding for an existing memory in-place.</td></tr>
+        <tr><td class="op-name">AssertFact</td><td class="op-byte">25</td><td class="op-desc">Assert a Prolog-style logic fact into the constraint store (Layer 1).</td></tr>
+        <tr><td class="op-name">RetractFact</td><td class="op-byte">26</td><td class="op-desc">Retract a constraint fact by ID.</td></tr>
+        <tr><td class="op-name">BranchEvent</td><td class="op-byte">27</td><td class="op-desc">Hypothetical branch lifecycle — create, resolve, or discard.</td></tr>
+        <tr><td class="op-name">TriggerEvent</td><td class="op-byte">28</td><td class="op-desc">Trigger tissue lifecycle — add, dismiss, or record a firing (Layer 2).</td></tr>
+        <tr><td class="op-name">PredictorEvent</td><td class="op-byte">29</td><td class="op-desc">Markov chain transition update — bump edge probability or record access (Layer 3).</td></tr>
+        <tr><td class="op-name">RecordSurprise</td><td class="op-byte">39</td><td class="op-desc">Record a prediction error tuple — expected vs actual outcome (Layer 4).</td></tr>
+        <tr><td class="op-name">RegisterDebt</td><td class="op-byte">40</td><td class="op-desc">Register a new epistemic debt with competing hypotheses and discriminating tests (Layer 5).</td></tr>
+        <tr><td class="op-name">UpdateDebt</td><td class="op-byte">41</td><td class="op-desc">Resolve, defer, or update status of an epistemic debt.</td></tr>
+        <tr><td class="op-name">UpdateSourceWeight</td><td class="op-byte">42</td><td class="op-desc">Update learned recall source weight for a (domain, source) pair (Layer 6).</td></tr>
+        <tr><td class="op-name">RecordFeedback</td><td class="op-byte">43</td><td class="op-desc">Record whether a recall source was useful — feeds Bayesian weight update.</td></tr>
+        <tr><td class="op-name">UpdateSurpriseCredit</td><td class="op-byte">44</td><td class="op-desc">Persist per-memory rolling credit state after hysteresis gate — strength delta applied.</td></tr>
+        <tr><td class="op-name">UpsertWisdomCandidate</td><td class="op-byte">45</td><td class="op-desc">Create or update a wisdom candidate with support evidence and promotion score.</td></tr>
+        <tr><td class="op-name">UpdateWisdomLifecycle</td><td class="op-byte">46</td><td class="op-desc">Advance wisdom candidate through FSM — candidate → provisional → trusted → demoted.</td></tr>
+        <tr><td class="op-name">UpdateScorerModel</td><td class="op-byte">47</td><td class="op-desc">Atomic snapshot of the learned scoring model — full factor weight delta map.</td></tr>
+        <tr><td class="op-name">AttachDebtEvidence</td><td class="op-byte">48</td><td class="op-desc">Attach supporting evidence (memory IDs + confidence) to an epistemic debt.</td></tr>
       </tbody>
     </table>
   </div>
