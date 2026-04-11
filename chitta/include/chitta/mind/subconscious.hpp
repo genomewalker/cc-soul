@@ -75,6 +75,8 @@ struct SubconsciousConfig {
     std::chrono::minutes cls_replay_interval{60}; // CLS replay every hour
     size_t cls_replay_batch_size{20};             // Memories to sample per replay
     size_t cls_replay_min_cluster{3};             // Min cluster size to distill
+    std::chrono::minutes learning_cycle_interval{30}; // Autonomous learning cycle
+    bool enable_learning_cycle{true};
 };
 
 // Queued embedding result (computed in background, flushed by main thread)
@@ -113,7 +115,12 @@ struct SubconsciousStats {
     std::atomic<size_t> field_demoted{0};             // Total memories demoted across all passes
     std::atomic<size_t> field_deleted{0};             // Total memories deleted across all passes
     std::atomic<size_t> belief_maintenance_runs{0};
+    std::atomic<size_t> learning_cycle_runs{0};
+    std::atomic<size_t> debts_auto_resolved{0};
+    std::atomic<size_t> wisdom_candidates_created{0};
+    std::atomic<size_t> scorer_updates{0};
     std::atomic<int64_t> last_belief_maintenance_at{0};
+    std::atomic<int64_t> last_learning_cycle_at{0};
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_theme_maintenance_at{0};
     std::atomic<int64_t> last_distillation_at{0};
@@ -270,6 +277,11 @@ private:
     std::function<void()> maintenance_cb_;
     std::chrono::steady_clock::time_point last_belief_maintenance_{std::chrono::steady_clock::now()};
     bool time_for_belief_maintenance() const;
+
+    // Autonomous learning cycle (Moves 3, 5, 6)
+    std::chrono::steady_clock::time_point last_learning_cycle_{std::chrono::steady_clock::now()};
+    void run_learning_cycle();
+    bool time_for_learning_cycle() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;

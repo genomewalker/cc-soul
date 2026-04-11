@@ -105,6 +105,18 @@ char* cf_get_source_weights(const struct CfHandle* h, const char* params_json);
 int cf_update_source_weight(struct CfHandle* h, const char* params_json);
 char* cf_integration_stats(const struct CfHandle* h);
 
+// Autonomous Learning FFI (Moves 1-6)
+char* cf_surprise_learning_stats(const struct CfHandle* h);
+char* cf_upsert_wisdom_candidate(struct CfHandle* h, const char* params_json);
+int   cf_update_wisdom_lifecycle(struct CfHandle* h, uint64_t candidate_id, uint8_t new_state);
+char* cf_query_wisdom_candidates(const struct CfHandle* h, const char* params_json);
+char* cf_wisdom_promotion_stats(const struct CfHandle* h);
+int   cf_attach_debt_evidence(struct CfHandle* h, uint64_t debt_id, const char* evidence_json);
+int   cf_update_scorer_model(struct CfHandle* h, const char* model_json);
+char* cf_learned_scorer_stats(const struct CfHandle* h);
+char* cf_effective_scorer_weights(const struct CfHandle* h);
+char* cf_auto_resolve_debts(struct CfHandle* h, float threshold);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
