@@ -905,4 +905,44 @@ cd chitta && cmake --build build --parallel
 
 ---
 
+## References
+
+Theoretical foundations and inspirations cited throughout the codebase.
+
+### Memory & Recall
+
+| Concept | Source | Used In |
+|---------|--------|---------|
+| ACT-R base-level activation | Anderson, J.R. & Schooler, L.J. (1991). "Reflections of the environment in memory." *Psychological Science*, 2(6), 396–408. | `chitta-field/src/scoring/factors.rs` — power-law decay over access timestamps |
+| Free Energy Principle (surprise) | Friston, K. (2010). "The free-energy principle: a unified brain theory?" *Nature Reviews Neuroscience*, 11(2), 127–138. | `chitta-field/src/scoring/factors.rs` — reconstruction error as surprise signal |
+| Mood-congruent memory | Bower, G.H. (1981). "Mood and memory." *American Psychologist*, 36(2), 129–148. | `chitta-field/src/scoring/factors.rs` — valence/arousal alignment between query and memory |
+| Flashbulb memory | Brown, R. & Kulik, J. (1977). "Flashbulb memories." *Cognition*, 5(1), 73–99. | `chitta-field/src/scoring/factors.rs` — high-arousal memories boosted |
+
+### Interference & Forgetting
+
+| Concept | Source | Used In |
+|---------|--------|---------|
+| Price of Meaning (no-escape theorem) | Arora, S. et al. (2023). "The Price of Meaning: On the Computational Costs of Rich Representations." Workshop paper. | `chitta-field/src/scoring/factors.rs` — interference density penalty; `chitta-field/src/store.rs` — lure detection |
+| Geometry of Forgetting | Sorscher, B. et al. (2022). "The neural population geometry of forgetting." *Neural Information Processing Systems*. | `chitta-field/src/scoring/factors.rs` — spacing boost; `chitta-field/src/store.rs` — per-realm embedding geometry |
+
+### Context Engineering
+
+| Concept | Source | Used In |
+|---------|--------|---------|
+| Latent Briefing (KV cache compaction) | Ramp Labs (2025). "Latent Briefing: KV Cache Compaction for Multi-Agent LLM Orchestration." Technical report. | `chitta/include/chitta/rpc/handlers/trajectory_compact.hpp` — attention-weighted turn selection with MAD thresholding |
+| Personal Brain OS (progressive disclosure) | Koylan (2025). "Building a Personal Brain OS with Claude." Blog post / X thread. | Context assembly pattern in `smart_context` — L1 router → L2 module → L3 data |
+| xMemory (hierarchical theme retrieval) | Wu, Y. et al. (2024). "xMemory: A Hierarchical Memory System for LLM Agents." *arXiv preprint*. | `chitta/include/chitta/rpc/handlers/field_misc.hpp` — theme system, two-stage retrieval |
+| Letta (MemGPT) context repository | Packer, C. et al. (2023). "MemGPT: Towards LLMs as Operating Systems." *arXiv preprint*. | `chitta/include/chitta/rpc/handlers/field_memory_ops.hpp` — memory versioning, merge queue |
+
+### Scoring & Search
+
+| Concept | Source | Used In |
+|---------|--------|---------|
+| Reciprocal Rank Fusion | Cormack, G.V. et al. (2009). "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods." *SIGIR 2009*. | `chitta/include/chitta/rpc/field_handler.hpp` — hybrid recall (BM25 + semantic) |
+| BM25 | Robertson, S.E. et al. (1994). "Okapi at TREC-3." *NIST Special Publication*. | `chitta-field/src/store.rs` — keyword recall |
+| HNSW | Malkov, Y.A. & Yashunin, D.A. (2020). "Efficient and robust approximate nearest neighbor search using HNSW graphs." *IEEE TPAMI*. | `chitta-field/src/store.rs` — semantic recall index |
+| MAD thresholding | Leys, C. et al. (2013). "Detecting outliers: Do not use standard deviation around the mean." *Journal of Experimental Social Psychology*. | `trajectory_compact.hpp` — adaptive turn selection threshold |
+
+---
+
 *Version 4.0 — chitta-field backend (Rust organic substrate), ANN semantic index (IVF + LSH), SDR cortical index, 8-phase resonance, self-tuning, xMemory themes, cross-session messaging.*

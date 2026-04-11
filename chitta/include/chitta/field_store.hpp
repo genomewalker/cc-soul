@@ -65,6 +65,26 @@ char* cf_agent_get(const struct CfHandle* h, const char* agent_id);
 char* cf_agent_list(const struct CfHandle* h);
 int cf_agent_disable(struct CfHandle* h, const char* agent_id);
 
+// Constraint store FFI (Layer 1)
+char* cf_assert_constraint(struct CfHandle* h, const char* params_json);
+int cf_retract_constraint(struct CfHandle* h, uint64_t fact_id);
+char* cf_query_constraints(const struct CfHandle* h, const char* params_json);
+char* cf_explain_constraint(const struct CfHandle* h, uint64_t fact_id);
+int64_t cf_create_constraint_branch(struct CfHandle* h, uint64_t parent_id, const char* scope);
+int cf_resolve_constraint_branch(struct CfHandle* h, uint64_t winner_id, uint64_t loser_id);
+
+// Trigger tissue FFI (Layer 2)
+int64_t cf_add_trigger(struct CfHandle* h, const char* params_json);
+char* cf_fire_trigger(struct CfHandle* h, uint64_t trigger_id);
+int cf_dismiss_trigger(struct CfHandle* h, uint64_t trigger_id);
+char* cf_list_triggers(const struct CfHandle* h);
+char* cf_evaluate_triggers(struct CfHandle* h);
+
+// Predictive memory FFI (Layer 3)
+char* cf_predict_needed(const struct CfHandle* h, size_t k);
+int cf_retrain_predictor(struct CfHandle* h);
+char* cf_constraint_stats(const struct CfHandle* h);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);

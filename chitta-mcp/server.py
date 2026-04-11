@@ -145,6 +145,8 @@ ADVANCED_TOOLS = {
     "probe_calibrate", "probe_seed", "probe_status", "behavioral_probe",
     # Sadhana (use sadhana gateway)
     "sadhana_set_max_turns",
+    # Trajectory compaction (Latent Briefing)
+    "trajectory_compact",
     # Misc advanced
     "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
     "full_resonate", "grow", "connect", "query",
@@ -158,6 +160,13 @@ ADVANCED_TOOLS = {
     "skill_upload", "skill_read", "skill_list", "skill_search", "skill_deprecate",
     # Agent registry
     "agent_upsert", "agent_get", "agent_list", "agent_disable",
+    # Layer 1: Executable Constraints
+    "assert_fact", "retract_fact", "query_unify", "query_chain",
+    "explain_fact", "branch_create", "branch_resolve",
+    # Layer 2: Trigger Tissue
+    "trigger_add", "trigger_list", "trigger_fire", "trigger_dismiss",
+    # Layer 3: Predictive Memory
+    "predict_needed",
 }
 
 # Combined set of tools to hide from listing (but still callable)

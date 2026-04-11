@@ -320,9 +320,33 @@ The embedding model (bge-base-en-v1.5) downloads automatically during setup.
 
 ## References
 
-The chitta-field memory substrate draws from the following work:
+CC-Soul's architecture draws from the following work:
 
-- Spisak, T., & Friston, K. J. (2026). **Free-energy principle for memory: self-orthogonalizing sparse codes, asymmetric Hopfield attractors, and surprise-modulated plasticity.** *Neurocomputing*. https://doi.org/10.1016/j.neucom.2026.08696
+### Memory & Recall
+
+- Anderson, J. R., & Schooler, L. J. (1991). **Reflections of the environment in memory.** *Psychological Science*, 2(6), 396–408. — ACT-R base-level activation: power-law decay over access timestamps.
+- Spisak, T., & Friston, K. J. (2026). **Free-energy principle for memory: self-orthogonalizing sparse codes, asymmetric Hopfield attractors, and surprise-modulated plasticity.** *Neurocomputing*. https://doi.org/10.1016/j.neucom.2026.08696 — FEP-derived learning rule, surprise-modulated plasticity, reconstruction error as surprise signal.
+- Bower, G. H. (1981). **Mood and memory.** *American Psychologist*, 36(2), 129–148. — Mood-congruent recall: valence/arousal alignment between query and memory.
+- Brown, R., & Kulik, J. (1977). **Flashbulb memories.** *Cognition*, 5(1), 73–99. — High-arousal memories boosted in scoring pipeline.
+
+### Interference & Forgetting
+
+- Arora, S., et al. (2023). **The Price of Meaning: On the Computational Costs of Rich Representations.** Workshop paper. — Interference density penalty, lure detection (no-escape theorem).
+- Sorscher, B., et al. (2022). **The neural population geometry of forgetting.** *NeurIPS*. — Spacing boost scoring, per-realm embedding geometry statistics.
+
+### Context Engineering
+
+- Ramp Labs. (2025). **Latent Briefing: KV Cache Compaction for Multi-Agent LLM Orchestration.** Technical report. — Task-guided query vectors, attention-weighted turn selection. Implemented in `trajectory_compact`.
+- Koylan. (2025). **Building a Personal Brain OS with Claude.** Blog post. — Progressive disclosure context assembly (L1 router → L2 module → L3 data).
+- Wu, Y., et al. (2024). **xMemory: A Hierarchical Memory System for LLM Agents.** *arXiv preprint*. — Hierarchical theme system, two-stage retrieval.
+- Packer, C., et al. (2023). **MemGPT: Towards LLMs as Operating Systems.** *arXiv preprint*. — Context repository pattern: memory versioning, merge queue, pin/lock.
+
+### Search & Scoring
+
+- Malkov, Y. A., & Yashunin, D. A. (2020). **Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs.** *IEEE TPAMI*. — HNSW semantic index.
+- Cormack, G. V., Clarke, C. L. A., & Buettcher, S. (2009). **Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods.** *SIGIR 2009*. — Hybrid recall (BM25 + semantic) fusion.
+- Robertson, S. E., et al. (1994). **Okapi at TREC-3.** *NIST Special Publication*. — BM25 keyword recall.
+- Leys, C., et al. (2013). **Detecting outliers: Do not use standard deviation around the mean.** *Journal of Experimental Social Psychology*, 49(4), 764–766. — MAD thresholding for adaptive turn selection in trajectory compaction.
 
 ## License
 
