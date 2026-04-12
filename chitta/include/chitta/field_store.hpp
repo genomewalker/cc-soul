@@ -141,6 +141,16 @@ char* cf_query_tasks(const struct CfHandle* h, const char* params_json);
 char* cf_agent_protocol_stats(const struct CfHandle* h);
 char* cf_auto_complete_tasks(struct CfHandle* h);
 
+// Wisdom Homeostasis (Layer 9)
+char* cf_enroll_wisdom_lineage(struct CfHandle* h, const char* params_json);
+int   cf_transition_wisdom_lineage(struct CfHandle* h, uint64_t lineage_id, uint8_t new_state, const char* reason, uint64_t task_id);
+int   cf_close_rederive(struct CfHandle* h, const char* params_json);
+char* cf_query_wisdom_lineages(const struct CfHandle* h, const char* params_json);
+char* cf_get_wisdom_lineage(const struct CfHandle* h, uint64_t lineage_id);
+char* cf_wisdom_lineage_stats(const struct CfHandle* h);
+char* cf_tick_lineage_staleness(struct CfHandle* h);
+char* cf_lineage_expiry_check(const struct CfHandle* h);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);

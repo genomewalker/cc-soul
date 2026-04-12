@@ -189,6 +189,10 @@ ADVANCED_TOOLS = {
     "register_task", "update_task", "add_delegation", "link_evidence",
     "add_probe", "resolve_probe", "set_criterion",
     "get_task", "query_tasks", "agent_protocol_stats",
+    # Layer 9: Wisdom Homeostasis
+    "enroll_wisdom_lineage", "transition_wisdom_lineage", "close_rederive",
+    "query_wisdom_lineages", "get_wisdom_lineage", "wisdom_lineage_stats",
+    "tick_lineage_staleness", "lineage_expiry_check",
 }
 
 # Combined set of tools to hide from listing (but still callable)

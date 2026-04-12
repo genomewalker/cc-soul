@@ -785,6 +785,40 @@ void Subconscious::run_learning_cycle() {
                 }
             }
         }
+
+        // Layer 9: Wisdom Homeostasis — staleness tick + TTL expiry demotions
+        {
+            // Grow staleness on lineages with no recent support
+            auto* tick_raw = cf_tick_lineage_staleness(field_store_->handle());
+            if (tick_raw) {
+                auto result = nlohmann::json::parse(tick_raw, nullptr, false);
+                cf_free_string(tick_raw);
+                if (!result.is_discarded()) {
+                    stats_.lineage_staleness_ticks++;
+                    auto transitioned = result.value("count", 0);
+                    if (transitioned > 0)
+                        stats_.lineages_inflamed += static_cast<size_t>(transitioned);
+                }
+            }
+
+            // Demote Inflamed lineages past TTL
+            auto* expiry_raw = cf_lineage_expiry_check(field_store_->handle());
+            if (expiry_raw) {
+                auto result = nlohmann::json::parse(expiry_raw, nullptr, false);
+                cf_free_string(expiry_raw);
+                if (!result.is_discarded()) {
+                    if (result.contains("expired_ids") && result["expired_ids"].is_array()) {
+                        for (auto& id_val : result["expired_ids"]) {
+                            auto lid = id_val.get<uint64_t>();
+                            cf_transition_wisdom_lineage(
+                                field_store_->handle(), lid, 3 /*Demoted*/,
+                                "rederive_ttl_expired", 0);
+                            stats_.lineages_demoted_ttl++;
+                        }
+                    }
+                }
+            }
+        }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Learning cycle failed: " << e.what() << "\n";
     }
