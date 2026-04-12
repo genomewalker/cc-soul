@@ -14,6 +14,27 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
+## What's New in v5.17.0
+
+- **Agent Protocol Memory (Layer 8)** — WAL-backed organ tracking task ownership across agent loops. Agents lose ownership and causality because they have no record of what they delegated, what evidence they produced, or what questions remain open. Layer 8 fixes this.
+- **Task Contracts** — register a task with goal, constraints, acceptance criteria, priority, deadline, and parent/subtask links. Status FSM: Active → Blocked → Completed / Failed / Abandoned.
+- **Delegation Edges** — record every handoff between agents with from/to/handoff_note. Full delegation chain survives WAL replay.
+- **Evidence Links** — link memories to tasks as typed evidence (Observation, Artifact, Result, Analysis, UserFeedback) with relevance score and producer identity. Idempotent by (task_id, memory_id).
+- **Pending Probes** — open questions that must be answered to unblock a task. Probes carry expected answerer, priority, and resolve to Answered/Dismissed with recorded answer text.
+- **Completion Criteria** — upsert criteria against a task (idempotent by criterion text); mark met/unmet with evidence notes. Subconscious auto-completes tasks when all criteria are met.
+- **10 new MCP tools** — `register_task`, `update_task`, `add_delegation`, `link_evidence`, `add_probe`, `resolve_probe`, `set_criterion`, `get_task`, `query_tasks`, `agent_protocol_stats`
+- **7 new WAL op codes** — `OP_REGISTER_TASK=53` through `OP_SET_CRITERION=59`. Full crash-recovery replay.
+- **Subconscious integration** — learning cycle auto-completes tasks with all criteria met; `tasks_auto_completed` stat tracked.
+
+## What's New in v5.16.0
+
+- **Intervention/Outcome/Attribution Ledger (Layer 7)** — WAL-backed organ tracking agent actions before execution, observations during execution, and causal attribution after outcome.
+- **10-class AttributionClass taxonomy** — `MemoryRecallError`, `SourceTrustError`, `ProcedureError`, `ToolExecutionError`, `EnvironmentShift`, `HiddenPrecondition`, `AmbiguousState`, `GoalSpecError`, `UserOverride`, `ExternalNondeterminism`. Each routes to a different learning subsystem.
+- **Attribution routing** — `MemoryRecallError` → surprise credit; `SourceTrustError` → integration kernel weight decrease; `ProcedureError` → skill memory demotion. Secondary class at 0.5× confidence.
+- **8 new MCP tools** — `start_intervention`, `add_observation`, `close_intervention`, `record_attribution`, `query_interventions`, `get_intervention`, `intervention_stats`, `list_open_interventions`
+- **4 new WAL op codes** — `OP_START_INTERVENTION=49` through `OP_RECORD_ATTRIBUTION=52`. Full WAL replay for crash recovery.
+- **Stale intervention auto-close** — subconscious learning cycle closes interventions open longer than 30 minutes.
+
 ## What's New in v5.15.0
 
 - **Autonomous Learning Pipeline** — closes the feedback loops from prediction errors to memory adaptation. The system now *acts* on what it records, pushing from "remembering" (~70%) to "learning" (~90%).
