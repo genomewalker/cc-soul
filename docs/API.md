@@ -1801,6 +1801,200 @@ Current learned scoring model — version, factor count, loss, outcome count. No
 
 Show effective scoring weights — baseline + learned deltas for all factors. No parameters.
 
+## Intervention Ledger (Layer 7)
+
+### start_intervention
+
+Begin tracking an agent intervention before execution — records intent, action type, preconditions, and expected observables.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intent` | string | Yes | Natural language description of what the agent intends to do |
+| `action_ref` | string | Yes | Tool name, file path, or command being invoked |
+| `action_type` | integer | No | 0=ToolCall 1=FileWrite 2=ShellExec 3=NetworkRequest 4=DaemonCall 5=UserQuery 6=MemoryWrite 7=SkillExec 8=Reasoning 9=Other |
+| `realm` | string | No | Realm context (default: coding) |
+| `session_id` | string | No | Session identifier |
+| `task_id` | integer | No | Optional agent protocol task ID to link |
+| `agent_id` | string | No | Agent identifier |
+| `domain` | string | No | Domain hint for attribution routing |
+| `preconditions` | array | No | Conditions assumed true before execution |
+| `expected_observables` | array | No | Outcomes expected if intent succeeds |
+| `reversal_cost` | integer | No | 0=None 1=Low 2=Medium 3=High |
+
+### add_observation
+
+Record an observation during an open intervention (stdout, test result, file diff, etc.).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intervention_id` | integer | Yes | Intervention ID from `start_intervention` |
+| `kind` | integer | Yes | 0=Stdout 1=Stderr 2=FileDiff 3=TestResult 4=EnvState 5=UserFeedback |
+| `summary` | string | No | Human-readable observation summary |
+| `evidence_refs` | array | No | Memory IDs that serve as evidence |
+| `confidence` | number | No | Confidence in the observation (default 1.0) |
+
+### close_intervention
+
+Close an intervention with its final outcome status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intervention_id` | integer | Yes | Intervention ID |
+| `status` | integer | Yes | 1=Succeeded 2=Failed 3=Partial 4=Aborted |
+
+### record_attribution
+
+Attribute a closed intervention to a causal class — routes feedback to the appropriate learning subsystem.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intervention_id` | integer | Yes | Intervention ID |
+| `primary_class` | integer | Yes | 0=MemoryRecallError 1=SourceTrustError 2=ProcedureError 3=ToolExecutionError 4=EnvironmentShift 5=HiddenPrecondition 6=AmbiguousState 7=GoalSpecError 8=UserOverride 9=ExternalNondeterminism |
+| `secondary_class` | integer | No | Optional secondary class (same enum, 0.5× confidence) |
+| `confidence_delta` | number | No | Learning signal magnitude 0.0–1.0 (default 0.5) |
+| `surprise_id` | integer | No | Link to a surprise event |
+| `debt_ids` | array | No | Epistemic debt IDs to resolve |
+| `source_memory_ids` | array | No | Memories implicated as recall errors |
+| `skill_memory_ids` | array | No | Skill memories to demote on procedure error |
+| `note` | string | No | Optional human-readable note |
+
+### query_interventions
+
+Query the intervention ledger with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `session_id` | string | No | Filter by session ID |
+| `status` | integer | No | Filter by status (0=Open 1=Succeeded 2=Failed 3=Partial 4=Aborted) |
+| `limit` | integer | No | Max results (default 50) |
+
+### get_intervention
+
+Get a single intervention record with its observations and attributions.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intervention_id` | integer | Yes | Intervention ID |
+
+### intervention_stats
+
+Intervention ledger statistics — total, open, succeeded, failed, aborted counts. No parameters.
+
+### list_open_interventions
+
+List all currently open (in-progress) interventions. No parameters.
+
+---
+
+## Agent Protocol Memory (Layer 8)
+
+### register_task
+
+Register a task contract — goal, constraints, acceptance criteria, priority, deadline, and optional parent task link.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `goal` | string | Yes | Task goal description |
+| `realm` | string | No | Realm context (default: coding) |
+| `session_id` | string | No | Session this task belongs to |
+| `constraints` | array | No | Constraints that must be respected |
+| `acceptance_criteria` | array | No | Criteria that must be satisfied for completion |
+| `priority` | integer | No | Priority 1–10 (default 5) |
+| `parent_task_id` | integer | No | Parent task ID for subtasks |
+| `tags` | array | No | Optional tags |
+| `deadline_ms` | integer | No | Optional deadline as Unix ms timestamp |
+
+### update_task
+
+Update task status and optionally attach an intervention or add a tag.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+| `status` | integer | Yes | 0=Active 1=Blocked 2=Completed 3=Failed 4=Abandoned |
+| `add_intervention_id` | integer | No | Attach intervention ID to task |
+| `add_tag` | string | No | Add a tag to the task |
+
+### add_delegation
+
+Record a delegation edge — which agent handed off to which, with optional handoff note.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+| `from_agent` | string | Yes | Delegating agent name |
+| `to_agent` | string | Yes | Receiving agent name |
+| `handoff_note` | string | No | Optional context passed at handoff |
+
+### link_evidence
+
+Link a memory to a task as typed evidence. Idempotent by (task_id, memory_id).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+| `memory_id` | integer | Yes | Memory ID to link |
+| `produced_by` | string | No | Agent that produced this evidence |
+| `evidence_kind` | integer | No | 0=Observation 1=Artifact 2=Result 3=Analysis 4=UserFeedback |
+| `relevance` | number | No | Relevance score 0–1 (default 1.0) |
+
+### add_probe
+
+Add a pending probe — an open question blocking or informing task completion.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+| `question` | string | Yes | Open question to be answered |
+| `expected_answerer` | string | No | Agent or role expected to answer |
+| `priority` | integer | No | Priority 1–10 (default 5) |
+
+### resolve_probe
+
+Resolve a pending probe as Answered or Dismissed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `probe_id` | integer | Yes | Probe ID |
+| `status` | integer | Yes | 1=Answered 2=Dismissed |
+| `answer` | string | No | Optional answer text |
+
+### set_criterion
+
+Upsert a completion criterion for a task. Idempotent by criterion text — updates existing if text matches.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+| `criterion` | string | Yes | Criterion description |
+| `is_met` | boolean | No | Whether criterion is met (default false) |
+| `evidence_note` | string | No | Optional evidence supporting the check |
+
+### get_task
+
+Get full task view — contract, delegations, evidence links, pending probes, and completion criteria.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | integer | Yes | Task ID |
+
+### query_tasks
+
+Query task contracts with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `session_id` | string | No | Filter by session ID |
+| `status` | integer | No | Filter by status (0–4) |
+| `priority` | integer | No | Filter by minimum priority |
+| `limit` | integer | No | Max results (default 50) |
+
+### agent_protocol_stats
+
+Agent protocol memory statistics — total tasks, delegations, evidence links, probes, and criteria counts. No parameters.
+
 ---
 
 *100+ tools. One soul.*

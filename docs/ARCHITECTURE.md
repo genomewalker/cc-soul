@@ -1059,6 +1059,55 @@ Closes feedback loops from prediction errors to memory adaptation.
 | `learned_scorer_stats` | Current model version, factor count, loss |
 | `effective_scorer_weights` | Baseline + learned deltas for all scoring factors |
 
+### Layer 7: Intervention Ledger
+
+WAL-backed organ tracking agent actions before execution, observations during execution, and causal attribution after outcome. Closes the loop from "what did I intend?" → "what did I observe?" → "why did it succeed or fail?" → learning subsystem update.
+
+**WAL op codes**: `OP_START_INTERVENTION = 49`, `OP_ADD_OBSERVATION = 50`, `OP_CLOSE_INTERVENTION = 51`, `OP_RECORD_ATTRIBUTION = 52`
+
+**Attribution routing**: `MemoryRecallError` → surprise credit; `SourceTrustError` → integration kernel weight decrease; `ProcedureError` → skill memory demotion. Secondary class supported at 0.5× confidence.
+
+**Stale auto-close**: subconscious learning cycle closes interventions open longer than 30 minutes.
+
+| Tool | Description |
+|------|-------------|
+| `start_intervention` | Begin tracking before execution — intent, action type, preconditions, expected observables |
+| `add_observation` | Record observation during execution (stdout, diff, test result, user feedback) |
+| `close_intervention` | Close with outcome status (Succeeded=1, Failed=2, Partial=3, Aborted=4) |
+| `record_attribution` | Attribute to causal class and route feedback to learning subsystem |
+| `query_interventions` | Query ledger by realm/session/status |
+| `get_intervention` | Get single intervention with observations and attributions |
+| `intervention_stats` | Ledger statistics — total, open, succeeded, failed counts |
+| `list_open_interventions` | All currently open (in-progress) interventions |
+
+### Layer 8: Agent Protocol Memory
+
+WAL-backed organ for tracking multi-step task ownership across agent loops. Agents lose causality because they have no record of what they delegated, what evidence they produced, or what questions remain open. Layer 8 makes delegation, evidence provenance, and completion criteria first-class persistent objects.
+
+**WAL op codes**: `OP_REGISTER_TASK = 53`, `OP_UPDATE_TASK = 54`, `OP_ADD_DELEGATION = 55`, `OP_LINK_EVIDENCE = 56`, `OP_ADD_PROBE = 57`, `OP_RESOLVE_PROBE = 58`, `OP_SET_CRITERION = 59`
+
+**Data model**:
+- `TaskContract` — goal, constraints, acceptance_criteria, priority, status FSM (Active/Blocked/Completed/Failed/Abandoned), deadline, parent_task_id, tags
+- `DelegationEdge` — from_agent → to_agent with handoff_note; status (Active/Completed/Recalled)
+- `EvidenceLink` — memory_id linked to task with EvidenceKind (Observation/Artifact/Result/Analysis/UserFeedback), relevance, producer. Idempotent by (task_id, memory_id).
+- `PendingProbe` — open question with expected_answerer, priority; resolves to Answered/Dismissed
+- `CompletionCriterion` — criterion text upserted idempotently; marked met/unmet with evidence note
+
+**Subconscious integration**: learning cycle auto-completes tasks whose all criteria are met (`tasks_auto_completed` stat).
+
+| Tool | Description |
+|------|-------------|
+| `register_task` | Register task contract with goal, constraints, criteria, priority, deadline |
+| `update_task` | Update status; optionally attach intervention or tag |
+| `add_delegation` | Record agent handoff with from/to/handoff_note |
+| `link_evidence` | Link memory to task as typed evidence (idempotent by task_id, memory_id) |
+| `add_probe` | Add open question blocking/informing task completion |
+| `resolve_probe` | Mark probe Answered or Dismissed with answer text |
+| `set_criterion` | Upsert completion criterion (idempotent by text); mark met/unmet |
+| `get_task` | Full task view — contract, delegations, evidence, probes, criteria |
+| `query_tasks` | Filter by realm/session/status/priority |
+| `agent_protocol_stats` | Total tasks, delegations, evidence links, probes, criteria counts |
+
 ---
 
-*Version 5.15 — Autonomous learning pipeline (surprise credit, wisdom promotion, learned scorer), subconscious learning cycle, 18-factor scoring pipeline, chitta-field organic substrate.*
+*Version 5.17 — Agent protocol memory (Layer 8, 10 MCP tools, WAL ops 53-59), intervention ledger (Layer 7, 8 MCP tools, WAL ops 49-52), autonomous learning pipeline (surprise credit, wisdom promotion, learned scorer), subconscious learning cycle, 18-factor scoring pipeline, chitta-field organic substrate.*
