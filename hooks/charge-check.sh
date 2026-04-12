@@ -33,7 +33,7 @@ echo "$NEW_BALANCE" > "$CHARGE_FILE"
 # Hard block: deeply overdrawn
 if [[ "$NEW_BALANCE" -lt -20 ]]; then
     printf '[charge] DEPLETED (%d/%d). Reclaim via /checkpoint, commit, or tests passing.\n' \
-        "$NEW_BALANCE" "$BUDGET"
+        "$NEW_BALANCE" "$BUDGET" >&2
     exit 2
 fi
 
