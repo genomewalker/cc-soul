@@ -150,6 +150,7 @@
     <a href="#cat-background" class="submenu-toc-link" data-section="cat-background">Background Processing</a>
     <a href="#cat-learning" class="submenu-toc-link" data-section="cat-learning">Learning &amp; Tracking</a>
     <a href="#cat-intervention" class="submenu-toc-link" data-section="cat-intervention">Intervention Ledger</a>
+    <a href="#cat-agent-protocol" class="submenu-toc-link" data-section="cat-agent-protocol">Agent Protocol Memory</a>
     <a href="#cat-explore" class="submenu-toc-link" data-section="cat-explore">Exploration</a>
     <a href="#cat-longtask" class="submenu-toc-link" data-section="cat-longtask">Long Tasks</a>
     <a href="#cat-anticipation" class="submenu-toc-link" data-section="cat-anticipation">Anticipation &amp; Habits</a>
@@ -1044,6 +1045,30 @@
       </div>
     </div>
 
+    <!-- AGENT PROTOCOL MEMORY (Layer 8) -->
+    <div class="tools-category collapsed" id="cat-agent-protocol">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="1.5" stroke="#CBAF86" stroke-width="1" opacity="0.5"/><line x1="6" y1="8" x2="14" y2="8" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="6" y1="11" x2="11" y2="11" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><circle cx="14" cy="4" r="2.5" fill="#CBAF86" opacity="0.7"/></svg>
+        </div>
+        <span class="tools-category-name">Agent Protocol Memory (Layer 8)</span>
+        <span class="tools-category-count">10 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">register_task</span><span class="tool-desc">Register a task contract &mdash; goal, constraints, acceptance criteria, priority, deadline, and optional parent task</span></div>
+        <div class="tool-row"><span class="tool-name">update_task</span><span class="tool-desc">Update task status (Active=0, Blocked=1, Completed=2, Failed=3, Abandoned=4); optionally attach an intervention or tag</span></div>
+        <div class="tool-row"><span class="tool-name">add_delegation</span><span class="tool-desc">Record a delegation edge &mdash; which agent handed off to which, with optional handoff note</span></div>
+        <div class="tool-row"><span class="tool-name">link_evidence</span><span class="tool-desc">Link a memory to a task as typed evidence (Observation, Artifact, Result, Analysis, UserFeedback) with relevance and producer</span></div>
+        <div class="tool-row"><span class="tool-name">add_probe</span><span class="tool-desc">Add a pending probe &mdash; an open question blocking or informing task completion</span></div>
+        <div class="tool-row"><span class="tool-name">resolve_probe</span><span class="tool-desc">Resolve a pending probe &mdash; mark Answered (1) or Dismissed (2) with optional answer text</span></div>
+        <div class="tool-row"><span class="tool-name">set_criterion</span><span class="tool-desc">Upsert a completion criterion for a task &mdash; idempotent by criterion text; mark met/unmet with evidence note</span></div>
+        <div class="tool-row"><span class="tool-name">get_task</span><span class="tool-desc">Get full task view &mdash; contract, delegations, evidence links, pending probes, and completion criteria</span></div>
+        <div class="tool-row"><span class="tool-name">query_tasks</span><span class="tool-desc">Query task contracts with optional realm, session, status, and priority filters</span></div>
+        <div class="tool-row"><span class="tool-name">agent_protocol_stats</span><span class="tool-desc">Agent protocol memory statistics &mdash; total tasks, delegations, evidence links, probes, and criteria counts</span></div>
+      </div>
+    </div>
+
     <!-- DEBUG (hidden in collapsed by default) -->
     <div class="tools-category collapsed" id="cat-debug">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
@@ -1841,6 +1866,64 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     ],
     get_intervention: [
       {name: 'intervention_id', type: 'integer', req: true, desc: 'Intervention ID'}
+    ],
+    // Agent Protocol Memory (Layer 8)
+    register_task: [
+      {name: 'goal', type: 'string', req: true, desc: 'Task goal description'},
+      {name: 'realm', type: 'string', req: false, desc: 'Realm context (default coding)'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Session this task belongs to'},
+      {name: 'constraints', type: 'array', req: false, desc: 'Constraints that must be respected'},
+      {name: 'acceptance_criteria', type: 'array', req: false, desc: 'Criteria that must be met for completion'},
+      {name: 'priority', type: 'integer', req: false, desc: 'Priority 1-10 (default 5)'},
+      {name: 'parent_task_id', type: 'integer', req: false, desc: 'Parent task ID for subtasks'},
+      {name: 'tags', type: 'array', req: false, desc: 'Optional tags'},
+      {name: 'deadline_ms', type: 'integer', req: false, desc: 'Optional deadline as Unix ms timestamp'}
+    ],
+    update_task: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'},
+      {name: 'status', type: 'integer', req: true, desc: '0=Active 1=Blocked 2=Completed 3=Failed 4=Abandoned'},
+      {name: 'add_intervention_id', type: 'integer', req: false, desc: 'Attach intervention ID to task'},
+      {name: 'add_tag', type: 'string', req: false, desc: 'Add a tag to the task'}
+    ],
+    add_delegation: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'},
+      {name: 'from_agent', type: 'string', req: true, desc: 'Delegating agent name'},
+      {name: 'to_agent', type: 'string', req: true, desc: 'Receiving agent name'},
+      {name: 'handoff_note', type: 'string', req: false, desc: 'Optional context passed at handoff'}
+    ],
+    link_evidence: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'},
+      {name: 'memory_id', type: 'integer', req: true, desc: 'Memory ID to link as evidence'},
+      {name: 'produced_by', type: 'string', req: false, desc: 'Agent that produced this evidence'},
+      {name: 'evidence_kind', type: 'integer', req: false, desc: '0=Observation 1=Artifact 2=Result 3=Analysis 4=UserFeedback'},
+      {name: 'relevance', type: 'number', req: false, desc: 'Relevance score 0-1 (default 1.0)'}
+    ],
+    add_probe: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'},
+      {name: 'question', type: 'string', req: true, desc: 'Open question to be answered'},
+      {name: 'expected_answerer', type: 'string', req: false, desc: 'Agent or role expected to answer'},
+      {name: 'priority', type: 'integer', req: false, desc: 'Priority 1-10 (default 5)'}
+    ],
+    resolve_probe: [
+      {name: 'probe_id', type: 'integer', req: true, desc: 'Probe ID'},
+      {name: 'status', type: 'integer', req: true, desc: '1=Answered 2=Dismissed'},
+      {name: 'answer', type: 'string', req: false, desc: 'Optional answer text'}
+    ],
+    set_criterion: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'},
+      {name: 'criterion', type: 'string', req: true, desc: 'Criterion description (upserted by text)'},
+      {name: 'is_met', type: 'boolean', req: false, desc: 'Whether criterion is met (default false)'},
+      {name: 'evidence_note', type: 'string', req: false, desc: 'Optional evidence supporting the check'}
+    ],
+    get_task: [
+      {name: 'task_id', type: 'integer', req: true, desc: 'Task ID'}
+    ],
+    query_tasks: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'session_id', type: 'string', req: false, desc: 'Filter by session ID'},
+      {name: 'status', type: 'integer', req: false, desc: 'Filter by status (0-4)'},
+      {name: 'priority', type: 'integer', req: false, desc: 'Filter by minimum priority'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default 50)'}
     ]
   };
 

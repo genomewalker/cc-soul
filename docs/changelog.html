@@ -456,12 +456,34 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.17.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.17.0</span>
+        <span class="version-date">April 12, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Agent Protocol Memory (Layer 8)</strong> &mdash; WAL-backed organ for tracking task ownership, delegation chains, evidence provenance, open probes, and completion criteria across multi-step agent loops.</li>
+          <li><strong>Task Contracts</strong> &mdash; register tasks with goal, constraints, acceptance criteria, priority, deadline, and parent/subtask links. Status FSM: Active &rarr; Blocked &rarr; Completed / Failed / Abandoned.</li>
+          <li><strong>Delegation Edges</strong> &mdash; record every agent handoff with from/to/handoff_note. Full delegation chain replays from WAL.</li>
+          <li><strong>Evidence Links</strong> &mdash; link memories to tasks as typed evidence (Observation, Artifact, Result, Analysis, UserFeedback) with relevance score and producer identity. Idempotent by (task_id, memory_id).</li>
+          <li><strong>Pending Probes</strong> &mdash; open questions blocking task completion. Probes carry expected answerer, priority, and resolve to Answered/Dismissed with recorded answer.</li>
+          <li><strong>Completion Criteria</strong> &mdash; upsert criteria against a task (idempotent by criterion text); mark met/unmet with evidence notes. Subconscious auto-completes tasks when all criteria are met.</li>
+          <li><strong>10 new MCP tools</strong> &mdash; <code>register_task</code>, <code>update_task</code>, <code>add_delegation</code>, <code>link_evidence</code>, <code>add_probe</code>, <code>resolve_probe</code>, <code>set_criterion</code>, <code>get_task</code>, <code>query_tasks</code>, <code>agent_protocol_stats</code>.</li>
+          <li><strong>7 new WAL op codes</strong> &mdash; <code>OP_REGISTER_TASK=53</code> through <code>OP_SET_CRITERION=59</code>. Full crash-recovery replay.</li>
+          <li><strong>Subconscious integration</strong> &mdash; learning cycle auto-completes tasks with all criteria met; <code>tasks_auto_completed</code> stat tracked.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.16.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.16.0</span>
         <span class="version-date">April 11, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
