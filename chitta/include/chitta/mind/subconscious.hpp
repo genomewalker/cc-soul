@@ -121,6 +121,10 @@ struct SubconsciousStats {
     std::atomic<size_t> scorer_updates{0};
     std::atomic<size_t> interventions_auto_closed{0};
     std::atomic<size_t> tasks_auto_completed{0};
+    // Layer 9: Wisdom Homeostasis
+    std::atomic<size_t> lineage_staleness_ticks{0};
+    std::atomic<size_t> lineages_inflamed{0};
+    std::atomic<size_t> lineages_demoted_ttl{0};
     std::atomic<int64_t> last_belief_maintenance_at{0};
     std::atomic<int64_t> last_learning_cycle_at{0};
     std::atomic<int64_t> last_hygiene_at{0};

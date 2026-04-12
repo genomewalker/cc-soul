@@ -593,6 +593,7 @@ private:
     #include "handlers/learning.hpp"
     #include "handlers/intervention.hpp"
     #include "handlers/agent_protocol.hpp"
+    #include "handlers/wisdom_lineage.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2729,6 +2730,66 @@ private:
             {"inputSchema",{{"type","object"}}}});
         handlers_["agent_protocol_stats"] = [this](const json& p) { return tool_agent_protocol_stats(field_store_, p); };
 
+        // ── Wisdom Homeostasis (Layer 9) ─────────────────────────────────────
+        tools_.push_back({{"name","enroll_wisdom_lineage"},{"description","Enroll a Trusted wisdom candidate into the Wisdom Homeostasis layer — creates a living WisdomLineage record that tracks belief integrity over time"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"wisdom_candidate_id",{{"type","integer"},{"description","ID of the WisdomCandidate to enroll"}}},
+                {"claim",{{"type","string"},{"description","The claim this wisdom encodes"}}},
+                {"envelope",{{"type","object"},{"description","Applicability envelope: {domain, action_types, preconditions, source_families}"}}},
+                {"seed_episode_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Episode IDs that seeded this wisdom"}}},
+                {"seed_surprise_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Surprise event IDs"}}},
+                {"seed_intervention_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Intervention IDs"}}},
+                {"seed_debt_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Epistemic debt IDs"}}},
+                {"ancestor_lineage_id",{{"type","integer"},{"description","Parent lineage ID if this is a fork/split"}}},
+                {"derivation_relation",{{"type","string"},{"description","Relation to ancestor: supersedes|branches_from|narrows|splits_from"}}}
+            }},{"required",{"wisdom_candidate_id","claim","envelope"}}}}});
+        handlers_["enroll_wisdom_lineage"] = [this](const json& p) { return tool_enroll_wisdom_lineage(field_store_, p); };
+
+        tools_.push_back({{"name","transition_wisdom_lineage"},{"description","Manually transition a wisdom lineage state (Trusted/Watch/Inflamed/Demoted). Normally automatic — use for overrides."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"lineage_id",{{"type","integer"},{"description","Lineage ID"}}},
+                {"new_state",{{"type","integer"},{"description","0=Trusted 1=Watch 2=Inflamed 3=Demoted"}}},
+                {"reason",{{"type","string"},{"description","Why this transition is happening"}}},
+                {"rederive_task_id",{{"type","integer"},{"description","Task contract ID if opening re-derivation"}}}
+            }},{"required",{"lineage_id","new_state"}}}}});
+        handlers_["transition_wisdom_lineage"] = [this](const json& p) { return tool_transition_wisdom_lineage(field_store_, p); };
+
+        tools_.push_back({{"name","close_rederive"},{"description","Close a re-derivation contract for an Inflamed wisdom lineage. Actions: reaffirm (0), narrow (1), split (2), demote (3)."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"lineage_id",{{"type","integer"},{"description","Lineage ID"}}},
+                {"action",{{"type","integer"},{"description","0=reaffirm 1=narrow 2=split 3=demote"}}},
+                {"new_envelope",{{"type","object"},{"description","Narrowed applicability envelope (for action=narrow/split)"}}},
+                {"fork_claim",{{"type","string"},{"description","Claim for the forked lineage (action=split)"}}},
+                {"fork_lineage_id",{{"type","integer"},{"description","Pre-enrolled fork lineage ID (action=split)"}}}
+            }},{"required",{"lineage_id","action"}}}}});
+        handlers_["close_rederive"] = [this](const json& p) { return tool_close_rederive(field_store_, p); };
+
+        tools_.push_back({{"name","query_wisdom_lineages"},{"description","List wisdom lineages filtered by state and/or domain"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"state",{{"type","string"},{"description","Filter: trusted|watch|inflamed|demoted"}}},
+                {"domain",{{"type","string"},{"description","Filter by domain"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_wisdom_lineages"] = [this](const json& p) { return tool_query_wisdom_lineages(field_store_, p); };
+
+        tools_.push_back({{"name","get_wisdom_lineage"},{"description","Get full details of a wisdom lineage by ID, including challenger evidence and state history"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"lineage_id",{{"type","integer"},{"description","Lineage ID"}}}
+            }},{"required",{"lineage_id"}}}}});
+        handlers_["get_wisdom_lineage"] = [this](const json& p) { return tool_get_wisdom_lineage(field_store_, p); };
+
+        tools_.push_back({{"name","wisdom_lineage_stats"},{"description","Show wisdom homeostasis statistics — counts by state, mean staleness, support/contradiction mass totals"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["wisdom_lineage_stats"] = [this](const json& p) { return tool_wisdom_lineage_stats(field_store_, p); };
+
+        tools_.push_back({{"name","tick_lineage_staleness"},{"description","Manually trigger a staleness tick — grows staleness mass on lineages with no recent support. Normally called by the subconscious cycle."},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["tick_lineage_staleness"] = [this](const json& p) { return tool_tick_lineage_staleness(field_store_, p); };
+
+        tools_.push_back({{"name","lineage_expiry_check"},{"description","List Inflamed lineages whose re-derivation TTL has expired — these should be demoted or re-derived urgently"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["lineage_expiry_check"] = [this](const json& p) { return tool_lineage_expiry_check(field_store_, p); };
+
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
             {"inputSchema",{{"type","object"},{"properties",{
@@ -3005,7 +3066,11 @@ private:
             // Layer 8: Agent Protocol Memory
             "register_task", "update_task", "add_delegation", "link_evidence",
             "add_probe", "resolve_probe", "set_criterion",
-            "get_task", "query_tasks", "agent_protocol_stats"
+            "get_task", "query_tasks", "agent_protocol_stats",
+            // Layer 9: Wisdom Homeostasis
+            "enroll_wisdom_lineage", "transition_wisdom_lineage", "close_rederive",
+            "query_wisdom_lineages", "get_wisdom_lineage", "wisdom_lineage_stats",
+            "tick_lineage_staleness", "lineage_expiry_check"
         };
 
         for (const auto& name : internal_tools) tool_visibility_[name] = "internal";
