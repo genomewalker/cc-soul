@@ -191,31 +191,6 @@ case "$MATCHER" in
             exit 2
         fi
 
-        # Stage 1b: RTK rewrite (token-optimized output)
-        rtk_cmd=$(rtk_rewrite "$command")
-        if [[ -n "$rtk_cmd" ]]; then
-            rtk_output=$(eval "$rtk_cmd" 2>&1)
-            rtk_rc=$?
-            if [[ $rtk_rc -eq 0 && -n "$rtk_output" ]]; then
-                printf '[RTK] %s\n\n%s\n' "$command" "$rtk_output"
-                exit 2
-            fi
-            # RTK failed — fall through to normal execution
-        fi
-
-        # Stage 1c: Fallback large-output protection (when RTK not available/applicable)
-        if [[ ! -x "$RTK_BIN" ]] && command -v jq >/dev/null 2>&1; then
-            fallback_result=$(fallback_rewrite "$command")
-            if [[ $? -eq 0 && -n "$fallback_result" ]]; then
-                _safer_cmd=$(echo "$fallback_result" | grep -o 'instead: .*' | sed 's/instead: //')
-                if [[ -n "$_safer_cmd" ]]; then
-                    _safer_output=$(eval "$_safer_cmd" 2>&1 | head -250)
-                    printf '⚠️ Large output — compact version: %s\n\n%s\n' "$command" "$_safer_output"
-                    exit 2
-                fi
-            fi
-        fi
-
         # Stage 2: Soul memory — surface corrections/gotchas
         # Skip for subagent calls (agent_id present) — saves 2s timeout per tool call
         agent_id=$(echo "$STDIN_DATA" | jq -r '.agent_id // empty')
