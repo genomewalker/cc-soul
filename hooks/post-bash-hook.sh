@@ -49,15 +49,6 @@ if [[ "$exit_code" == "0" && -n "$command" ]]; then
     mkdir -p "$MIND_PATH" 2>/dev/null
     echo "$curr_cmd" > "$LAST_CMD_FILE"
 
-    # Charge reclaim on durable progress
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    case "$command" in
-        *"git commit"*|*"git push"*)
-            "$SCRIPT_DIR/charge-reclaim.sh" 10 "commit" 2>/dev/null || true ;;
-        *"cargo test"*|*"pytest"*|*"npm test"*)
-            "$SCRIPT_DIR/charge-reclaim.sh" 5 "tests-passing" 2>/dev/null || true ;;
-    esac
-
     exit 0
 fi
 

@@ -22,7 +22,6 @@ capture:
 
 1. **Gather state** - Review current work
 2. **Capture checkpoint** - Use `ledger_save` with structured data
-3. **Reclaim charge** - Run `${CLAUDE_PLUGIN_ROOT}/hooks/charge-reclaim.sh 20 checkpoint`
 4. **Output summary** - Display checkpoint for user
 
 ## Tool Call
