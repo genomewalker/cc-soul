@@ -9,13 +9,13 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
             "timeout": 8,
-            "statusMessage": "awakening…"
+            "statusMessage": "awakening\u2026"
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
             "timeout": 10,
-            "statusMessage": "recalling context…"
+            "statusMessage": "recalling context\u2026"
           }
         ]
       },
@@ -26,7 +26,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/compact-restore-hook.sh",
             "timeout": 5,
-            "statusMessage": "restoring context…"
+            "statusMessage": "restoring context\u2026"
           }
         ]
       },
@@ -37,19 +37,19 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
             "timeout": 8,
-            "statusMessage": "awakening…"
+            "statusMessage": "awakening\u2026"
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
             "timeout": 10,
-            "statusMessage": "resuming…"
+            "statusMessage": "resuming\u2026"
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/resume-inject-hook.sh",
             "timeout": 3,
-            "statusMessage": "preparing recap…"
+            "statusMessage": "preparing recap\u2026"
           }
         ]
       },
@@ -60,13 +60,13 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
             "timeout": 8,
-            "statusMessage": "awakening…"
+            "statusMessage": "awakening\u2026"
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
             "timeout": 10,
-            "statusMessage": "recalling context…"
+            "statusMessage": "recalling context\u2026"
           }
         ]
       }
@@ -79,7 +79,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/prompt-hook.sh",
             "timeout": 10,
-            "statusMessage": "resonating…"
+            "statusMessage": "resonating\u2026"
           }
         ]
       }
@@ -91,7 +91,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
-            "statusMessage": "preserving state…"
+            "statusMessage": "preserving state\u2026"
           }
         ]
       }
@@ -103,7 +103,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact-hook.sh",
-            "statusMessage": "consolidating memory…"
+            "statusMessage": "consolidating memory\u2026"
           }
         ]
       }
@@ -116,7 +116,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop-hook.sh",
             "timeout": 5,
-            "statusMessage": "capturing learnings…",
+            "statusMessage": "capturing learnings\u2026",
             "async": true
           }
         ]
@@ -130,7 +130,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/file-changed-hook.sh",
             "timeout": 15,
-            "statusMessage": "re-indexing…",
+            "statusMessage": "re-indexing\u2026",
             "async": true
           }
         ]
@@ -144,107 +144,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Bash",
             "timeout": 10,
-            "statusMessage": "checking command patterns…"
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh Agent",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh Task",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__opencode_start",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh opencode_start",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__codex_start",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_start",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__parallel_agents",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh parallel_agents",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__opencode_discuss",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh opencode_discuss",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__codex_discuss",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_discuss",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__codex_run",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_run",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__web_search",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh web_search",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__chitta-bridge__web_fetch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh web_fetch",
-            "timeout": 5
+            "statusMessage": "checking command patterns\u2026"
           }
         ]
       }
@@ -257,14 +157,14 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/log-bash-history.sh",
             "timeout": 5,
-            "statusMessage": "logging command…",
+            "statusMessage": "logging command\u2026",
             "async": true
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-hook.sh",
             "timeout": 5,
-            "statusMessage": "checking result…"
+            "statusMessage": "checking result\u2026"
           }
         ]
       },
@@ -275,7 +175,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-intercept.sh",
             "timeout": 10,
-            "statusMessage": "syncing memory…",
+            "statusMessage": "syncing memory\u2026",
             "async": true
           }
         ]
