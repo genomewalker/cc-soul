@@ -166,6 +166,40 @@
             }
         }
 
+        // SSL v0.4: granularity tier (G:0-4) stored as triplet
+        if (id > 0 && params.contains("granularity")) {
+            int g = -1;
+            if (params["granularity"].is_number_integer()) {
+                g = params["granularity"].get<int>();
+            } else if (params["granularity"].is_string()) {
+                try { g = std::stoi(params["granularity"].get<std::string>()); } catch (...) {}
+            }
+            if (g >= 0 && g <= 4) {
+                field_store_->add_triplet(std::to_string(id), "granularity", std::to_string(g));
+            }
+        }
+
+        // SSL v0.4: derivation provenance (<=@refs) — comma-separated source memory IDs
+        if (id > 0 && params.contains("derivation") && params["derivation"].is_string()) {
+            std::istringstream dss(params["derivation"].get<std::string>());
+            std::string dref;
+            while (std::getline(dss, dref, ',')) {
+                dref.erase(0, dref.find_first_not_of(' '));
+                dref.erase(dref.find_last_not_of(' ') + 1);
+                if (!dref.empty()) {
+                    field_store_->add_triplet(std::to_string(id), "abstracted_from", dref);
+                }
+            }
+        }
+
+        // SSL v0.4: external source grounding (src:loc)
+        if (id > 0 && params.contains("source_loc") && params["source_loc"].is_string()) {
+            std::string sloc = params["source_loc"].get<std::string>();
+            if (!sloc.empty()) {
+                field_store_->add_triplet(std::to_string(id), "source_loc", sloc);
+            }
+        }
+
         // Correction supersession: when category=correction, weaken semantically similar memories
         if (category == "correction" && id > 0 && !embedding.empty()) {
             auto hits = field_store_->recall(embedding, 5, realm);
