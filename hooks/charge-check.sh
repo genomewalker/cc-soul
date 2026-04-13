@@ -32,15 +32,15 @@ echo "$NEW_BALANCE" > "$CHARGE_FILE"
 
 # Hard block: deeply overdrawn
 if [[ "$NEW_BALANCE" -lt -20 ]]; then
-    printf '[charge] DEPLETED (%d/%d). Reclaim via /checkpoint, commit, or tests passing.\n' \
-        "$NEW_BALANCE" "$BUDGET" >&2
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"[charge] DEPLETED (%d/%d). Reclaim via /checkpoint, commit, or tests passing."}}\n' \
+        "$NEW_BALANCE" "$BUDGET"
     exit 2
 fi
 
 # Advisory: low charge
 if [[ "$NEW_BALANCE" -le 20 ]]; then
-    printf '[charge] Low: %d/%d remaining (-%d for %s)\n' \
-        "$NEW_BALANCE" "$BUDGET" "$COST" "$TOOL" >&2
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[charge] Low: %d/%d remaining (-%d for %s)"}}\n' \
+        "$NEW_BALANCE" "$BUDGET" "$COST" "$TOOL"
 fi
 
 exit 0
