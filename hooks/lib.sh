@@ -189,8 +189,9 @@ emit_event() {
     queue_write "observe" "$args"
 }
 
-# parse_ssl_annotations — extract A:v,a F:FLAG →@ref from an SSL line
+# parse_ssl_annotations — extract A:v,a F:FLAG G:N <=@refs src:loc →@ref from an SSL line
 # Sets global variables: _SSL_VALENCE, _SSL_AROUSAL, _SSL_FLAGS, _SSL_REFS, _SSL_CLEAN
+#                        _SSL_GRANULARITY, _SSL_DERIVATION, _SSL_SOURCE
 # Usage: parse_ssl_annotations "line of SSL"
 parse_ssl_annotations() {
     local line="$1"
@@ -198,6 +199,9 @@ parse_ssl_annotations() {
     _SSL_AROUSAL=""
     _SSL_FLAGS=""
     _SSL_REFS=""
+    _SSL_GRANULARITY=""
+    _SSL_DERIVATION=""
+    _SSL_SOURCE=""
     _SSL_CLEAN="$line"
 
     # Extract A:valence,arousal
@@ -210,6 +214,24 @@ parse_ssl_annotations() {
     # Extract F:FLAG (comma-separated flags possible: F:PIVOT,ORIGIN)
     if [[ "$line" =~ F:([A-Z_,]+) ]]; then
         _SSL_FLAGS="${BASH_REMATCH[1]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    fi
+
+    # Extract G:N — granularity tier 0-4 (v0.4)
+    if [[ "$_SSL_CLEAN" =~ G:([0-4]) ]]; then
+        _SSL_GRANULARITY="${BASH_REMATCH[1]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    fi
+
+    # Extract <=@refs — derivation provenance, comma-separated IDs (v0.4)
+    if [[ "$_SSL_CLEAN" =~ \<=@([a-zA-Z0-9_,-]+) ]]; then
+        _SSL_DERIVATION="${BASH_REMATCH[1]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    fi
+
+    # Extract src:loc — external source grounding (v0.4)
+    if [[ "$_SSL_CLEAN" =~ src:([a-zA-Z0-9_./#:-]+) ]]; then
+        _SSL_SOURCE="${BASH_REMATCH[1]}"
         _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
     fi
 

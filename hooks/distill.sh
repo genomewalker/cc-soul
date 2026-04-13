@@ -54,22 +54,22 @@ if [[ ${#CONVERSATION} -gt $MAX_CHARS ]]; then
 ${tail_part}"
 fi
 
-# SSL v0.3 prompt with typed markers, affect, flags, and cross-refs
-PROMPT='Extract learnings from this conversation in SSL v0.3 format.
+# SSL v0.4 prompt with typed markers, affect, flags, granularity, derivation, and source
+PROMPT='Extract learnings from this conversation in SSL v0.4 format.
 
-## SSL v0.3 Format
+## SSL v0.4 Format
 
 Two tiers depending on memory type:
 
 ### Tier 1: Code-bearing (SOLUTION, GOTCHA, PATTERN)
 ```
-[TYPE] [domain] subject→action→result @location F:FLAG A:v,a →@ref
+[TYPE] [domain] subject→action→result @location G:N F:FLAG A:v,a <=@ref1,ref2 src:loc →@ref
 [ε] exact_command_or_code_verbatim
 ```
 
 ### Tier 2: Narrative (DECISION, PREFERENCE, FAILURE) — denser, no [ε] needed
 ```
-[TYPE] [domain] choice>alternative|reason+context F:FLAG A:v,a →@ref
+[TYPE] [domain] choice>alternative|reason+context G:N F:FLAG A:v,a <=@ref1,ref2 src:loc →@ref
 ```
 
 ## Types (choose most specific)
@@ -99,9 +99,23 @@ Two tiers depending on memory type:
 
 | Annotation | Meaning | Values |
 |------------|---------|--------|
+| G:N | Granularity tier | 0=atom, 1=episode, 2=claim, 3=operator, 4=boundary |
 | F:FLAG | Structural importance | ORIGIN, CORE, PIVOT, GENESIS, TURNING |
 | A:v,a | Affect (valence,arousal) | v: -1.0..+1.0, a: 0.0..1.0 |
+| <=@refs | Derived from (provenance) | comma-separated memory IDs this abstracted from; required at G:1+ |
+| src:loc | External source grounding | file:line, URL slug, paper ID |
 | →@ref | Cross-reference | tag name linking to related memory |
+
+### Granularity guide
+- G:0 atom — single fact, command, threshold, or name (default when unsure)
+- G:1 episode — what happened in a specific session or event
+- G:2 claim — abstraction over multiple episodes (use <=@ to cite sources)
+- G:3 operator — reusable procedure/pattern distilled from claims (use <=@)
+- G:4 boundary — architectural invariant or hard constraint (use <=@)
+
+### Derivation rule
+- G:0 atoms: <=@ is optional (no provenance needed for raw facts)
+- G:1+ abstract: <=@ is REQUIRED — name the episode/atom IDs this was inferred from
 
 ### Flag guide
 - ORIGIN: where an idea first appeared
@@ -115,6 +129,12 @@ Two tiers depending on memory type:
 - Negative valence (-): frustration, failure, confusion
 - High arousal (>0.5): breakthrough, urgent fix, critical discovery
 - Low arousal (<0.3): routine, minor preference, background pattern
+
+### Source grounding (src:)
+- Use when the learning traces back to a specific external artifact
+- File: src:simple_cli.cpp:720
+- Doc section: src:CLAUDE.md#build
+- Paper/RFC: src:RFC7540#5.1
 
 ## Relationships
 
@@ -132,28 +152,31 @@ Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 4. **No fluff**: Skip obvious/trivial learnings
 5. **High signal**: Each learning should be reconstructable from SSL alone
 6. **Affect required**: Every learning must have A:v,a — estimate from conversation tone
-7. **Flags when applicable**: Add F: only when structurally significant (not every memory)
-8. **Cross-ref when related**: Use →@tag to link learnings that reference each other
+7. **Granularity required**: Every learning must have G:N — use G:0 for raw facts, G:1+ for abstractions
+8. **Derivation required at G:1+**: Abstractions must cite <=@source_ids they generalise from
+9. **Flags when applicable**: Add F: only when structurally significant (not every memory)
+10. **Cross-ref when related**: Use →@tag to link learnings that reference each other
+11. **Source when traceable**: Add src: when the learning has a clear external origin
 
 ## Good Examples
 
 ### Tier 1 (code-bearing):
 ```
-[SOLUTION] [chitta] parallel-build→4x-faster @cmake A:+0.6,0.3
+[SOLUTION] [chitta] parallel-build→4x-faster @cmake G:0 A:+0.6,0.3
 [ε] cmake --build build --parallel
 
-[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776 A:-0.4,0.7 F:CORE
+[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776 G:0 A:-0.4,0.7 F:CORE src:simple_cli.cpp:776
 [ε] wrap handler.handle() in try-catch, return error JSON
 
-[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async A:+0.3,0.2 →@queue-architecture
+[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async G:3 A:+0.3,0.2 <=@parallel-build,thread-pool-fix →@queue-architecture
 [ε] echo json >> /tmp/chitta-queue.jsonl
 ```
 
 ### Tier 2 (narrative — dense, no [ε]):
 ```
-[DECISION] [arch] sqlite>postgres|metadata|single-file+no-daemon+<100k A:+0.5,0.4 F:PIVOT
-[PREFERENCE] [partnership] no-shortcuts+proper-solutions+no-stubs A:+0.2,0.1 F:CORE
-[FAILURE] [http] http-daemon>unix-socket|200ms-latency+hooks-need-<50ms A:-0.3,0.6 →@queue-architecture
+[DECISION] [arch] sqlite>postgres|metadata|single-file+no-daemon+<100k G:2 A:+0.5,0.4 F:PIVOT <=@schema-choice-episode
+[PREFERENCE] [partnership] no-shortcuts+proper-solutions+no-stubs G:0 A:+0.2,0.1 F:CORE
+[FAILURE] [http] http-daemon>unix-socket|200ms-latency+hooks-need-<50ms G:1 A:-0.3,0.6 →@queue-architecture
 ```
 
 ### Triplets:
@@ -170,6 +193,8 @@ Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 - Obvious things (e.g., "files should be saved")
 - Duplicating what is already in code comments
 - Missing A: annotations
+- Missing G: annotations
+- G:1+ without <=@ provenance
 - Verbose Tier 2 entries (use > and | instead of prose)
 
 ---
@@ -204,35 +229,35 @@ if [[ -z "$ENDPOINT" ]]; then
     while IFS= read -r match; do
         [[ -z "$match" ]] && continue
         clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
-        FALLBACK_RESULT+="[SOLUTION] [${REALM}] ${clean} A:+0.5,0.4"$'\n'
+        FALLBACK_RESULT+="[SOLUTION] [${REALM}] ${clean} G:0 A:+0.5,0.4"$'\n'
     done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:fixed|fix for|the fix was|resolved by|solved by)\s+\K[^\n.]{10,}' | head -5)"
 
     # Pattern: "chose X over Y" / "decided to X" / "went with X"
     while IFS= read -r match; do
         [[ -z "$match" ]] && continue
         clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
-        FALLBACK_RESULT+="[DECISION] [${REALM}] ${clean} A:+0.3,0.3"$'\n'
+        FALLBACK_RESULT+="[DECISION] [${REALM}] ${clean} G:0 A:+0.3,0.3"$'\n'
     done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:chose|decided to|went with|picked|selected)\s+\K[^\n.]{10,}' | head -5)"
 
     # Pattern: "prefer X" / "always X" / "never X"
     while IFS= read -r match; do
         [[ -z "$match" ]] && continue
         clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
-        FALLBACK_RESULT+="[PREFERENCE] [partnership] ${clean} A:+0.2,0.1"$'\n'
+        FALLBACK_RESULT+="[PREFERENCE] [partnership] ${clean} G:0 A:+0.2,0.1"$'\n'
     done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:I prefer|always |never |don.t ever)\s*\K[^\n.]{10,}' | head -5)"
 
     # Pattern: "watch out for X" / "careful with X" / "gotcha:" / "trap:"
     while IFS= read -r match; do
         [[ -z "$match" ]] && continue
         clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
-        FALLBACK_RESULT+="[GOTCHA] [${REALM}] ${clean} A:-0.3,0.5"$'\n'
+        FALLBACK_RESULT+="[GOTCHA] [${REALM}] ${clean} G:0 A:-0.3,0.5"$'\n'
     done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:watch out for|careful with|gotcha:|trap:|beware of)\s*\K[^\n.]{10,}' | head -5)"
 
     # Pattern: "failed because" / "didn't work" / "error was"
     while IFS= read -r match; do
         [[ -z "$match" ]] && continue
         clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
-        FALLBACK_RESULT+="[FAILURE] [${REALM}] ${clean} A:-0.4,0.5"$'\n'
+        FALLBACK_RESULT+="[FAILURE] [${REALM}] ${clean} G:0 A:-0.4,0.5"$'\n'
     done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:failed because|didn.t work|error was|broke because)\s*\K[^\n.]{10,}' | head -5)"
 
     if [[ -z "$FALLBACK_RESULT" ]]; then
@@ -259,7 +284,7 @@ if [[ "${SKIP_LLM:-false}" != "true" ]]; then
 import json, sys
 prompt = sys.stdin.read()
 req = {'model': '$MODEL', 'messages': [
-    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.3 format. Output ONLY SSL-formatted learnings with A:v,a affect annotations.'},
+    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.4 format. Output ONLY SSL-formatted learnings with G:N granularity and A:v,a affect annotations. G:1+ memories require <=@provenance.'},
     {'role': 'user', 'content': prompt}
 ], 'temperature': 0.3, 'max_tokens': 4096}
 json.dump(req, open('$TMPJSON', 'w'), ensure_ascii=True)
@@ -289,7 +314,7 @@ fi  # end SKIP_LLM gate
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh" 2>/dev/null || true
 
-echo "[distill] Processing SSL v0.3 results..."
+echo "[distill] Processing SSL v0.4 results..."
 
 # Get turn range for this session (for hierarchical retrieval)
 TURN_RANGE=$("$CHITTA_BIN" sql_query --query "SELECT MIN(turn_index), MAX(turn_index) FROM conversation_turn WHERE session_id = '$SESSION_ID'" 2>/dev/null | grep -E '^[0-9]' || echo "0 0")
@@ -323,7 +348,7 @@ store_current() {
         *) cat="wisdom" ;;
     esac
 
-    # Parse SSL v0.3 annotations from first line
+    # Parse SSL v0.4 annotations from first line
     local first_line="${CURRENT_CONTENT%%$'\n'*}"
     parse_ssl_annotations "$first_line"
 
@@ -338,7 +363,7 @@ store_current() {
     local title="${CURRENT_CONTENT%%$'\n'*}"
     title="${title:0:100}"
 
-    # Build observe args with optional v0.3 fields
+    # Build observe args with optional v0.4 fields
     local observe_args="--category \"$cat\" --title \"$title\" --content \"$CURRENT_CONTENT\" --realm \"$REALM\" --json"
     [[ -n "$_SSL_VALENCE" ]] && observe_args="$observe_args --valence $_SSL_VALENCE"
     [[ -n "$_SSL_AROUSAL" ]] && observe_args="$observe_args --arousal $_SSL_AROUSAL"
@@ -354,12 +379,28 @@ store_current() {
         [[ -n "$_SSL_VALENCE" ]] && affect_info=" A:${_SSL_VALENCE},${_SSL_AROUSAL}"
         local flag_info=""
         [[ -n "$_SSL_FLAGS" ]] && flag_info=" F:${_SSL_FLAGS}"
-        echo "[distill]   +${CURRENT_TYPE,,}: ${title:0:50}...${affect_info}${flag_info}"
+        local gran_info=""
+        [[ -n "$_SSL_GRANULARITY" ]] && gran_info=" G:${_SSL_GRANULARITY}"
+        echo "[distill]   +${CURRENT_TYPE,,}: ${title:0:50}...${affect_info}${flag_info}${gran_info}"
         ((STORED++)) || true
 
         # Link to episode if we have one
         if [[ -n "$EPISODE_ID" && -n "$id" ]]; then
             "$CHITTA_BIN" connect --subject "$id" --predicate "derived_from" --object "$EPISODE_ID" 2>/dev/null || true
+        fi
+
+        # SSL v0.4 triplets: granularity, derivation provenance, source grounding
+        if [[ -n "$_SSL_GRANULARITY" ]]; then
+            "$CHITTA_BIN" connect --subject "$id" --predicate "granularity" --object "$_SSL_GRANULARITY" 2>/dev/null || true
+        fi
+        if [[ -n "$_SSL_DERIVATION" ]]; then
+            IFS=',' read -ra _drefs <<< "$_SSL_DERIVATION"
+            for _dref in "${_drefs[@]}"; do
+                [[ -n "$_dref" ]] && "$CHITTA_BIN" connect --subject "$id" --predicate "abstracted_from" --object "$_dref" 2>/dev/null || true
+            done
+        fi
+        if [[ -n "$_SSL_SOURCE" ]]; then
+            "$CHITTA_BIN" connect --subject "$id" --predicate "source_loc" --object "$_SSL_SOURCE" 2>/dev/null || true
         fi
     fi
 
