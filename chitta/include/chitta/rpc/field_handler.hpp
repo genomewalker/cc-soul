@@ -430,6 +430,12 @@ private:
         if (content.rfind("[LEARN]", 0) == 0) return true;
         if (content.rfind("[ε]", 0) == 0) return true;
         if (content.find("\xe2\x86\x92") != std::string::npos) return true;  // UTF-8 →
+        // SSL v0.4: G:N granularity annotation
+        if (content.find(" G:0") != std::string::npos ||
+            content.find(" G:1") != std::string::npos ||
+            content.find(" G:2") != std::string::npos ||
+            content.find(" G:3") != std::string::npos ||
+            content.find(" G:4") != std::string::npos) return true;
         return false;
     }
 
@@ -770,7 +776,7 @@ private:
         handlers_["batch_forget"] = [this](const json& p) { return tool_batch_forget(p); };
 
         // Observe/Grow
-        tools_.push_back({{"name","observe"},{"description","Store an observation/learning (SSL v0.3)"},
+        tools_.push_back({{"name","observe"},{"description","Store an observation/learning (SSL v0.4)"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"category",{{"type","string"}}},{"title",{{"type","string"}}},
                 {"content",{{"type","string"}}},{"tags",{{"type","string"}}},
@@ -778,7 +784,10 @@ private:
                 {"valence",{{"type","number"},{"description","Affect valence: -1.0 to +1.0"}}},
                 {"arousal",{{"type","number"},{"description","Affect arousal: 0.0 to 1.0"}}},
                 {"flags",{{"type","string"},{"description","Structural flags: ORIGIN,CORE,PIVOT,GENESIS,TURNING"}}},
-                {"refs",{{"type","string"},{"description","Cross-references: comma-separated tag names or memory IDs"}}}
+                {"refs",{{"type","string"},{"description","Cross-references: comma-separated tag names or memory IDs"}}},
+                {"granularity",{{"type","integer"},{"description","SSL v0.4 granularity tier: 0=atom,1=episode,2=claim,3=operator,4=boundary"}}},
+                {"derivation",{{"type","string"},{"description","SSL v0.4 <=@ provenance: comma-separated source memory IDs this was abstracted from (required at G:1+)"}}},
+                {"source_loc",{{"type","string"},{"description","SSL v0.4 src: external source grounding, e.g. file:line or doc section"}}}
             }},{"required",{"title","content"}}}}
         });
         handlers_["observe"] = [this](const json& p) { return tool_observe(p); };
