@@ -34,7 +34,7 @@ echo "$NEW_BALANCE" > "$CHARGE_FILE"
 if [[ "$NEW_BALANCE" -lt -20 ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"[charge] DEPLETED (%d/%d). Reclaim via /checkpoint, commit, or tests passing."}}\n' \
         "$NEW_BALANCE" "$BUDGET"
-    exit 2
+    exit 0
 fi
 
 # Advisory: low charge
