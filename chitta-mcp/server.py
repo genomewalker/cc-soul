@@ -882,6 +882,10 @@ results
     return daemon_call("smart_context", arguments)
 
 
+def handle_lookup(arguments: dict) -> str:
+    return daemon_call("lookup", arguments)
+
+
 def handle_learn_correction(arguments: dict) -> str:
     """
     Store a correction when I was wrong.
@@ -1656,6 +1660,7 @@ COMPOSITE_HANDLERS = {
     "symbol_callers": handle_symbol_callers,
     "symbol_callees": handle_symbol_callees,
     "smart_context": handle_smart_context,
+    "lookup": handle_lookup,
     # Consolidated gateways (replace individual tools)
     "recall": handle_recall_gateway,
     "sadhana": handle_sadhana_gateway,
@@ -1701,7 +1706,7 @@ REALM_STORE_TOOLS = {
 }
 
 # Tools that filter/query by realm
-REALM_FILTER_TOOLS = {"long_task_active", "smart_context"}
+REALM_FILTER_TOOLS = {"long_task_active", "smart_context", "lookup"}
 
 
 def get_current_session_id(use_cache: bool = True) -> Optional[str]:
