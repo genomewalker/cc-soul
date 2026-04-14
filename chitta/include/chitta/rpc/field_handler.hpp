@@ -600,6 +600,7 @@ private:
     #include "handlers/intervention.hpp"
     #include "handlers/agent_protocol.hpp"
     #include "handlers/wisdom_lineage.hpp"
+    #include "handlers/field_lookup.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -1749,6 +1750,17 @@ private:
             }},{"required",{"query"}}}}
         });
         handlers_["structured_recall"] = [this](const json& p) { return tool_structured_recall(p); };
+
+        tools_.push_back({{"name","lookup"},{"description","Unified memory lookup. Classifies intent, fans out to keyword/semantic/triplet/temporal/code backends, fuses with weighted RRF. Use this as the default memory search."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"}}},
+                {"limit",{{"type","integer"}}},
+                {"realm",{{"type","string"}}},
+                {"mode",{{"type","string"},{"enum",{"auto","fast","deep"}}}},
+                {"explain",{{"type","boolean"}}}
+            }},{"required",{"query"}}}}
+        });
+        handlers_["lookup"] = [this](const json& p) { return tool_lookup(p); };
 
         tools_.push_back({{"name","route_stats"},{"description","Show route learner status and arm configuration for smart_recall"},
             {"inputSchema",{{"type","object"},{"properties",json::object()}}}

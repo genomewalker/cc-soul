@@ -4153,6 +4153,21 @@ COMPOSITE_TOOLS = [
         }
     ),
     Tool(
+        name="lookup",
+        description="Unified memory lookup. Classifies query intent, fans out to optimal backends (keyword/semantic/triplet/temporal/code), fuses with weighted RRF. Default entry point for memory search — use instead of recall/smart_recall/hybrid_recall.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"},
+                "realm": {"type": "string", "description": "Filter by realm"},
+                "mode": {"type": "string", "enum": ["auto", "fast", "deep"], "description": "auto=escalate if low confidence; fast=skip deep search; deep=force full resonate"},
+                "explain": {"type": "boolean", "description": "Include intent classification and score breakdown"}
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
         name="smart_context",
         description="Build intelligent context. Modes: fast (<80ms), full (<200ms), rlm (RLM-style dynamic exploration via soul_repl - Claude writes the exploration code).",
         inputSchema={
