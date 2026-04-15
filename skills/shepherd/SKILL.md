@@ -9,12 +9,12 @@ hooks:
     - matcher: ""
       hooks:
         - type: command
-          command: "bash $CLAUDE_PLUGIN_ROOT/../hooks/shepherd-stop-hook.sh"
+          command: "bash $CLAUDE_PLUGIN_ROOT/hooks/shepherd-stop-hook.sh"
   UserPromptSubmit:
     - matcher: ""
       hooks:
         - type: command
-          command: "bash $CLAUDE_PLUGIN_ROOT/../hooks/shepherd-prompt-hook.sh"
+          command: "bash $CLAUDE_PLUGIN_ROOT/hooks/shepherd-prompt-hook.sh"
   PostToolUse:
     - matcher: "Bash"
       hooks:
