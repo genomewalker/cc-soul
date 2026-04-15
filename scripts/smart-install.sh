@@ -338,13 +338,40 @@ build_from_source() {
     local plugin_bin="$src_root/bin"
     mkdir -p "$BIN_DIR" "$plugin_bin"
 
-    # Clean build directory to avoid CMake cache conflicts
+    # Clean build directory to avoid CMake cache conflicts, but preserve
+    # FetchContent deps from a previous plugin version to avoid re-downloading.
+    local prev_deps=""
+    if [[ -d "$HOME/.claude/plugins/cache/genomewalker-cc-soul" ]]; then
+        # Find most recent prior version's _deps (sorted descending, skip current)
+        local current_ver
+        current_ver=$(basename "$PLUGIN_DIR")
+        while IFS= read -r prev_dir; do
+            local candidate="$prev_dir/chitta/build/_deps"
+            if [[ "$(basename "$prev_dir")" != "$current_ver" && -d "$candidate" ]]; then
+                prev_deps="$candidate"
+                break
+            fi
+        done < <(find "$HOME/.claude/plugins/cache/genomewalker-cc-soul" -mindepth 2 -maxdepth 2 \
+                      -name "chitta" -type d | sed 's|/chitta$||' | sort -Vr)
+    fi
+
     rm -rf "$build_dir"
     mkdir -p "$build_dir"
+
+    # Reuse FetchContent deps from previous version (saves 5-8 min of CMake configure)
+    if [[ -n "$prev_deps" ]]; then
+        echo "[cc-soul] Reusing FetchContent deps from $(basename "$(dirname "$(dirname "$prev_deps")")")"
+        cp -r "$prev_deps" "$build_dir/_deps"
+    fi
+
     cd "$build_dir"
 
-    # Detect ONNX Runtime for embeddings
+    # Use ccache if available (speeds up C++ recompilation significantly)
     local cmake_args="-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS= -DCMAKE_C_FLAGS="
+    if command -v ccache &>/dev/null; then
+        cmake_args="$cmake_args -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache"
+        echo "[cc-soul] ccache enabled"
+    fi
     # Pass chitta-field root to cmake (set by build_chitta_field)
     if [[ -n "$CHITTA_FIELD_ROOT" ]]; then
         cmake_args="$cmake_args -DCHITTA_FIELD_ROOT=$CHITTA_FIELD_ROOT"
