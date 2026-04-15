@@ -9,7 +9,7 @@ hooks:
     - matcher: "Read"
       hooks:
         - type: command
-          command: "bash ${CLAUDE_PLUGIN_ROOT}/../hooks/codebase-learn-post-read.sh"
+          command: "bash ${CLAUDE_PLUGIN_ROOT}/hooks/codebase-learn-post-read.sh"
           timeout: 10
           once: true
 ---
