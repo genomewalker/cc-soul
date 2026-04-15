@@ -9,6 +9,7 @@
 #include <vector>
 #include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -382,6 +383,64 @@ public:
             result = extract_file_full(path);
         }
 
+        return result;
+    }
+
+    // Collect source file paths without parsing (for two-pass hash-then-parse).
+    std::vector<std::string> collect_source_files(
+        const std::string& path,
+        const std::vector<std::string>& exclude = {"node_modules", ".git", "build", "__pycache__", "venv"},
+        size_t max_files = 1000
+    ) {
+        std::vector<std::string> files;
+        if (std::filesystem::is_regular_file(path)) {
+            if (!detect_language(path).empty()) files.push_back(path);
+            return files;
+        }
+        if (!std::filesystem::is_directory(path)) return files;
+
+        std::function<void(const std::filesystem::path&)> traverse;
+        traverse = [&](const std::filesystem::path& dir) {
+            if (files.size() >= max_files) return;
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                if (files.size() >= max_files) return;
+                std::string name = entry.path().filename().string();
+                if (entry.is_directory()) {
+                    bool skip = false;
+                    for (const auto& ex : exclude) {
+                        if (name == ex) { skip = true; break; }
+                    }
+                    if (!skip) traverse(entry.path());
+                } else if (entry.is_regular_file()) {
+                    if (!detect_language(entry.path().string()).empty())
+                        files.push_back(entry.path().string());
+                }
+            }
+        };
+        traverse(path);
+        return files;
+    }
+
+    // Extract only the specified files (parse with tree-sitter).
+    ExtractionResult extract_files(const std::unordered_set<std::string>& file_paths) {
+        ExtractionResult result;
+        result.symbols.reserve(file_paths.size() * 20);
+        result.callsites.reserve(file_paths.size() * 10);
+        for (const auto& fp : file_paths) {
+            auto file_result = extract_file_full(fp);
+            result.symbols.insert(result.symbols.end(),
+                                 std::make_move_iterator(file_result.symbols.begin()),
+                                 std::make_move_iterator(file_result.symbols.end()));
+            result.callsites.insert(result.callsites.end(),
+                                   std::make_move_iterator(file_result.callsites.begin()),
+                                   std::make_move_iterator(file_result.callsites.end()));
+            result.type_relationships.insert(result.type_relationships.end(),
+                                            std::make_move_iterator(file_result.type_relationships.begin()),
+                                            std::make_move_iterator(file_result.type_relationships.end()));
+            result.imports.insert(result.imports.end(),
+                                 std::make_move_iterator(file_result.imports.begin()),
+                                 std::make_move_iterator(file_result.imports.end()));
+        }
         return result;
     }
 

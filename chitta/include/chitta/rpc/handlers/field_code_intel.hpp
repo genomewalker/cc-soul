@@ -283,45 +283,71 @@
     struct GitProvenance {
         std::string commit;
         std::string author;
-        int64_t timestamp_ms{0};
+        int64_t timestamp_ms{-1};
     };
 
-    static GitProvenance git_file_provenance(const std::string& path) {
-        GitProvenance prov;
-        std::string cmd = "git log -1 --format=\"%H %ae %at\" -- \"" + path + "\" 2>/dev/null";
+    static std::string git_repo_root(const std::string& path) {
+        std::string dir = std::filesystem::is_directory(path) ? path
+                        : std::filesystem::path(path).parent_path().string();
+        std::string cmd = "git -C \"" + dir + "\" rev-parse --show-toplevel 2>/dev/null";
         FILE* fp = popen(cmd.c_str(), "r");
-        if (!fp) return prov;
-        char buf[512];
-        std::string output;
-        while (fgets(buf, sizeof(buf), fp)) output += buf;
-        int rc = pclose(fp);
-        if (rc != 0 || output.empty()) return prov;
-        // Trim trailing newline
-        while (!output.empty() && (output.back() == '\n' || output.back() == '\r'))
-            output.pop_back();
-        // Parse: "<commit> <email> <unix_timestamp>"
-        auto sp1 = output.find(' ');
-        if (sp1 == std::string::npos) return prov;
-        auto sp2 = output.find(' ', sp1 + 1);
-        if (sp2 == std::string::npos) return prov;
-        prov.commit = output.substr(0, sp1);
-        prov.author = output.substr(sp1 + 1, sp2 - sp1 - 1);
-        try {
-            prov.timestamp_ms = std::stoll(output.substr(sp2 + 1)) * 1000;
-        } catch (...) {}
-        return prov;
+        if (!fp) return "";
+        char buf[512] = {};
+        fgets(buf, sizeof(buf), fp);
+        pclose(fp);
+        std::string root(buf);
+        while (!root.empty() && (root.back() == '\n' || root.back() == '\r')) root.pop_back();
+        return root;
     }
 
-    // Compute a simple content hash (hex string of std::hash).
+    static std::unordered_map<std::string, GitProvenance>
+    git_batch_provenance(const std::string& repo_root,
+                         const std::unordered_set<std::string>& abs_paths) {
+        std::unordered_map<std::string, GitProvenance> result;
+        if (repo_root.empty() || abs_paths.empty()) return result;
+
+        for (const auto& abs : abs_paths) {
+            std::string rel;
+            if (abs.size() > repo_root.size() && abs.substr(0, repo_root.size()) == repo_root)
+                rel = abs.substr(repo_root.size() + 1);
+            else
+                rel = abs;
+            std::string cmd = "git -C \"" + repo_root + "\" log -1 --format=\"%H %ae %at\" -- \"" + rel + "\" 2>/dev/null";
+            FILE* fp = popen(cmd.c_str(), "r");
+            if (!fp) continue;
+            char buf[512];
+            std::string out;
+            while (fgets(buf, sizeof(buf), fp)) out += buf;
+            pclose(fp);
+            while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+            if (out.empty()) continue;
+            auto sp1 = out.find(' ');
+            if (sp1 == std::string::npos) continue;
+            auto sp2 = out.find(' ', sp1 + 1);
+            if (sp2 == std::string::npos) continue;
+            GitProvenance prov;
+            prov.commit = out.substr(0, sp1);
+            prov.author = out.substr(sp1 + 1, sp2 - sp1 - 1);
+            try { prov.timestamp_ms = std::stoll(out.substr(sp2 + 1)) * 1000; } catch (...) {}
+            result[abs] = prov;
+        }
+        return result;
+    }
+
+    // Compute FNV-1a 64-bit content hash (deterministic, good distribution).
     static std::string compute_content_hash(const std::string& file_path) {
         std::ifstream f(file_path, std::ios::binary);
         if (!f) return "";
-        std::ostringstream buf;
-        buf << f.rdbuf();
-        std::string content = buf.str();
-        auto h = std::hash<std::string>{}(content);
+        uint64_t hash = 14695981039346656037ULL;
+        char buf[8192];
+        while (f.read(buf, sizeof(buf)) || f.gcount() > 0) {
+            for (std::streamsize i = 0; i < f.gcount(); ++i) {
+                hash ^= static_cast<uint8_t>(buf[i]);
+                hash *= 1099511628211ULL;
+            }
+        }
         std::ostringstream hex;
-        hex << std::hex << std::setfill('0') << std::setw(16) << h;
+        hex << std::hex << std::setfill('0') << std::setw(16) << hash;
         return hex.str();
     }
 
@@ -386,18 +412,22 @@
             auto code_files_json = field_store_->list_code_files(project);
             auto arr = json::parse(code_files_json, nullptr, false);
             if (arr.is_array()) {
+                std::unordered_set<std::string> stale_paths;
                 for (const auto& item : arr) {
                     std::string indexed_path = item.value("path", "");
                     if (!indexed_path.empty() && !std::filesystem::exists(indexed_path)) {
-                        // Remove symbols for this stale file
-                        auto syms = field_store_->search_symbols_by_name("", 5000);
-                        for (const auto& s : syms) {
-                            if (std::string(reinterpret_cast<const char*>(s.file_path)) == indexed_path) {
-                                field_store_->remove_symbol(s.symbol_id);
-                                stale_removed++;
-                            }
-                        }
+                        stale_paths.insert(indexed_path);
                         field_store_->invalidate_triplets_by_source_file(indexed_path);
+                    }
+                }
+                if (!stale_paths.empty()) {
+                    auto all_syms = field_store_->search_symbols_by_name("", 5000);
+                    for (const auto& s : all_syms) {
+                        std::string sym_path(reinterpret_cast<const char*>(s.file_path));
+                        if (stale_paths.count(sym_path)) {
+                            field_store_->remove_symbol(s.symbol_id);
+                            stale_removed++;
+                        }
                     }
                 }
             }
@@ -405,16 +435,19 @@
 
         CodeIntel intel;
 
-        auto result = intel.extract_directory_full(path, exclude, max_files);
-        if (result.symbols.empty()) {
+        // Pass 1: collect source file paths (no tree-sitter parsing yet)
+        auto all_files = intel.collect_source_files(path, exclude, max_files);
+        if (all_files.empty()) {
             return ToolResult::ok("No symbols found in " + path, {{"stored", 0}});
         }
 
-        // Collect unique file paths from symbols
-        std::unordered_set<std::string> seen_files;
-        for (const auto& sym : result.symbols) seen_files.insert(sym.file_path);
+        std::unordered_set<std::string> seen_files(all_files.begin(), all_files.end());
 
-        // Determine which files actually changed via content hash
+        // Detect git repo root once, batch provenance for all files
+        std::string repo_root = git_repo_root(path);
+        auto prov_map = git_batch_provenance(repo_root, seen_files);
+
+        // Pass 2: hash each file, upsert code file, determine which changed
         std::unordered_set<std::string> changed_files;
         for (const auto& fp : seen_files) {
             int64_t mtime = 0;
@@ -424,22 +457,32 @@
             } catch (...) {}
 
             std::string hash = compute_content_hash(fp);
-            auto prov = git_file_provenance(fp);
+            auto it = prov_map.find(fp);
+            std::string commit, author;
+            int64_t git_ts = -1;
+            if (it != prov_map.end()) {
+                commit = it->second.commit;
+                author = it->second.author;
+                git_ts = it->second.timestamp_ms;
+            }
             auto [file_id, was_updated] = field_store_->upsert_code_file_v2(
-                fp, project, mtime, hash, prov.commit, prov.author, prov.timestamp_ms);
+                fp, project, mtime, hash, commit, author, git_ts);
 
             if (was_updated) {
                 changed_files.insert(fp);
             }
         }
 
-        // Store symbols only for changed files
-        size_t symbols_stored = 0, symbols_embedded = 0, symbols_skipped = 0;
+        // Pass 3: parse only changed files with tree-sitter
+        auto result = intel.extract_files(changed_files);
+        if (result.symbols.empty() && changed_files.empty()) {
+            return ToolResult::ok("No symbols found in " + path, {{"stored", 0}});
+        }
+
+        // Store symbols (all are from changed files — parsed only those)
+        size_t symbols_stored = 0, symbols_embedded = 0;
+        size_t symbols_skipped = seen_files.size() - changed_files.size();
         for (const auto& sym : result.symbols) {
-            if (changed_files.find(sym.file_path) == changed_files.end()) {
-                symbols_skipped++;
-                continue;
-            }
             std::vector<float> emb;
             if (yantra_) {
                 std::string text = sym.kind + " " + sym.name;
@@ -458,7 +501,6 @@
         std::unordered_set<std::string> invalidated_files;
         size_t callsites_stored = 0;
         for (const auto& cs : result.callsites) {
-            if (changed_files.find(cs.file_path) == changed_files.end()) continue;
             if (invalidated_files.insert(cs.file_path).second) {
                 field_store_->invalidate_triplets_by_source_file(cs.file_path);
             }
