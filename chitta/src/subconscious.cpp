@@ -155,6 +155,11 @@ void Subconscious::process_loop() {
             run_learning_cycle();
         }
 
+        // Code intel staleness: restore confidence of code intel memories
+        if (config_.enable_code_intel_staleness && field_store_ && time_for_code_intel_staleness()) {
+            run_code_intel_staleness();
+        }
+
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
             last_dream_triggered_at_ = now_ms();
@@ -821,6 +826,43 @@ void Subconscious::run_learning_cycle() {
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Learning cycle failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_code_intel_staleness() const {
+    auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
+        std::chrono::steady_clock::now() - last_code_intel_staleness_).count();
+    return elapsed >= config_.code_intel_staleness_interval_hours;
+}
+
+void Subconscious::run_code_intel_staleness() {
+    last_code_intel_staleness_ = std::chrono::steady_clock::now();
+    stats_.code_intel_staleness_runs++;
+
+    try {
+        const std::vector<std::string> kinds = {
+            "symbol", "projectessence", "modulestate", "patternstate"
+        };
+        size_t restored = 0;
+        for (const auto& kind : kinds) {
+            auto hits = field_store_->recall_by_kind(kind, 2000);
+            for (const auto& h : hits) {
+                if (h.confidence < config_.code_intel_min_confidence) {
+                    float delta = config_.code_intel_target_confidence - h.confidence;
+                    if (delta > 0.0f) {
+                        field_store_->strengthen(h.memory_id, delta);
+                        restored++;
+                    }
+                }
+            }
+        }
+        stats_.code_intel_memories_restored += restored;
+        if (restored > 0) {
+            std::cerr << "[subconscious] Code intel staleness: restored "
+                      << restored << " memories\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Code intel staleness failed: " << e.what() << "\n";
     }
 }
 
