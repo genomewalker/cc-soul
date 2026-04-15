@@ -72,6 +72,10 @@ struct SubconsciousConfig {
     bool enable_habit_formation{true};            // Auto-detect tool patterns and form habits
     bool enable_cls_replay{true};                 // CLS offline replay consolidation
     bool enable_sleep_consolidation{true};        // chitta-field encode + snapshot + demotion
+    bool enable_code_intel_staleness{true};       // Restore confidence of code intel memories
+    int code_intel_staleness_interval_hours{24};
+    float code_intel_min_confidence{0.5f};
+    float code_intel_target_confidence{0.8f};
     std::chrono::minutes cls_replay_interval{60}; // CLS replay every hour
     size_t cls_replay_batch_size{20};             // Memories to sample per replay
     size_t cls_replay_min_cluster{3};             // Min cluster size to distill
@@ -121,6 +125,9 @@ struct SubconsciousStats {
     std::atomic<size_t> scorer_updates{0};
     std::atomic<size_t> interventions_auto_closed{0};
     std::atomic<size_t> tasks_auto_completed{0};
+    // Code intel staleness
+    std::atomic<size_t> code_intel_staleness_runs{0};
+    std::atomic<size_t> code_intel_memories_restored{0};
     // Layer 9: Wisdom Homeostasis
     std::atomic<size_t> lineage_staleness_ticks{0};
     std::atomic<size_t> lineages_inflamed{0};
@@ -288,6 +295,11 @@ private:
     std::chrono::steady_clock::time_point last_learning_cycle_{std::chrono::steady_clock::now()};
     void run_learning_cycle();
     bool time_for_learning_cycle() const;
+
+    // Code intel staleness restoration
+    std::chrono::steady_clock::time_point last_code_intel_staleness_{std::chrono::steady_clock::now()};
+    void run_code_intel_staleness();
+    bool time_for_code_intel_staleness() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;

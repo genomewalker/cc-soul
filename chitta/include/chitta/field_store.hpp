@@ -151,6 +151,18 @@ char* cf_wisdom_lineage_stats(const struct CfHandle* h);
 char* cf_tick_lineage_staleness(struct CfHandle* h);
 char* cf_lineage_expiry_check(const struct CfHandle* h);
 
+// Code intel v2 FFI
+int cf_upsert_code_file_v2(struct CfHandle* h,
+    const char* path, const char* project, int64_t mtime,
+    const char* content_hash, const char* git_commit,
+    const char* git_author, int64_t git_timestamp_ms,
+    int* out_changed, uint64_t* out_id);
+int cf_invalidate_triplets_by_source_file(struct CfHandle* h, const char* source_file);
+int cf_add_triplet_with_source(struct CfHandle* h,
+    const char* subject, const char* predicate, const char* object,
+    float weight, uint64_t source_memory_id, const char* source_file,
+    uint64_t* out_triplet_id);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
@@ -667,6 +679,41 @@ public:
         uint64_t id = 0;
         int r = cf_upsert_code_file(handle_, path.c_str(), project.c_str(), mtime, &id);
         if (r != 0) throw std::runtime_error(last_error());
+        return id;
+    }
+
+    /// Upsert a code file with content hash and git provenance.
+    /// Returns {file_id, was_updated} where was_updated indicates content changed.
+    std::pair<uint64_t, bool> upsert_code_file_v2(
+        const std::string& path, const std::string& project, int64_t mtime,
+        const std::string& content_hash, const std::string& git_commit,
+        const std::string& git_author, int64_t git_timestamp_ms)
+    {
+        uint64_t id = 0;
+        int changed = 0;
+        const char* hash_ptr = content_hash.empty() ? nullptr : content_hash.c_str();
+        const char* commit_ptr = git_commit.empty() ? nullptr : git_commit.c_str();
+        const char* author_ptr = git_author.empty() ? nullptr : git_author.c_str();
+        int r = cf_upsert_code_file_v2(handle_, path.c_str(), project.c_str(), mtime,
+            hash_ptr, commit_ptr, author_ptr, git_timestamp_ms,
+            &changed, &id);
+        if (r != 0) throw std::runtime_error(last_error());
+        return {id, changed != 0};
+    }
+
+    /// Invalidate all active triplets associated with a source file.
+    void invalidate_triplets_by_source_file(const std::string& path) {
+        cf_invalidate_triplets_by_source_file(handle_, path.c_str());
+    }
+
+    /// Add a triplet with optional source file tracking.
+    uint64_t add_triplet_with_source(const std::string& subject, const std::string& predicate,
+                                     const std::string& object, float weight,
+                                     uint64_t source_memory_id, const std::string& source_file) {
+        uint64_t id = 0;
+        const char* sf_ptr = source_file.empty() ? nullptr : source_file.c_str();
+        cf_add_triplet_with_source(handle_, subject.c_str(), predicate.c_str(), object.c_str(),
+                                   weight, source_memory_id, sf_ptr, &id);
         return id;
     }
 
