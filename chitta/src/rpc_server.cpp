@@ -718,6 +718,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"max_pairs", "Max pairs to export", false, "10000"},
       {"min_confidence", "Min confidence threshold", false, "0.5"},
       {"include_negatives", "Generate hard negatives", false, "true"}}},
+
+    {"lookup", "Unified memory lookup — intent-routing search across keyword/semantic/triplet/temporal/code backends",
+     {{"query", "Search query", true, nullptr},
+      {"limit", "Max results", false, "10"},
+      {"realm", "Filter by realm", false, nullptr},
+      {"mode", "Search mode: auto|fast|deep", false, "auto"},
+      {"explain", "Include intent classification and score breakdown", false, "false"}}},
 };
 
 // Build set of known tools from specs
@@ -803,7 +810,7 @@ void print_usage(const char* prog) {
               << "  Triplets:    connect, query, query_graph\n"
               << "  Hooks:       observe, full_resonate\n"
               << "  Explore:     explore_recall, explore_peek, explore_expand, explore_neighbors\n"
-              << "  Context:     soul_context, health_check, version_check\n"
+              << "  Context:     soul_context, health_check, version_check, lookup\n"
               << "  Maintenance: cycle, cleanup, hygiene_stats, hygiene_run\n"
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, search_symbols, code_context\n"
