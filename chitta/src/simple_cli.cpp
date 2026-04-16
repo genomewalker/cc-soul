@@ -754,6 +754,7 @@ void print_usage(const char* prog) {
               << "\nSubconscious (background processing):\n"
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
               << "  --no-autonomous          Disable autonomous agents (dream, think)\n"
+              << "  --embed-interval SECS    Enable background embedding of wisdom memories (default: off)\n"
               << "\nHTTP Visualization Server:\n"
               << "  --http-port PORT         Enable HTTP viz server on PORT (0=disabled, default)\n"
               << "  --http-static-dir PATH   Static file directory (default: auto-detect docs/mind-viz/)\n"
@@ -837,6 +838,9 @@ int main(int argc, char* argv[]) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
             subconscious_config.enable_hygiene = false;
+        } else if (strcmp(argv[i], "--embed-interval") == 0 && i + 1 < argc) {
+            subconscious_config.enable_background_embedding = true;
+            subconscious_config.embedding_interval = std::chrono::seconds(safe_stoi(argv[++i], "--embed-interval"));
         } else if (strcmp(argv[i], "--no-autonomous") == 0) {
             no_autonomous = true;
         } else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) {
