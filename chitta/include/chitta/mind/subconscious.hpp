@@ -81,6 +81,9 @@ struct SubconsciousConfig {
     size_t cls_replay_min_cluster{3};             // Min cluster size to distill
     std::chrono::minutes learning_cycle_interval{30}; // Autonomous learning cycle
     bool enable_learning_cycle{true};
+    bool enable_correction_promotion{true};       // Promote repeated cross-project corrections to brahman
+    int correction_promotion_interval_hours{12};
+    int correction_promotion_min_realms{2};       // Min distinct non-brahman realms to trigger promotion
 };
 
 // Queued embedding result (computed in background, flushed by main thread)
@@ -128,6 +131,9 @@ struct SubconsciousStats {
     // Code intel staleness
     std::atomic<size_t> code_intel_staleness_runs{0};
     std::atomic<size_t> code_intel_memories_restored{0};
+    // Correction promotion
+    std::atomic<size_t> correction_promotion_runs{0};
+    std::atomic<size_t> correction_promotions{0};
     // Layer 9: Wisdom Homeostasis
     std::atomic<size_t> lineage_staleness_ticks{0};
     std::atomic<size_t> lineages_inflamed{0};
@@ -300,6 +306,11 @@ private:
     std::chrono::steady_clock::time_point last_code_intel_staleness_{std::chrono::steady_clock::now()};
     void run_code_intel_staleness();
     bool time_for_code_intel_staleness() const;
+
+    // Correction promotion: elevate repeated cross-project corrections to brahman
+    std::chrono::steady_clock::time_point last_correction_promotion_{std::chrono::steady_clock::now()};
+    void run_correction_promotion();
+    bool time_for_correction_promotion() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;
