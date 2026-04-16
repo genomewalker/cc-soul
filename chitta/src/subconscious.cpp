@@ -160,6 +160,11 @@ void Subconscious::process_loop() {
             run_code_intel_staleness();
         }
 
+        // Correction promotion: elevate cross-project corrections to brahman
+        if (config_.enable_correction_promotion && field_store_ && time_for_correction_promotion()) {
+            run_correction_promotion();
+        }
+
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
             last_dream_triggered_at_ = now_ms();
@@ -863,6 +868,68 @@ void Subconscious::run_code_intel_staleness() {
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Code intel staleness failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_correction_promotion() const {
+    auto elapsed = std::chrono::steady_clock::now() - last_correction_promotion_;
+    auto interval = std::chrono::hours(config_.correction_promotion_interval_hours);
+    return elapsed >= interval;
+}
+
+void Subconscious::run_correction_promotion() {
+    last_correction_promotion_ = std::chrono::steady_clock::now();
+    stats_.correction_promotion_runs++;
+
+    try {
+        auto json_str = field_store_->recall_filtered("wisdom", "", 0.0f, 0.0f, 5000);
+        auto mems = nlohmann::json::parse(json_str, nullptr, false);
+        if (!mems.is_array()) return;
+
+        // Group correction memories by content key (first 80 chars after "[correction]")
+        // value: map from realm -> memory_id (first seen wins per realm)
+        std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> by_key;
+
+        for (const auto& m : mems) {
+            if (!m.contains("content") || !m.contains("realm") || !m.contains("id")) continue;
+            std::string content = m.value("content", std::string{});
+            std::string realm   = m.value("realm", std::string{});
+            uint64_t    id      = m.value("id", uint64_t{0});
+
+            auto pos = content.find("[correction]");
+            if (pos == std::string::npos) continue;
+
+            std::string key = content.substr(pos, std::min(content.size() - pos, size_t(80)));
+            auto& realm_map = by_key[key];
+            if (realm_map.find(realm) == realm_map.end()) {
+                realm_map[realm] = id;
+            }
+        }
+
+        size_t promoted = 0;
+        for (auto& [key, realm_map] : by_key) {
+            // Already in brahman — nothing to do
+            if (realm_map.count("brahman")) continue;
+
+            // Only promote if correction appears in enough distinct project realms
+            if ((int)realm_map.size() < config_.correction_promotion_min_realms) continue;
+
+            // Promote the first entry: move it to brahman
+            auto it = realm_map.begin();
+            if (field_store_->set_realm(it->second, "brahman")) {
+                promoted++;
+                std::cerr << "[subconscious] Correction promoted to brahman (id="
+                          << it->second << ", realms=" << realm_map.size() << ")\n";
+            }
+        }
+
+        stats_.correction_promotions += promoted;
+        if (promoted > 0) {
+            std::cerr << "[subconscious] Correction promotion: promoted "
+                      << promoted << " corrections to brahman\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Correction promotion failed: " << e.what() << "\n";
     }
 }
 
