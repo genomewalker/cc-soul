@@ -18,6 +18,7 @@
 //   --toon              CLI mode: output TOON format (compact, shell-friendly)
 
 #include <chitta/socket_client.hpp>
+#include <chitta/rpc/sandbox.hpp>  // append_line_atomic
 #include <unistd.h>  // getppid
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
@@ -30,7 +31,9 @@
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <nlohmann/json.hpp>
 
 // TOON (Token-Oriented Object Notation) encoder
@@ -1180,8 +1183,11 @@ int main(int argc, char* argv[]) {
     OutputFormat output_format = OutputFormat::Text;
     std::string tool;
     int tool_arg_index = 0;
+    std::vector<std::string> tool_positional;  // positional args after the tool name, flags stripped
 
-    // Pre-scan for --socket-path, --json, --toon flags, find tool name
+    // Pre-scan for --socket-path, --json, --toon flags, find tool name, and
+    // collect any positional args that follow the tool (flags interleaved
+    // after the tool name are honored as global flags, not tool args).
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
             std::cout << "chitta " << CHITTA_VERSION << "\n";
@@ -1197,6 +1203,8 @@ int main(int argc, char* argv[]) {
         } else if (tool.empty() && argv[i][0] != '-') {
             tool = argv[i];
             tool_arg_index = i;
+        } else if (!tool.empty() && argv[i][0] != '-') {
+            tool_positional.emplace_back(argv[i]);
         }
     }
 
@@ -1234,6 +1242,59 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         std::cout << "Daemon: running (version unknown)\n";
+        return 0;
+    }
+
+    // queue_write: enqueue a JSONL request line to /tmp/chitta-queue.jsonl.
+    // Client-side only (no daemon required). Hooks use this instead of
+    // `jq -c ... >> file` so args are parsed/compacted natively and the
+    // append is a single atomic write() syscall (see sandbox::append_line_atomic).
+    //
+    // Usage: chitta queue_write <tool> <args-json>
+    //   args-json may be multi-line / pretty-printed — it is normalized.
+    //   Pass "-" to read args-json from stdin.
+    if (tool == "queue_write") {
+        if (tool_positional.size() < 2) {
+            std::cerr << "usage: chitta queue_write <tool> <args-json|->\n";
+            return 2;
+        }
+        std::string qtool = tool_positional[0];
+        std::string raw_args = tool_positional[1];
+        if (raw_args == "-") {
+            std::string chunk((std::istreambuf_iterator<char>(std::cin)),
+                              std::istreambuf_iterator<char>());
+            raw_args = std::move(chunk);
+        }
+
+        nlohmann::json args_json = nlohmann::json::parse(raw_args, nullptr, false);
+        if (args_json.is_discarded()) {
+            std::cerr << "queue_write: invalid JSON for args\n";
+            return 2;
+        }
+
+        char ack_buf[48];
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::snprintf(ack_buf, sizeof(ack_buf), "ack-%lld-%d",
+                      static_cast<long long>(now_ms),
+                      static_cast<int>(::getpid()));
+
+        nlohmann::json entry = {
+            {"ack_id", ack_buf},
+            {"tool",   qtool},
+            {"args",   args_json},
+            {"ts",     now_ms / 1000}
+        };
+
+        std::string queue_path = "/tmp/chitta-queue.jsonl";
+        if (const char* env = std::getenv("CHITTA_QUEUE_PATH")) queue_path = env;
+
+        if (!chitta::sandbox::append_line_atomic(
+                queue_path,
+                entry.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace))) {
+            std::cerr << "queue_write: append failed: " << queue_path << "\n";
+            return 1;
+        }
         return 0;
     }
 

@@ -3,12 +3,19 @@
 ## Build & Deploy
 ```bash
 cd chitta && cmake --build build --parallel
-systemctl --user stop chittad
-cp ../bin/chittad ../bin/chitta ~/.claude/bin/
-systemctl --user start chittad
+# Atomically replace the on-disk binary FIRST — the running daemon keeps its
+# old inode mapped and is unaffected until we restart. This keeps the daemon
+# up until the new binary is fully written.
+install -m 0755 ../bin/chittad ~/.claude/bin/chittad
+install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
+systemctl --user restart chittad
 pkill -f "chitta mcp" 2>/dev/null; sleep 1
 ```
-`~/.claude/bin/chittad` is NOT a symlink — copy explicitly after each build.
+`~/.claude/bin/chittad` is NOT a symlink — `install` overwrites via a temp
+file + atomic rename, so there is no partial-binary window. Never `cp`
+directly over a running binary and then start — some filesystems (NFS, some
+fuse mounts) will return ETXTBSY or leave the running process on a corrupt
+image.
 
 ## Release
 ```bash

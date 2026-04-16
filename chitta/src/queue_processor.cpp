@@ -1,4 +1,5 @@
 #include <chitta/queue_processor.hpp>
+#include <chitta/rpc/sandbox.hpp>
 #include <chitta/vak.hpp>
 #include <iostream>
 
@@ -77,10 +78,21 @@ void QueueProcessor::write_failed_item(const std::string& line, const std::excep
         } else {
             entry["raw"] = line.substr(0, 300);
         }
-        std::ofstream dlf(failed_queue_path_, std::ios::app);
-        dlf << entry.dump(-1, ' ', false, json::error_handler_t::replace) << "\n";
+        if (!sandbox::append_line_atomic(
+                failed_queue_path_,
+                entry.dump(-1, ' ', false, json::error_handler_t::replace))) {
+            std::cerr << "[queue] FAILED to write dead-letter entry to "
+                      << failed_queue_path_
+                      << " (original error: " << e.what() << ")\n";
+        }
         queue_fail_count_++;
-    } catch (...) {}
+    } catch (const std::exception& inner) {
+        std::cerr << "[queue] write_failed_item threw: " << inner.what()
+                  << " (original error: " << e.what() << ")\n";
+    } catch (...) {
+        std::cerr << "[queue] write_failed_item threw unknown exception"
+                  << " (original error: " << e.what() << ")\n";
+    }
 }
 
 void QueueProcessor::run() {
