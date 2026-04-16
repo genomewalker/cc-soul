@@ -165,6 +165,11 @@ void Subconscious::process_loop() {
             run_correction_promotion();
         }
 
+        // Background embedding: embed pending wisdom memories in small batches (idle only)
+        if (config_.enable_background_embedding && embedder_ && field_store_ && is_idle() && time_for_background_embedding()) {
+            run_background_embedding();
+        }
+
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
             last_dream_triggered_at_ = now_ms();
@@ -930,6 +935,50 @@ void Subconscious::run_correction_promotion() {
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Correction promotion failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_background_embedding() const {
+    auto last = stats_.last_embedding_at.load();
+    if (last == 0) return true;
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.embedding_interval).count();
+    return (now_ms() - last) >= interval_ms;
+}
+
+void Subconscious::run_background_embedding() {
+    stats_.last_embedding_at = now_ms();
+
+    auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
+    if (pending.empty()) return;
+
+    size_t embedded = 0;
+    for (uint64_t id : pending) {
+        if (!running_.load()) break;
+        auto meta_json = field_store_->get_memory_metadata(id);
+        if (meta_json.empty()) continue;
+
+        try {
+            auto meta = nlohmann::json::parse(meta_json, nullptr, false);
+            if (meta.is_discarded()) continue;
+            auto text = meta.value("content", std::string{});
+            if (text.empty()) continue;
+
+            auto emb = embed(text);
+            if (emb.empty()) {
+                stats_.embedding_skips++;
+                continue;
+            }
+
+            field_store_->backfill_embedding(id, emb);
+            embedded++;
+        } catch (...) {}
+    }
+
+    if (embedded > 0) {
+        stats_.symbols_embedded += embedded;
+        std::cerr << "[subconscious] Background embedded " << embedded
+                  << " memories (" << pending.size() << " were pending)\n";
     }
 }
 

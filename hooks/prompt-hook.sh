@@ -123,6 +123,11 @@ if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
 fi
 
 # ===========================================
+# REALM DETECTION: Filter recall to current project realm
+# ===========================================
+REALM=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null | grep -oP 'realm": "\K[^"]+' || echo "brahman")
+
+# ===========================================
 # MEMORY RETRIEVAL: Choose strategy based on mode
 # ===========================================
 # RLM mode: Use soul_repl for dynamic exploration (more powerful but slower)
@@ -142,15 +147,15 @@ else
     # Run structured recall + hybrid recall in parallel, then merge.
     # Hybrid (BM25 + semantic + graph) catches literal tokens (filenames, IDs, paths)
     # that pure semantic recall misses when they have low cosine similarity.
-    _sem_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" structured_recall --query "$QUERY" --limit 8 2>/dev/null || \
-               timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true) &
+    _sem_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" structured_recall --query "$QUERY" --limit 8 --realm "$REALM" --include-global true 2>/dev/null || \
+               timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" --include-global true 2>/dev/null || true) &
     _sem_pid=$!
-    _hyb_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 2>/dev/null || true) &
+    _hyb_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" --include-global true 2>/dev/null || true) &
     _hyb_pid=$!
     # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
     # regardless of semantic similarity. Use --toon for consistent parseable output.
     _kw_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
-              --limit 3 --toon 2>/dev/null || true) &
+              --limit 3 --toon --realm "$REALM" --include-global true 2>/dev/null || true) &
     _kw_pid=$!
     wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" 2>/dev/null || true
 

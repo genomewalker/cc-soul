@@ -312,6 +312,10 @@ private:
     void run_correction_promotion();
     bool time_for_correction_promotion() const;
 
+    // Background embedding: embed pending memories using VakYantra
+    void run_background_embedding();
+    bool time_for_background_embedding() const;
+
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;
     std::atomic<int64_t> last_dream_triggered_at_{0};
