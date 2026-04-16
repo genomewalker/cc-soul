@@ -2,7 +2,23 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.20.6] - 2026-04-16
+
+### Fixed
+- **Queue JSONL corruption** — hooks now enqueue via native `chitta queue_write` (single-syscall atomic append, JSON compaction); removes the ~40K/day `[queue] FAILED: json parse error` burst caused by multi-line `jq` output.
+- **Chain continuity warning spam** — `OpLog::replay()` now resets `chain_head = ZERO_HASH` at instance-id prefix boundaries so independent per-instance segment chains no longer trigger header-level warnings (previously ~120K/day on startup).
+- **Dead-letter interleaving** — `sandbox::append_line_atomic()` uses a single POSIX `write()` with `O_APPEND | O_CLOEXEC` and an EINTR/short-write loop; replaces two-step `ofstream::<<` calls that could interleave under concurrency.
+- **`queue_write` CLI arg parsing** — now uses a positional-args vector so flags interleaved after the subcommand (e.g. `chitta queue_write --json ...`) no longer shift the tool/args slots.
+- **`lib.sh` fallback** — when the `chitta` binary is absent, the bash fallback now compacts the JSON via `python3` and fails loudly instead of silently injecting a malformed line.
+- **Dead-letter failure visibility** — `QueueProcessor::write_failed_item()` now logs append failures and inner exceptions to stderr instead of swallowing them.
+- **Safer deploy** — `CLAUDE.md` documents atomic `install` (temp+rename) before `systemctl restart`, preserving daemon uptime across the binary swap.
+
+### Added
+- Regression test `replay_across_independent_instance_chains` in `chitta-field/src/log.rs` covering the instance-boundary chain-reset invariant.
+
 ## [5.3.0] - 2026-04-01
+
+> **Note (2026-04-16):** The FEP / Hopfield / adaptive-vigilance items below are **partially shipped**. The chitta-field sibling checkout now exports the six `cf_*` symbols with the ABI declared in `chitta/include/chitta/field_store.hpp` (`cf_reconstruction_error`, `cf_memory_surprise` are real; `cf_search_attractor`, `cf_hopfield_co_retrieval`, `cf_hopfield_stats`, `cf_adapt_vigilance` are stubs returning `CF_NOT_IMPLEMENTED` / empty `"{}"`). The pinned submodule at `cc-soul/chitta-field@762463a` does NOT yet carry these exports; `hopfield.rs`, `attractor_settle`, asymmetric prototype transitions, surprise-modulated plasticity, and the self-orthogonalising sparse encoder are still unimplemented on both sides. Bump the submodule once the full set lands.
 
 ### Added
 - **FEP attractor network** — self-orthogonalizing memory representations derived from the Free Energy Principle (Spisak & Friston, Neurocomputing 2026). Three-phase integration across chitta-field and the C++ daemon.

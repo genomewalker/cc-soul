@@ -121,13 +121,38 @@ queue_write() {
     local args="$2"
     local queue_file
     queue_file=$(get_queue_file)
+
+    # Native enqueue: parses/compacts `args` JSON and writes the JSONL line
+    # with a single atomic write() syscall. Avoids bash quoting bugs and the
+    # "multi-line jq output truncates the JSONL entry" class of parse errors.
+    # CHITTA_QUEUE_PATH lets the binary honor non-default queue locations
+    # (test fixtures, isolated checkouts).
+    mkdir -p "$(dirname "$queue_file")"
+    local chitta_bin="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+    if [[ -x "$chitta_bin" ]]; then
+        CHITTA_QUEUE_PATH="$queue_file" "$chitta_bin" queue_write "$tool" "$args" >/dev/null 2>&1 && return
+    fi
+
+    # Fallback: bootstrap path when the native binary isn't installed yet.
+    # Compact the entry through python3 so embedded newlines in $args can't
+    # corrupt the JSONL line. If compaction fails, drop the write loudly
+    # rather than injecting a malformed line that would poison the queue.
     local ack_id
     ack_id=$(generate_ack_id)
-
-    # Ensure directory exists
-    mkdir -p "$(dirname "$queue_file")"
-
-    echo "{\"ack_id\":\"$ack_id\",\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$queue_file"
+    local line
+    if line=$(ACK_ID="$ack_id" TOOL="$tool" ARGS="$args" TS="$(date +%s)" \
+        python3 -c 'import json,os,sys
+try:
+    a=json.loads(os.environ["ARGS"])
+except Exception as e:
+    sys.stderr.write(f"queue_write fallback: invalid args json: {e}\n"); sys.exit(1)
+sys.stdout.write(json.dumps({"ack_id":os.environ["ACK_ID"],"tool":os.environ["TOOL"],"args":a,"ts":int(os.environ["TS"])},separators=(",",":"))+"\n")
+' 2>/dev/null); then
+        printf '%s' "$line" >> "$queue_file"
+    else
+        echo "[queue_write] dropped: no chitta binary and args not valid JSON" >&2
+        return 1
+    fi
 }
 
 # emit_event — structured soul event with provenance.
