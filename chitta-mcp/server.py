@@ -928,11 +928,10 @@ def handle_learn_correction(arguments: dict) -> str:
         content += "\n[REPEAT-MISTAKE]"
         tags.append("repeat-mistake")
 
-    # Store as high-confidence memory with 'correction' tag
     remember_result = daemon_call("remember", {
         "content": content,
         "tags": tags,
-        "type": "wisdom",
+        "type": "correction",
         "visibility": 2  # Global visibility - corrections apply everywhere
     })
 
@@ -970,7 +969,7 @@ def handle_learn_preference(arguments: dict) -> str:
     result = daemon_call("remember", {
         "content": content,
         "tags": ["preference", category],
-        "type": "belief",  # Preferences are beliefs about how to interact
+        "type": "preference",
         "visibility": 2    # Global - applies everywhere
     })
 
