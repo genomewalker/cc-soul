@@ -12,6 +12,10 @@ LAST_CMD_FILE="$MIND_PATH/.last_bash_cmd"
 
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
+# Source shared library for fire-and-forget queue_write — never block on daemon RPC
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh" 2>/dev/null || true
+
 # Read stdin (PostToolUse gets tool result)
 STDIN_DATA=$(cat)
 
@@ -34,14 +38,14 @@ if [[ "$exit_code" == "0" && -n "$command" ]]; then
     if [[ -f "$LAST_CMD_FILE" ]]; then
         prev_cmd=$(cat "$LAST_CMD_FILE" 2>/dev/null)
 
-        # Record habit if both commands present and different
+        # Record habit if both commands present and different.
+        # Uses queue_write (fire-and-forget file append) instead of RPC —
+        # bash post-hooks fire on every command; a blocking RPC here can
+        # stack up behind WAL/consolidation work and stall MCP responsiveness.
         if [[ -n "$prev_cmd" && "$prev_cmd" != "$curr_cmd" ]]; then
-            # Queue habit_observe async to not block
-            (
-                "$CHITTA_BIN" habit_observe \
-                    --trigger "bash:$prev_cmd" \
-                    --response "bash:$curr_cmd" 2>/dev/null || true
-            ) &
+            trigger_json=$(printf 'bash:%s' "$prev_cmd" | jq -Rs .)
+            response_json=$(printf 'bash:%s' "$curr_cmd" | jq -Rs .)
+            queue_write "habit_observe" "{\"trigger\":$trigger_json,\"response\":$response_json}" 2>/dev/null || true
         fi
     fi
 
