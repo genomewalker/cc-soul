@@ -41,6 +41,14 @@ inline std::string get_socket_dir() {
         mkdir(dir.c_str(), 0700);
         return dir;
     }
+    // Fallback: /run/user/{uid} (present on Linux even without XDG_RUNTIME_DIR set)
+    uid_t uid = getuid();
+    std::string run_user = "/run/user/" + std::to_string(uid);
+    if (access(run_user.c_str(), W_OK) == 0) {
+        std::string dir = run_user + "/chitta";
+        mkdir(dir.c_str(), 0700);
+        return dir;
+    }
     // Fall back to ~/.cache/chitta (persistent, user-owned)
     const char* home = getenv("HOME");
     if (home) {
