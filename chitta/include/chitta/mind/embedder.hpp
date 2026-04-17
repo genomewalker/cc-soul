@@ -278,7 +278,7 @@ public:
     }
 
     std::vector<Artha> transform_batch(const std::vector<std::string>& texts) {
-        std::shared_lock lock(mutex_);
+        std::unique_lock lock(mutex_);  // ONNX Session::Run() is not thread-safe
         if (!yantra_ || !yantra_->ready()) {
             return std::vector<Artha>(texts.size());
         }
