@@ -20,6 +20,8 @@ djb2_hash() {
 get_socket_dir() {
     if [[ -n "${XDG_RUNTIME_DIR:-}" && -w "$XDG_RUNTIME_DIR" ]]; then
         echo "${XDG_RUNTIME_DIR}/chitta"
+    elif [[ -w "/run/user/$(id -u)" ]]; then
+        echo "/run/user/$(id -u)/chitta"
     elif [[ -n "${HOME:-}" ]]; then
         echo "${HOME}/.cache/chitta"
     else
