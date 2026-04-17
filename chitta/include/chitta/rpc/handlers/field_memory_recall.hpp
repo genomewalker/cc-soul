@@ -11,6 +11,14 @@
         std::string content = params.value("content", "");
         if (content.empty()) return ToolResult::error("content is required");
 
+        if (sandbox::is_sandboxed()) {
+            std::string dead_id = sandbox::dead_letter_write(
+                failed_queue_path_, queue_fail_count_, "remember", params);
+            return ToolResult::ok(
+                "Sandboxed write diverted to dead-letter queue",
+                {{"sandboxed", true}, {"dead_lettered_id", dead_id}, {"tool", "remember"}});
+        }
+
         std::string kind  = params.value("type", "episode");
         std::string realm = params.value("realm", "brahman");
         float confidence  = params.value("confidence", 0.8f);
