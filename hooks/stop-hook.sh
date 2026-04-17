@@ -122,6 +122,10 @@ echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=t
 # Store assistant turn
 queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
 
+# Structured LLM extraction is designed in docs/STRUCTURED_EXTRACTOR_DESIGN.md.
+# The `distill_turn` op has no daemon-side handler yet, so enqueue is held
+# until the C++ side lands. Re-enable once queue_processor.cpp dispatches it.
+
 # Skip daemon-dependent operations if daemon is not running.
 # queue_write / store_turn above are file-based and always run.
 daemon_available || exit 0
@@ -168,6 +172,9 @@ DEDUP_FILE="$MIND_PATH/.stop_dedup_${SESSION_ID}"
 touch "$DEDUP_FILE"
 
 # Extract typed learnings → convert to SSL v0.3 → queue with provenance + affect/flags/refs
+# TODO(v6): remove this regex block once the `distill_turn` op is wired in
+# queue_processor.cpp. See docs/STRUCTURED_EXTRACTOR_DESIGN.md §4 (migration)
+# and §6 (MVP scope).
 LEARNED=0
 while IFS= read -r line; do
     if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN|CORRECTION|EVENT)\] ]]; then

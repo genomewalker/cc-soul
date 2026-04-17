@@ -456,6 +456,40 @@ TOOLS = [
         }
     ),
     Tool(
+        name="distill_turn",
+        description="Run structured learning extraction on a single assistant turn (invokes chitta-mcp/extractors/stop_extractor.py). Enqueued by stop-hook; emits observe events with source=distillation.",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "description": "Session UUID",
+                                "type": "string"
+                        },
+                        "turn_index": {
+                                "description": "Turn index of the assistant message to extract from",
+                                "anyOf": [
+                                        {"type": "integer"},
+                                        {"type": "string"}
+                                ]
+                        },
+                        "transcript_path": {
+                                "description": "Absolute path to the JSONL transcript",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Realm for emitted learnings (project name or brahman)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "session_id",
+                        "turn_index",
+                        "transcript_path",
+                        "realm"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="observe",
         description="Store an observation/learning (used by hooks for [LEARN] extraction)",
         inputSchema={
