@@ -128,3 +128,4 @@ nohup.out
 scripts/ssl_model/*.gguf
 .claude/worktrees/
 scripts/ssl_model/llama.cpp
+.codex
