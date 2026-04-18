@@ -575,6 +575,8 @@ install_hooks() {
 
     for script in "${hooks[@]}"; do
         if [[ -f "$hooks_src/$script" ]]; then
+            # Ensure plugin cache copy is executable (Claude Code runs hooks from here)
+            chmod +x "$hooks_src/$script"
             if [[ ! -f "$hooks_dst/$script" ]] || \
                ! cmp -s "$hooks_src/$script" "$hooks_dst/$script"; then
                 cp "$hooks_src/$script" "$hooks_dst/"
