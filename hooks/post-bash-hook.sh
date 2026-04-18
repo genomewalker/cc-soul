@@ -30,9 +30,50 @@ normalize_cmd() {
     echo "$1" | awk '{print $1}' | sed 's|.*/||'
 }
 
-# Track command sequence for habit learning on success
+# Detect long-running job launches and store operational state
+is_long_running_launch() {
+    local cmd="$1"
+    echo "$cmd" | grep -qE \
+        '(^|\s)(nohup|sbatch|srun|qsub|bsub)\s' \
+        || echo "$cmd" | grep -qE '(parallel\s.*--sshlogin|parallel\s.*-S\s|gnu parallel)' \
+        || echo "$cmd" | grep -qE '(screen\s+-dm|tmux\s+new(-session)?\s+-d)' \
+        || { echo "$cmd" | grep -qE '\s*&\s*$' && echo "$cmd" | grep -qvE '^\s*(sleep|echo|true|false|wait)\s'; }
+}
+
+extract_job_paths() {
+    local cmd="$1"
+    local paths=""
+    # --out_dir / --output / -o / --outdir
+    local outdir
+    outdir=$(echo "$cmd" | grep -oE '(--(out_dir|output|outdir|out)\s+\S+|-o\s+\S+)' | grep -oE '\S+$' | head -1)
+    [[ -n "$outdir" ]] && paths+="out:$outdir "
+    # --log / --joblog / > file redirection
+    local logfile
+    logfile=$(echo "$cmd" | grep -oE '(--joblog\s+\S+|--log\s+\S+)' | grep -oE '\S+$' | head -1)
+    [[ -z "$logfile" ]] && logfile=$(echo "$cmd" | grep -oE '>\s*\S+\.log' | grep -oE '\S+\.log' | head -1)
+    [[ -n "$logfile" ]] && paths+="log:$logfile "
+    echo "$paths"
+}
+
 if [[ "$exit_code" == "0" && -n "$command" ]]; then
     curr_cmd=$(normalize_cmd "$command")
+
+    # Long-running launch: store raw command + extracted paths as a signal
+    # so other sessions can find it via recall. Claude adds semantic layer separately.
+    if is_long_running_launch "$command"; then
+        job_paths=$(extract_job_paths "$command")
+        short_cmd=$(echo "$command" | head -c 300)
+        # Determine realm from CWD
+        cwd=$(pwd 2>/dev/null || echo "")
+        realm=""
+        if [[ "$cwd" == *"/repos/"* ]]; then
+            realm=$(echo "$cwd" | grep -oE '/repos/[^/]+' | sed 's|/repos/||')
+        fi
+        content="[job:auto] cmd: $short_cmd | $job_paths| cwd: $cwd"
+        content_json=$(printf '%s' "$content" | jq -Rs .)
+        realm_json=$(printf '%s' "$realm" | jq -Rs .)
+        queue_write "remember" "{\"content\":$content_json,\"kind\":\"signal\",\"realm\":$realm_json,\"tags\":[\"long-running-job\"],\"visibility\":1}" 2>/dev/null || true
+    fi
 
     # Read previous command if exists
     if [[ -f "$LAST_CMD_FILE" ]]; then

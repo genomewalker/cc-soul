@@ -1,4 +1,5 @@
 #include <chitta/queue_processor.hpp>
+#include <chitta/rpc/field_handler.hpp>
 #include <chitta/rpc/sandbox.hpp>
 #include <chitta/vak.hpp>
 #include <iostream>
@@ -127,6 +128,7 @@ void QueueProcessor::run() {
             if (!daemon_running) break;
 
             try {
+                auto _lk = handler_.acquire_lock();
                 auto j = json::parse(line);
                 std::string tool = j.value("tool", "");
                 auto args = j.value("args", json::object());
