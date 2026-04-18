@@ -91,10 +91,14 @@ public:
     bool get_distill_enabled() const { return distill_enabled_.load(); }
     void set_distill_enabled(bool e) { distill_enabled_.store(e); }
 
+    // Serialize direct field_store access outside handle() (maintenance thread, queue processor)
+    std::unique_lock<std::mutex> acquire_lock() { return std::unique_lock<std::mutex>(rpc_mutex_); }
+
     void run_belief_maintenance(float stale_strength_threshold = 0.1f,
                                 int stale_days = 30,
                                 float dup_threshold = 0.97f,
                                 size_t max_dups = 5) {
+        std::unique_lock<std::mutex> _lk(rpc_mutex_);
         size_t demoted = 0, contradictions_archived = 0, dups_merged = 0;
 
         // 1. Stale belief demotion: archive Active memories with decayed strength below threshold
@@ -183,6 +187,7 @@ public:
     }
 
     json handle(const json& request) {
+        std::unique_lock<std::mutex> _lk(rpc_mutex_);
         std::string method = request.value("method", "");
         json params = request.value("params", json::object());
         auto id = request.value("id", json());
@@ -213,6 +218,7 @@ private:
     std::string failed_queue_path_;
     RecallCallback recall_callback_;
 
+    mutable std::mutex rpc_mutex_;    // Serializes all field_store FFI access (not thread-safe)
     mutable std::mutex distill_mutex_;
     std::string distill_model_ = "github-copilot/gpt-5-mini";
     std::atomic<bool> distill_enabled_{true};

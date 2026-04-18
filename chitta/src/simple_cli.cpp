@@ -264,6 +264,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             if (yantra && (now_time - last_pending_embed >= pending_embed_interval)) {
                 last_pending_embed = now_time;
                 try {
+                    auto _lk = handler.acquire_lock();
                     auto pending = field_store.pending_embeddings(50);
                     if (!pending.empty()) {
                         std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
@@ -303,6 +304,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             if (seg_event || (now_time - last_foreign_sync >= foreign_sync_interval)) {
                 last_foreign_sync = now_time;
                 try {
+                    auto _lk = handler.acquire_lock();
                     int applied = field_store.sync_foreign();
                     if (verbose_mode && applied > 0) {
                         std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
@@ -321,7 +323,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     auto current_mtime = std::filesystem::last_write_time("/proc/self/exe");
                     if (current_mtime != startup_binary_mtime) {
                         std::cerr << "[maint] Binary updated, restarting daemon...\n";
-                        field_store.flush();
+                        { auto _lk = handler.acquire_lock(); field_store.flush(); }
                         daemon_running = false;
                         ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
                         char self_path[PATH_MAX];
@@ -341,6 +343,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 cycle_count++;
 
                 try {
+                    auto _lk = handler.acquire_lock();
                     field_store.flush();
                     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -411,7 +414,12 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             ts.transcript_path = path.string();
                             ts.realm = "brahman";
                             // Look up realm from transcript registry
-                            auto reg = field_store.get_latest_event("transcript", "register", ts.session_id);
+                            std::optional<std::string> reg, progress;
+                            {
+                                auto _lk = handler.acquire_lock();
+                                reg = field_store.get_latest_event("transcript", "register", ts.session_id);
+                                progress = field_store.get_latest_event("transcript", "progress", ts.session_id);
+                            }
                             if (reg) {
                                 try {
                                     auto r = json::parse(*reg);
@@ -420,7 +428,6 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             }
                             ts.last_processed_line = 0;
                             // Check FieldStore for last progress event
-                            auto progress = field_store.get_latest_event("transcript", "progress", ts.session_id);
                             if (progress) {
                                 try {
                                     auto p = json::parse(*progress);
@@ -530,7 +537,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             }
             if (req.data == "shutdown") {
                 server.respond(req.client_fd, R"({"status":"shutting_down"})");
-                field_store.flush();
+                { auto _lk = handler.acquire_lock(); field_store.flush(); }
                 daemon_running = false;
                 continue;
             }
