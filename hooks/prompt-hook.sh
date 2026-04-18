@@ -293,8 +293,8 @@ LEARNING_HINTS=""
 
 # Detect CORRECTION patterns: user is correcting Claude
 # Direct: "wrong", "mistake", "not working", "incorrect"
-# Implicit: "actually", "should be", "not what I"
-if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget)"; then
+# Implicit: "actually", "should be", "not what I", "should not", ordering fixes
+if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|stupid\b.*doing|doing.*stupid\b|first.*then\b|before.*not after\b|kill.*before\b|binary.*first\b)"; then
     # Truncate to first 200 chars for context, escape for output
     correction_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
     LEARNING_HINTS="[LEARN] ⚠️ CORRECTION detected - call learn_correction NOW
@@ -304,9 +304,9 @@ if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|
 fi
 
 # Detect PREFERENCE patterns: user expressing preferences
-# Direct preferences: "I prefer", "always", "never"
-# Meta-preferences: "more concise", "fewer examples", "go deeper", "simpler please", "don't overexplain", "be more verbose"
-if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
+# Direct: "I prefer", "always use", "never use", "don't use", "use X instead"
+# Meta: style/communication preferences
+if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose|always use\b|never use\b|don'?t use\b|don'?t call\b|use .* instead\b|just use\b|use ssh\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)"; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Preference detected → use learn_preference tool"
 fi
 
