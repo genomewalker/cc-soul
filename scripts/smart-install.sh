@@ -145,24 +145,31 @@ download_binaries() {
     local tmp_file=$(mktemp)
 
     if download "$url" "$tmp_file"; then
-        mkdir -p "$BIN_DIR"
-        # Clean old chitta files before extracting
-        rm -f "$BIN_DIR"/chitta* "$BIN_DIR"/lib*.so* 2>/dev/null
-        if tar -xzf "$tmp_file" -C "$BIN_DIR" 2>/dev/null; then
+        local tmp_extract
+        tmp_extract=$(mktemp -d)
+        if tar -xzf "$tmp_file" -C "$tmp_extract" 2>/dev/null; then
             rm -f "$tmp_file"
-            # Verify binaries can actually run (check for missing shared libs)
-            # The bundled libs should be found via RPATH=$ORIGIN
-            if "$BIN_DIR/chittad" --help >/dev/null 2>&1 && \
-               "$BIN_DIR/chitta" --help >/dev/null 2>&1; then
+            # Verify extracted binaries work before touching BIN_DIR
+            if "$tmp_extract/chittad" --help >/dev/null 2>&1 && \
+               "$tmp_extract/chitta" --help >/dev/null 2>&1; then
+                mkdir -p "$BIN_DIR"
+                # Atomic install: running daemon keeps its old inode until restarted
+                install -m 0755 "$tmp_extract/chittad" "$BIN_DIR/chittad"
+                install -m 0755 "$tmp_extract/chitta"  "$BIN_DIR/chitta"
+                for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
+                    [[ -f "$tmp_extract/$lib" ]] && install -m 0755 "$tmp_extract/$lib" "$BIN_DIR/$lib"
+                done
+                rm -rf "$tmp_extract"
                 echo "[cc-soul] Pre-built binaries installed"
                 return 0
             else
                 echo "[cc-soul] Pre-built binaries incompatible, will build from source"
-                rm -f "$BIN_DIR"/chitta_* "$BIN_DIR"/lib*.so*
+                rm -rf "$tmp_extract"
                 return 1
             fi
         fi
         rm -f "$tmp_file"
+        rm -rf "$tmp_extract"
     fi
 
     return 1
@@ -418,7 +425,7 @@ build_from_source() {
             if [[ -L "$BIN_DIR/$bin" && "$src_real" == "$dst_real" && -n "$src_real" ]]; then
                 true  # symlink already points to the built binary
             else
-                cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
+                install -m 0755 "$plugin_bin/$bin" "$BIN_DIR/$bin"
             fi
         else
             echo "[cc-soul] ERROR: $bin not built" >&2
@@ -429,7 +436,7 @@ build_from_source() {
     # Copy shared libraries if present
     for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
         if [[ -f "$plugin_bin/$lib" ]]; then
-            cp -f "$plugin_bin/$lib" "$BIN_DIR/$lib"
+            install -m 0755 "$plugin_bin/$lib" "$BIN_DIR/$lib"
         fi
     done
 
@@ -877,15 +884,14 @@ main() {
         exit 0
     fi
 
-    # Stop daemon before updating binaries (version mismatch can cause issues)
-    stop_daemon
-
     echo "[cc-soul] Installing v$current_version..."
 
     # Download models
     download_models
 
     # Install binaries (try pre-built first, then build)
+    # NOTE: binaries are installed atomically (install cmd) so the running daemon
+    # keeps its old inode in memory — stop_daemon happens AFTER install.
     local platform=$(detect_platform)
     local need_binaries=false
 
@@ -966,6 +972,9 @@ main() {
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
         exit 1
     fi
+
+    # Binaries are on disk — now safe to stop and restart daemon
+    stop_daemon
 
     # Run database migrations if needed
     if [[ -f "${HOME}/.claude/mind/chitta.duckdb" && -x "$BIN_DIR/chittad" ]]; then
