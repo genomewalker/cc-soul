@@ -390,7 +390,7 @@ void Subconscious::store_correction(const std::string& context, const std::strin
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("wisdom",
+    field_store_->remember("correction",
                            realm.empty() ? "brahman" : realm,
                            content.str(), embedding, confidence, 0.005f);
 }
@@ -402,7 +402,7 @@ void Subconscious::store_preference(const std::string& preference, const std::st
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("belief", "brahman",
+    field_store_->remember("preference", "brahman",
                            content.str(), embedding, 0.8f, 0.0f);
 }
 
