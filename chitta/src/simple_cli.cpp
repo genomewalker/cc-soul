@@ -590,24 +590,16 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 continue;
             }
 
-            // Fast-path: health_check stays on main thread (always responsive)
-            if (tool_name == "health_check") {
-                auto response = handler.handle(parsed);
-                // Add pool stats to health_check
-                if (response.contains("result") && response["result"].contains("structured")) {
-                    response["result"]["structured"]["pool_workers"] = pool.worker_count();
-                    response["result"]["structured"]["pool_active"] = pool.active_count();
-                    response["result"]["structured"]["pool_pending"] = pool.pending();
-                }
-                server.respond(req.client_fd, response.dump(-1, ' ', false, json::error_handler_t::replace));
-                continue;
-            }
-
-            // All other requests go to thread pool
+            // All other requests go to thread pool (health_check included — main thread must not block on rpc_mutex_)
             pool.submit(req.client_fd, tool_name,
-                [&handler, data = req.data]() {
+                [&handler, &pool, data = req.data, tname = tool_name]() {
                     auto request = json::parse(data);
                     auto response = handler.handle(request);
+                    if (tname == "health_check" && response.contains("result") && response["result"].contains("structured")) {
+                        response["result"]["structured"]["pool_workers"] = pool.worker_count();
+                        response["result"]["structured"]["pool_active"] = pool.active_count();
+                        response["result"]["structured"]["pool_pending"] = pool.pending();
+                    }
                     return response.dump(-1, ' ', false, json::error_handler_t::replace);
                 },
                 [&server](int fd, std::string response) {
