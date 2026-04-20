@@ -384,7 +384,7 @@ else
     compliance=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "compliance:auto user correction" --limit 2 --text-only 2>/dev/null | head -c 300 || true)
     if [[ -n "$compliance" && "$compliance" != *"No memories"* ]]; then
         echo ""
-        echo "⚠️ [compliance-issues] Recent missed corrections - be more proactive!"
+        echo "[compliance] missed corrections"
     fi
 
     # ===========================================
@@ -399,15 +399,9 @@ else
         _syco_count=$(echo "$_probe_triplets" | grep -c "sycophantic" || true)
         _shallow_count=$(echo "$_probe_triplets" | grep -c "shallow" || true)
 
-        if [[ "${_hedge_count:-0}" -ge 3 ]]; then
-            _probe_nudge="${_probe_nudge}[probe] Chronic hedging detected (${_hedge_count} recent sessions) — be direct and assertive, drop qualifiers.\n"
-        fi
-        if [[ "${_syco_count:-0}" -ge 3 ]]; then
-            _probe_nudge="${_probe_nudge}[probe] Chronic sycophancy detected (${_syco_count} recent sessions) — push back when needed, prioritize accuracy over agreement.\n"
-        fi
-        if [[ "${_shallow_count:-0}" -ge 3 ]]; then
-            _probe_nudge="${_probe_nudge}[probe] Chronic shallow reasoning detected (${_shallow_count} recent sessions) — go deeper, think step by step before answering.\n"
-        fi
+        [[ "${_hedge_count:-0}" -ge 3 ]] && _probe_nudge="${_probe_nudge}[probe] hedging×${_hedge_count} — direct, drop qualifiers\n"
+        [[ "${_syco_count:-0}" -ge 3 ]] && _probe_nudge="${_probe_nudge}[probe] sycophancy×${_syco_count} — push back, accuracy>agreement\n"
+        [[ "${_shallow_count:-0}" -ge 3 ]] && _probe_nudge="${_probe_nudge}[probe] shallow×${_shallow_count} — think deeper before answering\n"
     fi
     if [[ -n "$_probe_nudge" ]]; then
         echo ""
