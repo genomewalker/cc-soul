@@ -988,6 +988,17 @@ main() {
         echo "[cc-soul] Updated: $installed_version → $current_version"
     fi
 
+    # Train hook intent classifier if not present (uses bundled corpus, no API calls)
+    CLASSIFIER_MODEL="${MIND_PATH:-${HOME}/.claude/mind}/hook-classifier.bin"
+    TRAIN_SCRIPT="$(dirname "$0")/train-hook-classifier.sh"
+    if [[ ! -f "$CLASSIFIER_MODEL" && -f "$TRAIN_SCRIPT" ]]; then
+        echo "[cc-soul] Hook intent classifier not found — training in background (~30s)..."
+        nohup bash "$TRAIN_SCRIPT" \
+            > "${TMPDIR:-/tmp}/chitta-train-classifier.log" 2>&1 &
+        echo "[cc-soul] Classifier training started (PID $!). Regex fallback active until done."
+        echo "[cc-soul] Log: ${TMPDIR:-/tmp}/chitta-train-classifier.log"
+    fi
+
     # Mark as installed
     echo "$current_version" > "$MARKER"
     echo "[cc-soul] Installation complete (v$current_version)"

@@ -288,39 +288,91 @@ fi
 
 # ===========================================
 # PATTERN DETECTION: Detect learning opportunities
+# fasttext model when available, regex fallback
 # ===========================================
 LEARNING_HINTS=""
+_CLASSIFIER_MODEL="${MIND_PATH}/hook-classifier.bin"
+_CLASSIFIER_THRESHOLD="0.55"
+_CLASSIFIER_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" 2>/dev/null && pwd)/classify-intent.py"
 
-# Detect CORRECTION patterns: user is correcting Claude
-# Direct: "wrong", "mistake", "not working", "incorrect"
-# Implicit: "actually", "should be", "not what I", "should not", ordering fixes
-if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|stupid\b.*doing|doing.*stupid\b|first.*then\b|before.*not after\b|kill.*before\b|binary.*first\b)"; then
-    # Truncate to first 200 chars for context, escape for output
+_DETECTED_INTENT=""
+_DETECTED_SCORE=""
+
+if [[ -f "$_CLASSIFIER_MODEL" && -x "$_CLASSIFIER_SCRIPT" ]]; then
+    _clf_out=$(echo "$QUERY" | python3 "$_CLASSIFIER_SCRIPT" "$_CLASSIFIER_MODEL" "$_CLASSIFIER_THRESHOLD" 2>/dev/null || true)
+    if [[ -n "$_clf_out" ]]; then
+        _DETECTED_INTENT="${_clf_out%% *}"
+        _DETECTED_SCORE="${_clf_out##* }"
+    fi
+fi
+
+# Regex fallback for each category (used when model absent OR as safety net)
+_regex_correction=0
+_regex_preference=0
+_regex_belief=0
+_regex_milestone=0
+_regex_frustration=0
+
+echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|first.*then\b|before.*not after\b|kill.*before\b|binary.*first\b)" \
+    && _regex_correction=1 || true
+echo "$QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)" \
+    && _regex_preference=1 || true
+echo "$QUERY" | grep -qiE "(I always|we always|I never|we never|our convention|our standard|we typically|we usually|by convention|in this (project|codebase|repo)|the standard (approach|way)|we (always|never) use|our (approach|workflow|setup) is)" \
+    && _regex_belief=1 || true
+echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)" \
+    && _regex_milestone=1 || true
+echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)" \
+    && _regex_frustration=1 || true
+
+# Merge: model wins when confident; regex fills gaps
+_intent_correction=0
+_intent_preference=0
+_intent_belief=0
+_intent_milestone=0
+
+[[ "$_DETECTED_INTENT" == "correction"  ]] && _intent_correction=1  || true
+[[ "$_DETECTED_INTENT" == "preference"  ]] && _intent_preference=1  || true
+[[ "$_DETECTED_INTENT" == "belief"      ]] && _intent_belief=1      || true
+[[ "$_DETECTED_INTENT" == "milestone"   ]] && _intent_milestone=1   || true
+[[ $_regex_correction -eq 1 ]]  && _intent_correction=1  || true
+[[ $_regex_preference -eq 1 ]]  && _intent_preference=1  || true
+[[ $_regex_belief -eq 1 ]]      && _intent_belief=1      || true
+[[ $_regex_milestone -eq 1 ]]   && _intent_milestone=1   || true
+
+# --- ACT on detected intents ---
+
+if [[ $_intent_correction -eq 1 ]]; then
     correction_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
     LEARNING_HINTS="[LEARN] ⚠️ CORRECTION detected - call learn_correction NOW
   User said: \"${correction_ctx}\""
-    # Signal for stop-hook: save correction context to temp file
     echo "$QUERY" > "$MIND_PATH/.last_correction_context"
+    _corr_payload=$(jq -n --arg c "[correction] $correction_ctx" --arg r "$REALM" \
+        '{content: $c, category: "correction", realm: $r, tags: ["correction","auto"], visibility: 2}')
+    queue_write "observe" "$_corr_payload" 2>/dev/null || true
 fi
 
-# Detect PREFERENCE patterns: user expressing preferences
-# Direct: "I prefer", "always use", "never use", "don't use", "use X instead"
-# Meta: style/communication preferences
-if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose|always use\b|never use\b|don'?t use\b|don'?t call\b|use .* instead\b|just use\b|use ssh\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)"; then
+if [[ $_intent_preference -eq 1 ]]; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Preference detected → use learn_preference tool"
+    _pref_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    _pref_payload=$(jq -n --arg c "[preference] $_pref_ctx" --arg r "$REALM" \
+        '{content: $c, category: "preference", realm: $r, tags: ["preference","auto"], visibility: 2}')
+    queue_write "observe" "$_pref_payload" 2>/dev/null || true
 fi
 
-# Detect FRUSTRATION/STATE patterns: user emotional state
-# Strong frustration: "frustrated", "annoyed", "give up"
-# Mild frustration: "tedious", "repetitive", "not sure", "overthinking"
-if echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)"; then
+if [[ $_intent_belief -eq 1 ]]; then
+    _belief_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    _belief_payload=$(jq -n --arg c "[belief] $_belief_ctx" --arg r "$REALM" \
+        '{content: $c, category: "belief", realm: $r, tags: ["belief","auto"], visibility: 2}')
+    queue_write "observe" "$_belief_payload" 2>/dev/null || true
+fi
+
+if [[ $_regex_frustration -eq 1 ]]; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] User state detected → use learn_approach if something helps"
 fi
 
-# Detect MILESTONE patterns: store directly via daemon (no MCP tool needed)
-if echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)"; then
+if [[ $_intent_milestone -eq 1 ]]; then
     milestone_text=$(echo "$QUERY" | head -c 300 | tr '\n' ' ')
-    queue_write "remember" "{\"content\":\"[milestone] $milestone_text\",\"kind\":\"milestone\",\"tags\":[\"milestone\"]}"
+    queue_write "observe" "{\"content\":\"[milestone] $milestone_text\",\"category\":\"milestone\",\"realm\":\"$REALM\",\"tags\":[\"milestone\"]}"
 fi
 
 # ===========================================
