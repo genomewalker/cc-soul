@@ -465,6 +465,9 @@
             }
         }
 
+        // Purge corrupt nodes: iterates all payloads directly in Rust (not by kind)
+        size_t purged = field_store_->purge_corrupt();
+
         size_t trimmed = field_store_->trim_realm_names();
         field_store_->flush();
 
@@ -473,12 +476,14 @@
            << "  promoted : " << promoted  << "\n"
            << "  demoted  : " << demoted   << "\n"
            << "  removed  : " << removed   << " (confidence < " << threshold << ")\n"
+           << "  purged   : " << purged    << " corrupt/empty nodes\n"
            << "  trimmed  : " << trimmed   << " dirty realm names\n";
 
         return ToolResult::ok(ss.str(), {
             {"promoted",  promoted},
             {"demoted",   demoted},
             {"removed",   removed},
+            {"purged",    purged},
             {"trimmed",   trimmed},
             {"threshold", threshold},
         });

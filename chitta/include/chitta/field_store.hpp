@@ -1186,6 +1186,14 @@ public:
         } catch (...) { return {}; }
     }
 
+    /// Purge corrupt memories (empty/whitespace content or non-finite affect).
+    /// Returns the count of memories purged.
+    size_t purge_corrupt() {
+        size_t purged = 0;
+        if (cf_purge_corrupt(handle_, &purged) != 0) return 0;
+        return purged;
+    }
+
     /// Record co-retrieval for Hebbian association strengthening.
     void record_co_retrieval(const std::vector<uint64_t>& memory_ids,
                              float base_assoc_delta = 0.05f) {
