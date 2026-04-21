@@ -39,9 +39,23 @@
             out["avg_confidence"]   = stats_j.value("avg_confidence", 0.0f);
         }
 
-        // Per-realm/kind embedding geometry ("Geometry of Forgetting")
+        // Per-realm/kind embedding geometry — reuse soul_context cache (60s TTL)
         try {
-            auto spectral_j = json::parse(field_store_->spectral_stats_by_realm());
+            static std::mutex spectral_mu_;
+            static std::string spectral_cache_;
+            static std::chrono::steady_clock::time_point spectral_ts_;
+            std::string _spec_str;
+            {
+                std::lock_guard<std::mutex> lk(spectral_mu_);
+                auto now = std::chrono::steady_clock::now();
+                if (spectral_cache_.empty() ||
+                    std::chrono::duration_cast<std::chrono::seconds>(now - spectral_ts_).count() > 60) {
+                    spectral_cache_ = field_store_->spectral_stats_by_realm();
+                    spectral_ts_ = now;
+                }
+                _spec_str = spectral_cache_;
+            }
+            auto spectral_j = json::parse(_spec_str);
             auto& by_realm = spectral_j["by_realm"];
             auto& by_kind  = spectral_j["by_kind"];
             auto& anomalies = spectral_j["anomalies"];
@@ -223,12 +237,39 @@
             }
         }
 
-        // Per-realm/kind embedding geometry (compact: top 5 realms + anomalies only)
-        json spectral_j;
+        // Spectral stats — cached 60s to avoid per-call SVD cost
+        static std::mutex spectral_mu_;
+        static std::string spectral_cache_;
+        static std::chrono::steady_clock::time_point spectral_ts_;
+        std::string spectral_str;
+        {
+            std::lock_guard<std::mutex> lk(spectral_mu_);
+            auto now = std::chrono::steady_clock::now();
+            if (spectral_cache_.empty() ||
+                std::chrono::duration_cast<std::chrono::seconds>(now - spectral_ts_).count() > 60) {
+                spectral_cache_ = field_store_->spectral_stats_by_realm();
+                spectral_ts_ = now;
+            }
+            spectral_str = spectral_cache_;
+        }
+
+        json out = {
+            {"version",        CHITTA_VERSION},
+            {"total_memories", total_memories},
+            {"wisdom_nodes",   wisdom_nodes},
+            {"beliefs",        beliefs},
+            {"episodes",       episodes},
+            {"corrections",    corrections.size()},
+            {"preferences",    preferences.size()},
+            {"avg_confidence", avg_conf},
+        };
+        if (stats_j.contains("count_by_kind"))
+            out["count_by_kind"] = stats_j["count_by_kind"];
+
         try {
-            spectral_j = json::parse(field_store_->spectral_stats_by_realm());
-            auto& by_realm = spectral_j["by_realm"];
-            auto& by_kind  = spectral_j["by_kind"];
+            auto spectral_j = json::parse(spectral_str);
+            auto& by_realm  = spectral_j["by_realm"];
+            auto& by_kind   = spectral_j["by_kind"];
             auto& anomalies = spectral_j["anomalies"];
 
             if (by_realm.is_array() && !by_realm.empty()) {
@@ -248,6 +289,7 @@
                        << "  cos=" << std::setprecision(3)
                        << sorted[i].value("mean_cosine_sim", 0.0) << "\n";
                 }
+                out["spectral_by_realm"] = by_realm;
             }
             if (by_kind.is_array() && !by_kind.empty()) {
                 ss << "\nBy kind:\n";
@@ -261,6 +303,7 @@
                        << "  cos=" << std::setprecision(3)
                        << k.value("mean_cosine_sim", 0.0) << "\n";
                 }
+                out["spectral_by_kind"] = by_kind;
             }
             if (anomalies.is_array() && !anomalies.empty()) {
                 ss << "\nAnomalies:\n";
@@ -268,26 +311,9 @@
                     ss << "  ! " << a.value("group", "?")
                        << ": " << a.value("detail", "") << "\n";
                 }
+                out["anomalies"] = anomalies;
             }
         } catch (...) {}
-
-        json out = {
-            {"version",         CHITTA_VERSION},
-            {"total_memories",  total_memories},
-            {"wisdom_nodes",    wisdom_nodes},
-            {"beliefs",         beliefs},
-            {"episodes",        episodes},
-            {"corrections",     corrections.size()},
-            {"preferences",     preferences.size()},
-            {"avg_confidence",  avg_conf},
-        };
-        if (stats_j.contains("count_by_kind"))
-            out["count_by_kind"] = stats_j["count_by_kind"];
-        if (!spectral_j.is_null()) {
-            if (spectral_j.contains("by_realm"))  out["spectral_by_realm"] = spectral_j["by_realm"];
-            if (spectral_j.contains("by_kind"))   out["spectral_by_kind"]  = spectral_j["by_kind"];
-            if (spectral_j.contains("anomalies")) out["anomalies"]         = spectral_j["anomalies"];
-        }
 
         return ToolResult::ok(ss.str(), out);
     }
@@ -439,18 +465,21 @@
             }
         }
 
+        size_t trimmed = field_store_->trim_realm_names();
         field_store_->flush();
 
         std::ostringstream ss;
         ss << "Hygiene run complete\n"
            << "  promoted : " << promoted  << "\n"
            << "  demoted  : " << demoted   << "\n"
-           << "  removed  : " << removed   << " (confidence < " << threshold << ")\n";
+           << "  removed  : " << removed   << " (confidence < " << threshold << ")\n"
+           << "  trimmed  : " << trimmed   << " dirty realm names\n";
 
         return ToolResult::ok(ss.str(), {
             {"promoted",  promoted},
             {"demoted",   demoted},
             {"removed",   removed},
+            {"trimmed",   trimmed},
             {"threshold", threshold},
         });
     }
