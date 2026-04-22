@@ -47,6 +47,9 @@ jobs:
           mkdir -p chitta/build
           cd chitta/build
           cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_ROOT_DIR="$CONDA_PREFIX" \
+            -DPython3_FIND_STRATEGY=LOCATION \
+            -DPython3_FIND_VIRTUALENV=ONLY \
             -DPython3_EXECUTABLE="$PYO3_PYTHON"
           cmake --build . --parallel
 
