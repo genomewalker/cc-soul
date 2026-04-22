@@ -30,8 +30,10 @@ jobs:
       - name: Install dependencies
         shell: bash -l {0}
         run: |
-          conda install -y cmake nlohmann_json sqlite
-          conda install -y -c conda-forge onnxruntime-cpp
+          conda install -y "python=3.11" cmake nlohmann_json sqlite
+          conda install -y -c conda-forge "python=3.11" onnxruntime-cpp
+          python --version
+          echo "PYO3_PYTHON=$CONDA_PREFIX/bin/python3" >> "$GITHUB_ENV"
 
       - name: Build chitta-field
         shell: bash -l {0}
@@ -44,7 +46,8 @@ jobs:
         run: |
           mkdir -p chitta/build
           cd chitta/build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="$PYO3_PYTHON"
           cmake --build . --parallel
 
       - name: Verify binaries
