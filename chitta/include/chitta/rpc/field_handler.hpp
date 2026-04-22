@@ -608,6 +608,7 @@ private:
     #include "handlers/agent_protocol.hpp"
     #include "handlers/wisdom_lineage.hpp"
     #include "handlers/field_lookup.hpp"
+    #include "handlers/repl_sessions.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -3047,6 +3048,34 @@ private:
         });
         handlers_["export_training_pairs"] = [this](const json& p) { return tool_export_training_pairs(p); };
 
+        // ── Soul REPL Session Store ──────────────────────────────────────────
+        tools_.push_back({{"name","repl_session_get"},{"description","Get persisted Soul REPL session namespace by ID"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"session_id",{{"type","string"},{"description","Session ID"}}}
+            }},{"required",{"session_id"}}}}
+        });
+        handlers_["repl_session_get"] = [this](const json& p) { return tool_repl_session_get(p); };
+
+        tools_.push_back({{"name","repl_session_set"},{"description","Persist a Soul REPL session namespace"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"session_id",{{"type","string"},{"description","Session ID"}}},
+                {"namespace_json",{{"type","string"},{"description","Serialized namespace as JSON"}}}
+            }},{"required",{"session_id","namespace_json"}}}}
+        });
+        handlers_["repl_session_set"] = [this](const json& p) { return tool_repl_session_set(p); };
+
+        tools_.push_back({{"name","repl_session_delete"},{"description","Delete a Soul REPL session"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"session_id",{{"type","string"},{"description","Session ID"}}}
+            }},{"required",{"session_id"}}}}
+        });
+        handlers_["repl_session_delete"] = [this](const json& p) { return tool_repl_session_delete(p); };
+
+        tools_.push_back({{"name","repl_session_list"},{"description","List all active Soul REPL sessions"},
+            {"inputSchema",{{"type","object"},{"properties",{}}}}
+        });
+        handlers_["repl_session_list"] = [this](const json&) { return tool_repl_session_list(); };
+
         classify_tools();
     }
 
@@ -3070,7 +3099,8 @@ private:
             "session_register", "session_heartbeat", "session_deregister", "msg_ack",
             "file_index_session", "file_index_all",
             "chitta_health",
-            "ingest_source", "wiki_export", "health_check_start", "export_training_pairs"
+            "ingest_source", "wiki_export", "health_check_start", "export_training_pairs",
+            "repl_session_get", "repl_session_set", "repl_session_delete", "repl_session_list"
         };
 
         static const std::vector<std::string> advanced_tools = {
