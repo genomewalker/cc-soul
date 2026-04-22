@@ -318,6 +318,20 @@ case "$MATCHER" in
             fi
         fi
 
+        # ─── Edit → symbol_patch redirect ─────────────────────────────────────────────
+        FILE_PATH=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+        OLD_STR=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' 2>/dev/null)
+        NEW_STR=$(echo "$STDIN_DATA" | jq -r '.tool_input.new_string // empty' 2>/dev/null)
+
+        if [[ -x "$CHITTA_BIN" && -n "$FILE_PATH" && -n "$OLD_STR" && -n "$NEW_STR" ]]; then
+            SYMBOL=$(echo "$OLD_STR" | grep -m1 -oE '(def |fn |class |pub fn |pub struct )[a-zA-Z_][a-zA-Z0-9_]*' | awk '{print $NF}' 2>/dev/null || true)
+            if [[ -n "$SYMBOL" ]]; then
+                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[fp] symbol_patch available for $SYMBOL in $FILE_PATH — prefer mcp__chitta-bridge__symbol_patch over Edit for this change\"}}"
+                exit 0
+            fi
+        fi
+        # ──────────────────────────────────────────────────────────────────────────────
+
         FP_BIN="${HOME}/.claude/bin/fp"
         [[ ! -x "$FP_BIN" ]] && exit 0
         # fp --hook reads the full tool JSON, applies patch, exits 2 with confirmation.

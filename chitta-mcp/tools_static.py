@@ -4203,7 +4203,7 @@ COMPOSITE_TOOLS = [
     ),
     Tool(
         name="smart_context",
-        description="Build intelligent context. Modes: fast (<80ms), full (<200ms), rlm (RLM-style dynamic exploration via soul_repl - Claude writes the exploration code).",
+        description="Build intelligent context. Modes: fast (<80ms), full (<200ms), rlm (RLM-style dynamic exploration via soul_repl). With resolver_mode=true (default), prepends digest-node and decision memories before code symbols.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -4235,6 +4235,10 @@ COMPOSITE_TOOLS = [
                 "realm": {
                     "type": "string",
                     "description": "Filter by realm"
+                },
+                "resolver_mode": {
+                    "type": "boolean",
+                    "description": "Prepend digest-node and decision memories before code symbols (default: true)"
                 }
             },
             "required": ["task"]
@@ -4406,6 +4410,94 @@ COMPOSITE_TOOLS = [
                 }
             },
             "required": ["name"]
+        }
+    ),
+    Tool(
+        name="verify_correction",
+        description="Mark a correction memory as verified at a specific code locus. Stores a verification record and updates the original correction's tags.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "anyOf": [{"type": "integer"}, {"type": "string"}],
+                    "description": "Memory/triplet ID of the correction to verify"
+                },
+                "evidence_locus": {
+                    "type": "string",
+                    "description": "Location of evidence, e.g. 'sadhana_manager.cpp:299'"
+                }
+            },
+            "required": ["id", "evidence_locus"]
+        }
+    ),
+    Tool(
+        name="ack_memory",
+        description="Increment ack signal for a memory. Records [ack] memory:<id> score:+1 with tag ack-signal.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory ID to ack"
+                }
+            },
+            "required": ["id"]
+        }
+    ),
+    Tool(
+        name="nack_memory",
+        description="Decrement nack signal for a memory. Records [nack] memory:<id> score:-1 with tag nack-signal.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory ID to nack"
+                }
+            },
+            "required": ["id"]
+        }
+    ),
+    Tool(
+        name="remember_typed",
+        description="Store a typed memory node (digest-node, decision, open-question, etc.) with optional graph links (supersedes, invalidated-by, anchors-to).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "node_type": {
+                    "type": "string",
+                    "enum": ["digest-node", "symbol-summary", "decision", "open-question", "rollup", "working-brief"],
+                    "description": "Type of memory node"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "SSL triplet content for the memory"
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "What this memory is about"
+                },
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "predicate": {
+                                "type": "string",
+                                "enum": ["supersedes", "invalidated-by", "anchors-to"]
+                            },
+                            "target_id": {"type": "string"}
+                        },
+                        "required": ["predicate", "target_id"]
+                    },
+                    "description": "Graph links to other memories"
+                },
+                "realm": {
+                    "type": "string",
+                    "description": "Realm to store in (default: brahman)"
+                }
+            },
+            "required": ["node_type", "content", "subject"]
         }
     ),
     # Curiosity-driven research (background learning agent)
