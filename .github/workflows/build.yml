@@ -31,6 +31,8 @@ jobs:
           toolchain: "1.92.0"
 
       - name: Build chitta-field
+        env:
+          PYO3_PYTHON: /usr/bin/python3
         run: |
           cd chitta-field
           ./build.sh build --release
