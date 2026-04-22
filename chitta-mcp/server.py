@@ -590,30 +590,14 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
             return json.dumps(result["structured"])
 
         content = result.get("content", [])
-        structured = result.get("structured", {})
 
-        # Extract text content
-        text_parts = []
         if content and isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    text_parts.append(item.get("text", str(item)))
-                else:
-                    text_parts.append(str(item))
+            return "\n".join(
+                item.get("text", str(item)) if isinstance(item, dict) else str(item)
+                for item in content
+            )
 
-        # Combine: text summary + TOON structured data
-        output_parts = []
-        if text_parts:
-            output_parts.append("\n".join(text_parts))
-        if structured:
-            toon_data = to_toon(structured)
-            if toon_data:
-                output_parts.append(toon_data)
-
-        if output_parts:
-            return "\n".join(output_parts)
-
-        return to_toon(result)
+        return ""
     except Exception as e:
         return f"Error: {e}"
 
@@ -1706,13 +1690,10 @@ Persistent sessions (variables survive across calls):
         initial_namespace: dict = {}
         if session_id and not reset:
             raw = daemon_call("repl_session_get", {"session_id": session_id})
-            if raw and not raw.startswith("null") and not raw.startswith("Error"):
+            if raw and raw != "null":
                 try:
-                    # daemon_call may append TOON metadata after the JSON line
-                    ns_line = raw.splitlines()[0].strip()
-                    if ns_line and ns_line != "null":
-                        initial_namespace = _json.loads(ns_line)
-                except (ValueError, KeyError, IndexError):
+                    initial_namespace = _json.loads(raw)
+                except (ValueError, KeyError):
                     pass
 
         result, ns = execute_soul_code(code, initial_namespace=initial_namespace if not reset else None)
