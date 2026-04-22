@@ -20,11 +20,6 @@ jobs:
         with:
           toolchain: "1.92.0"
 
-      - name: Build chitta-field
-        run: |
-          cd chitta-field
-          ./build.sh build --release
-
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -37,6 +32,12 @@ jobs:
         run: |
           conda install -y cmake nlohmann_json sqlite
           conda install -y -c conda-forge onnxruntime-cpp
+
+      - name: Build chitta-field
+        shell: bash -l {0}
+        run: |
+          cd chitta-field
+          ./build.sh build --release
 
       - name: Build
         shell: bash -l {0}

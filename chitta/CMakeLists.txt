@@ -470,17 +470,9 @@ add_executable(chittad
     src/sadhana/sadhana_manager.cpp
 )
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
-find_package(Python3 COMPONENTS Development)
-if(Python3_FOUND)
-    target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread Python3::Python)
-    list(APPEND CHITTA_RUNTIME_LIBS "${Python3_LIBRARY_DIRS}")
-else()
-    # Fallback: link conda Python directly
-    set(CONDA_PYTHON_LIB "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib")
-    target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread
-        "-L${CONDA_PYTHON_LIB}" "-lpython3.12")
-    list(APPEND CHITTA_RUNTIME_LIBS "${CONDA_PYTHON_LIB}")
-endif()
+find_package(Python3 REQUIRED COMPONENTS Development)
+target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread Python3::Python)
+list(APPEND CHITTA_RUNTIME_LIBS "${Python3_LIBRARY_DIRS}")
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 
 # CLI tool for memory operations (thin client + MCP server)
