@@ -252,17 +252,42 @@ class SoulREPL:
         self.soul.clear_trajectory()
         self.history = []
 
+    _SERIALIZABLE = (str, int, float, bool, type(None), list, dict, tuple)
 
-def execute_soul_code(code: str, max_output: int = 10000) -> ExecutionResult:
-    """
-    Convenience function for one-shot code execution.
+    def get_serializable_namespace(self) -> dict:
+        """Return namespace subset safe to JSON-serialize (skip builtins/callables)."""
+        out = {}
+        for k, v in self.namespace.items():
+            if k.startswith('_') or k in ('soul', 'Memory', 'Triplet'):
+                continue
+            if not isinstance(v, self._SERIALIZABLE):
+                continue
+            try:
+                import json as _json
+                _json.dumps(v)
+                out[k] = v
+            except (TypeError, ValueError):
+                pass
+        return out
 
-    Args:
-        code: Python code to execute
-        max_output: Maximum output characters
+    def restore_namespace(self, data: dict) -> None:
+        """Restore serializable variables into the sandbox namespace."""
+        for k, v in data.items():
+            if not k.startswith('_') and k not in ('soul', 'Memory', 'Triplet'):
+                self.namespace[k] = v
 
-    Returns:
-        ExecutionResult
+
+def execute_soul_code(
+    code: str,
+    max_output: int = 10000,
+    initial_namespace: dict | None = None,
+) -> tuple["ExecutionResult", dict]:
+    """Execute code in a fresh REPL, optionally seeded with a prior namespace.
+
+    Returns (result, serializable_namespace) so callers can persist session state.
     """
     repl = SoulREPL(max_output=max_output)
-    return repl.execute(code)
+    if initial_namespace:
+        repl.restore_namespace(initial_namespace)
+    result = repl.execute(code)
+    return result, repl.get_serializable_namespace()
