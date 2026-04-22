@@ -1663,14 +1663,14 @@ def handle_transcript_search(arguments: dict) -> str:
         output += f"   {r['content'][:200]}...\n\n"
 
     return output
-
-
 def handle_soul_repl(arguments: dict) -> str:
     """
     RLM-style REPL for programmatic soul exploration.
 
     Executes Python code in a sandbox with soul.* methods exposed.
     Supports persistent sessions via session_id — variables survive across calls.
+    Session namespaces are stored natively in chitta-field (repl_sessions.json),
+    not in the wisdom-memory graph.
     """
     code = arguments.get("code", "")
     reset = arguments.get("reset", False)
@@ -1702,36 +1702,33 @@ Persistent sessions (variables survive across calls):
         from soul_repl import execute_soul_code
         import json as _json
 
-        # Restore session namespace from chitta memory
+        # Restore session namespace from chitta-field native store
         initial_namespace: dict = {}
-        session_tag = f"soul_repl_session:{session_id}" if session_id else ""
         if session_id and not reset:
-            raw = daemon_call("recall", {"query": session_tag, "limit": 1, "tag": session_tag})
-            if raw:
+            raw = daemon_call("repl_session_get", {"session_id": session_id})
+            if raw and not raw.startswith("null") and not raw.startswith("Error"):
                 try:
-                    # Namespace is stored as JSON in memory content after the tag prefix
-                    marker = f"[{session_tag}] "
-                    for line in raw.splitlines():
-                        if line.startswith(marker):
-                            initial_namespace = _json.loads(line[len(marker):])
-                            break
-                except (ValueError, KeyError):
+                    # daemon_call may append TOON metadata after the JSON line
+                    ns_line = raw.splitlines()[0].strip()
+                    if ns_line and ns_line != "null":
+                        initial_namespace = _json.loads(ns_line)
+                except (ValueError, KeyError, IndexError):
                     pass
 
         result, ns = execute_soul_code(code, initial_namespace=initial_namespace if not reset else None)
 
-        # Persist session namespace back to chitta
+        # Persist session namespace back to chitta-field native store
         if session_id and ns:
             try:
                 ns_json = _json.dumps(ns, separators=(',', ':'))
-                daemon_call("remember", {
-                    "content": f"[{session_tag}] {ns_json}",
-                    "type": "episode",
-                    "tags": f"soul-repl,{session_tag}",
-                    "confidence": 0.5,
+                daemon_call("repl_session_set", {
+                    "session_id": session_id,
+                    "namespace_json": ns_json,
                 })
             except Exception:
                 pass
+        elif session_id and reset:
+            daemon_call("repl_session_delete", {"session_id": session_id})
 
         output = []
         if result.output:
