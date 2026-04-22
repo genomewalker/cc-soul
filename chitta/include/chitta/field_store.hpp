@@ -156,6 +156,9 @@ char* cf_repl_session_get(const struct CfHandle* h, const char* session_id);
 int   cf_repl_session_set(struct CfHandle* h, const char* session_id, const char* namespace_json, int64_t updated_ms);
 int   cf_repl_session_delete(struct CfHandle* h, const char* session_id);
 char* cf_repl_session_list(const struct CfHandle* h);
+// Atomic execute: get namespace, run code, persist namespace. Returns JSON.
+char* cf_repl_execute(struct CfHandle* h, const char* session_id, const char* code,
+                      int reset, const char* socket_path, int max_output);
 
 // Code intel v2 FFI
 int cf_upsert_code_file_v2(struct CfHandle* h,
@@ -1336,6 +1339,19 @@ public:
     std::string repl_session_list() {
         char* json = cf_repl_session_list(handle_);
         if (!json) return "[]";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    // Atomic execute: load namespace, run code, persist namespace.
+    // Returns JSON: {success, output, error, session_id, trajectory}.
+    std::string repl_execute(const std::string& session_id, const std::string& code,
+                             bool reset, const std::string& socket_path,
+                             int max_output = 10000) {
+        char* json = cf_repl_execute(handle_, session_id.c_str(), code.c_str(),
+                                      reset ? 1 : 0, socket_path.c_str(), max_output);
+        if (!json) return R"({"success":false,"error":"cf_repl_execute failed"})";
         std::string result(json);
         cf_free_string(json);
         return result;

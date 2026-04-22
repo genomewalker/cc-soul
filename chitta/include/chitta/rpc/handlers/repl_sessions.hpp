@@ -35,6 +35,26 @@
         return ToolResult::ok(r > 0 ? "deleted" : "not found", {{"session_id", session_id}, {"deleted", r > 0}});
     }
 
+    ToolResult tool_repl_execute(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
+        std::string session_id = params.value("session_id", "");
+        std::string code       = params.value("code", "");
+        bool reset             = params.value("reset", false);
+        int  max_output        = params.value("max_output", 10000);
+        if (session_id.empty()) return ToolResult::error("session_id required");
+        if (code.empty())       return ToolResult::error("code required");
+
+        std::string json_result = field_store_->repl_execute(session_id, code, reset, "", max_output);
+        json out = json::parse(json_result, nullptr, false);
+        if (out.is_discarded()) return ToolResult::error("repl_execute returned invalid JSON");
+        bool success = out.value("success", false);
+        std::string output = out.value("output", "");
+        std::string error  = out.value("error",  "");
+        std::string text   = output.empty() ? error : output;
+        if (!error.empty() && !output.empty()) text = output + "\nError:\n" + error;
+        return ToolResult::ok(text.empty() ? "(no output)" : text, out);
+    }
+
     ToolResult tool_repl_session_list() {
         if (!field_store_) return ToolResult::error("chitta-field store unavailable");
         std::string json_str = field_store_->repl_session_list();

@@ -3076,6 +3076,16 @@ private:
         });
         handlers_["repl_session_list"] = [this](const json&) { return tool_repl_session_list(); };
 
+        tools_.push_back({{"name","repl_execute"},{"description","Execute Python code in the Soul REPL sandbox. Atomically restores session namespace, runs code, persists updated namespace. Returns output, errors, and soul.* trajectory."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"session_id",{{"type","string"},{"description","Session ID for namespace persistence"}}},
+                {"code",{{"type","string"},{"description","Python code to execute"}}},
+                {"reset",{{"type","boolean"},{"description","Clear session state before executing"}}},
+                {"max_output",{{"type","integer"},{"description","Maximum output chars (default 10000)"}}}
+            }},{"required",{"session_id","code"}}}}
+        });
+        handlers_["repl_execute"] = [this](const json& p) { return tool_repl_execute(p); };
+
         classify_tools();
     }
 
@@ -3100,7 +3110,8 @@ private:
             "file_index_session", "file_index_all",
             "chitta_health",
             "ingest_source", "wiki_export", "health_check_start", "export_training_pairs",
-            "repl_session_get", "repl_session_set", "repl_session_delete", "repl_session_list"
+            "repl_session_get", "repl_session_set", "repl_session_delete", "repl_session_list",
+            "repl_execute"
         };
 
         static const std::vector<std::string> advanced_tools = {

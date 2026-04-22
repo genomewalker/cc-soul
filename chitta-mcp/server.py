@@ -1683,45 +1683,30 @@ Persistent sessions (variables survive across calls):
 """
 
     try:
-        from soul_repl import execute_soul_code
         import json as _json
-
-        # Restore session namespace from chitta-field native store
-        initial_namespace: dict = {}
-        if session_id and not reset:
-            raw = daemon_call("repl_session_get", {"session_id": session_id})
-            if raw and raw != "null":
-                try:
-                    initial_namespace = _json.loads(raw)
-                except (ValueError, KeyError):
-                    pass
-
-        result, ns = execute_soul_code(code, initial_namespace=initial_namespace if not reset else None)
-
-        # Persist session namespace back to chitta-field native store
-        if session_id and ns:
-            try:
-                ns_json = _json.dumps(ns, separators=(',', ':'))
-                daemon_call("repl_session_set", {
-                    "session_id": session_id,
-                    "namespace_json": ns_json,
-                })
-            except Exception:
-                pass
-        elif session_id and reset:
-            daemon_call("repl_session_delete", {"session_id": session_id})
+        raw = daemon_call("repl_execute", {
+            "session_id": session_id or "default",
+            "code": code,
+            "reset": reset,
+            "max_output": 10000,
+        })
+        try:
+            result = _json.loads(raw)
+        except (ValueError, TypeError):
+            return raw or "(no output)"
 
         output = []
-        if result.output:
-            output.append(result.output)
-        if result.error:
-            output.append(f"\nError:\n{result.error}")
-        if result.trajectory:
-            output.append(f"\n[Trajectory: {len(result.trajectory)} soul calls]")
-            for t in result.trajectory[-5:]:
+        if result.get("output"):
+            output.append(result["output"])
+        if result.get("error"):
+            output.append(f"\nError:\n{result['error']}")
+        traj = result.get("trajectory", [])
+        if traj:
+            output.append(f"\n[Trajectory: {len(traj)} soul calls]")
+            for t in traj[-5:]:
                 output.append(f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k, v in t['args'].items())})")
         if session_id:
-            output.append(f"\n[Session: {session_id} | {len(ns)} vars persisted]")
+            output.append(f"\n[Session: {session_id}]")
 
         return "\n".join(output) if output else "(no output)"
 
