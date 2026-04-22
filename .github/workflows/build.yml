@@ -23,7 +23,7 @@ jobs:
 
       - name: Install build tools
         run: |
-          dnf install -y wget perl-IPC-Cmd cmake ninja-build python3-devel
+          dnf install -y wget perl-IPC-Cmd cmake ninja-build python3.11 python3.11-devel
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +32,7 @@ jobs:
 
       - name: Build chitta-field
         env:
-          PYO3_PYTHON: /usr/bin/python3
+          PYO3_PYTHON: /usr/bin/python3.11
         run: |
           cd chitta-field
           ./build.sh build --release
@@ -61,6 +61,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DPython3_EXECUTABLE=/usr/bin/python3.11 \
             -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include/onnxruntime/core/session \
             -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
             -DJSON_INCLUDE_DIR=/opt/nlohmann_json/include
@@ -78,6 +79,8 @@ jobs:
           mkdir -p dist
           cp /opt/onnxruntime/lib/libonnxruntime.so.${{ env.ONNX_VERSION }} bin/
           ln -sf libonnxruntime.so.${{ env.ONNX_VERSION }} bin/libonnxruntime.so
+          PYLIB=$(python3.11 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')/libpython3.11.so.1.0
+          [ -f "$PYLIB" ] && cp "$PYLIB" bin/ && ln -sf libpython3.11.so.1.0 bin/libpython3.11.so
           for b in bin/chitta bin/chittad; do
             patchelf --set-rpath '$ORIGIN' $b 2>/dev/null || true
           done
