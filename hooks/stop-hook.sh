@@ -44,6 +44,31 @@ fi
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]] && exit 0
 
+# ─── 85% context guard ────────────────────────────────────────────────────────
+_ctx_used=$(echo "$INPUT" | jq -r '.context_window.used_tokens // 0' 2>/dev/null || echo 0)
+_ctx_max=$(echo "$INPUT" | jq -r '.context_window.max_tokens // 0' 2>/dev/null || echo 0)
+if [[ "$_ctx_max" -gt 0 ]]; then
+    _ctx_pct=$(( _ctx_used * 100 / _ctx_max ))
+    if [[ "$_ctx_pct" -ge 85 ]]; then
+        _sentinel="${MIND_PATH}/.size_warned_${SESSION_ID}"
+        if [[ ! -f "$_sentinel" ]]; then
+            touch "$_sentinel" 2>/dev/null || true
+            _handoff_dir="/tmp/opencode/handoffs"
+            mkdir -p "$_handoff_dir"
+            cat > "$_handoff_dir/${SESSION_ID}.yaml" <<YAML
+timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+session_id: ${SESSION_ID}
+context_pct: ${_ctx_pct}
+note: Auto-handoff at ≥85% context. Run /recap to continue in a fresh session.
+realm: ${REALM:-unknown}
+YAML
+            echo "{\"decision\":\"block\",\"reason\":\"Context at ≥85% — handoff written to prevent data loss. Run /recap to continue.\"}"
+            exit 0
+        fi
+    fi
+fi
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Convert to SSL v0.3 format
 # Input: category, raw content
 # Output: SSL formatted string (v0.3 with domain prefix)

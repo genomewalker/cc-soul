@@ -349,6 +349,17 @@ else
     touch "$SURFACE_COUNT_FILE" 2>/dev/null
 
     corrections_raw=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "correction" --tag "correction" --limit 5 --json 2>/dev/null || true)
+
+    # Filter out verified corrections
+    corrections_raw=$(echo "$corrections_raw" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['results'] = [r for r in d.get('results', [])
+                if 'verified' not in r.get('text','').lower()
+                and r.get('correction_state','emitted') not in ('verified','applied')]
+print(json.dumps(d))
+" 2>/dev/null || echo "$corrections_raw")
+
     if [[ -n "$corrections_raw" && "$corrections_raw" != *"No memories"* ]]; then
         corrections_out=""
         while IFS= read -r corr_line; do
