@@ -151,6 +151,12 @@ char* cf_wisdom_lineage_stats(const struct CfHandle* h);
 char* cf_tick_lineage_staleness(struct CfHandle* h);
 char* cf_lineage_expiry_check(const struct CfHandle* h);
 
+// Soul REPL session store FFI
+char* cf_repl_session_get(const struct CfHandle* h, const char* session_id);
+int   cf_repl_session_set(struct CfHandle* h, const char* session_id, const char* namespace_json, int64_t updated_ms);
+int   cf_repl_session_delete(struct CfHandle* h, const char* session_id);
+char* cf_repl_session_list(const struct CfHandle* h);
+
 // Code intel v2 FFI
 int cf_upsert_code_file_v2(struct CfHandle* h,
     const char* path, const char* project, int64_t mtime,
@@ -1307,6 +1313,32 @@ public:
     /// Disable (revoke) an agent.
     int agent_disable(const std::string& agent_id) {
         return cf_agent_disable(handle_, agent_id.c_str());
+    }
+
+    // ── Soul REPL Session Store ─────────────────────────────────────────────
+
+    std::string repl_session_get(const std::string& session_id) {
+        char* json = cf_repl_session_get(handle_, session_id.c_str());
+        if (!json) return "";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    int repl_session_set(const std::string& session_id, const std::string& namespace_json, int64_t updated_ms) {
+        return cf_repl_session_set(handle_, session_id.c_str(), namespace_json.c_str(), updated_ms);
+    }
+
+    int repl_session_delete(const std::string& session_id) {
+        return cf_repl_session_delete(handle_, session_id.c_str());
+    }
+
+    std::string repl_session_list() {
+        char* json = cf_repl_session_list(handle_);
+        if (!json) return "[]";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
     }
 
     CfHandle* handle() const { return handle_; }
