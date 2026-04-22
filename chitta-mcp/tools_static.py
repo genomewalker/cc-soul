@@ -4087,7 +4087,7 @@ COMPOSITE_TOOLS = [
     ),
     Tool(
         name="soul_repl",
-        description="RLM-style Python REPL for programmatic memory exploration. Write code with soul.* methods: search(), recall(), expand(), triplets(), recent(), remember(), symbols(). Call with no code for API reference.",
+        description="RLM-style Python REPL for programmatic memory exploration. Write code with soul.* methods: search(), recall(), expand(), triplets(), recent(), remember(), symbols(). Supports persistent sessions via session_id. Call with no code for API reference.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -4098,6 +4098,10 @@ COMPOSITE_TOOLS = [
                 "reset": {
                     "type": "boolean",
                     "description": "Reset namespace before execution (default: false)"
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session name for persistent state — variables survive across calls with the same session_id"
                 }
             }
         }
