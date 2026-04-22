@@ -796,6 +796,141 @@ def handle_symbol_callees(arguments: dict) -> str:
         return response  # Return raw response
 
 
+def handle_verify_correction(arguments: dict) -> str:
+    """
+    Mark a correction memory as verified at a given evidence locus.
+    Stores a new [correction:<id>] verified_at:<locus> memory and
+    updates the original correction to append 'verified' in its tags.
+    """
+    mem_id = str(arguments.get("id", ""))
+    evidence_locus = arguments.get("evidence_locus", "")
+
+    if not mem_id:
+        return "Error: 'id' parameter required"
+    if not evidence_locus:
+        return "Error: 'evidence_locus' parameter required"
+
+    # Store verification record
+    verify_result = daemon_call("remember", {
+        "content": f"[correction:{mem_id}] verified_at:{evidence_locus} by:agent",
+        "tags": ["correction", "verified"],
+        "type": "correction",
+        "visibility": 2,
+    })
+
+    # Update original memory tags to include 'verified'
+    daemon_call("tag", {"id": int(mem_id) if mem_id.isdigit() else mem_id, "tags": ["verified"]})
+
+    return f"Correction {mem_id} verified at {evidence_locus}\n{verify_result}"
+
+
+def handle_ack_memory(arguments: dict) -> str:
+    """
+    Increment ack signal for a memory.
+    Stores a [ack] memory:<id> score:+1 entry with tag ack-signal.
+    """
+    mem_id = str(arguments.get("id", ""))
+    if not mem_id:
+        return "Error: 'id' parameter required"
+
+    daemon_call("remember", {
+        "content": f"[ack] memory:{mem_id} score:+1",
+        "tags": ["ack-signal"],
+        "type": "episode",
+        "visibility": 2,
+    })
+
+    return json.dumps({"acked": mem_id})
+
+
+def handle_nack_memory(arguments: dict) -> str:
+    """
+    Decrement nack signal for a memory.
+    Stores a [nack] memory:<id> score:-1 entry with tag nack-signal.
+    """
+    mem_id = str(arguments.get("id", ""))
+    if not mem_id:
+        return "Error: 'id' parameter required"
+
+    daemon_call("remember", {
+        "content": f"[nack] memory:{mem_id} score:-1",
+        "tags": ["nack-signal"],
+        "type": "episode",
+        "visibility": 2,
+    })
+
+    return json.dumps({"nacked": mem_id})
+
+
+_TYPED_NODE_TYPES = frozenset({
+    "digest-node", "symbol-summary", "decision", "open-question", "rollup", "working-brief"
+})
+_LINK_PREDICATES = frozenset({"supersedes", "invalidated-by", "anchors-to"})
+
+
+def handle_remember_typed(arguments: dict) -> str:
+    """
+    Store a typed memory node with optional graph links.
+
+    node_type: digest-node | symbol-summary | decision | open-question | rollup | working-brief
+    links: list of {predicate, target_id} using supersedes | invalidated-by | anchors-to
+    """
+    node_type = arguments.get("node_type", "")
+    content = arguments.get("content", "")
+    subject = arguments.get("subject", "")
+    links = arguments.get("links", [])
+    realm = arguments.get("realm", "brahman")
+
+    if not node_type:
+        return "Error: 'node_type' parameter required"
+    if node_type not in _TYPED_NODE_TYPES:
+        return f"Error: node_type must be one of {sorted(_TYPED_NODE_TYPES)}"
+    if not content:
+        return "Error: 'content' parameter required"
+    if not subject:
+        return "Error: 'subject' parameter required"
+
+    # Store primary memory with typed tags
+    store_args: dict = {
+        "content": content,
+        "tags": [f"typed:{node_type}", node_type],
+        "type": "wisdom",
+        "visibility": 2,
+        "realm": realm,
+    }
+
+    remember_result = daemon_call("remember", store_args)
+
+    # Extract new ID from result (format varies; try to parse integer)
+    new_id = None
+    id_match = re.search(r'\b(\d+)\b', remember_result)
+    if id_match:
+        new_id = id_match.group(1)
+    if not new_id:
+        new_id = f"{subject[:20].replace(' ', '_').lower()}:{node_type}"
+
+    # Write link triplet memories
+    links_written = 0
+    if isinstance(links, list):
+        for link in links:
+            predicate = link.get("predicate", "")
+            target_id = str(link.get("target_id", ""))
+            if not predicate or not target_id:
+                continue
+            if predicate not in _LINK_PREDICATES:
+                continue
+            daemon_call("remember", {
+                "content": f"[link] {new_id} {predicate} {target_id}",
+                "tags": ["link", predicate],
+                "type": "episode",
+                "visibility": 2,
+                "realm": realm,
+            })
+            links_written += 1
+
+    return json.dumps({"id": new_id, "node_type": node_type, "links_written": links_written})
+
+
 def handle_smart_context(arguments: dict) -> str:
     """
     Build intelligent context combining memories, code symbols, and graph relationships.
@@ -806,8 +941,12 @@ def handle_smart_context(arguments: dict) -> str:
     - rlm: RLM-style dynamic exploration via soul_repl
 
     RLM mode lets Claude write exploration code for complex queries.
+
+    When resolver_mode=True (default), prepends digest-node and decision memories
+    before the code symbols section.
     """
     mode = arguments.get("mode", "fast")
+    resolver_mode = arguments.get("resolver_mode", True)
 
     # RLM mode: use soul_repl for dynamic exploration
     if mode == "rlm":
@@ -845,7 +984,7 @@ results
 '''
         try:
             from soul_repl import execute_soul_code
-            result = execute_soul_code(exploration_code)
+            result, _ns = execute_soul_code(exploration_code)
 
             if result.error:
                 return f"RLM exploration error: {result.error}"
@@ -879,7 +1018,46 @@ results
             return f"RLM mode failed: {e}, falling back to daemon"
 
     # Default: delegate to C++ daemon (fast single-RPC)
-    return daemon_call("smart_context", arguments)
+    # Resolver hierarchy: prepend digest-node + decision memories when resolver_mode=True
+    if not resolver_mode:
+        return daemon_call("smart_context", arguments)
+
+    task = arguments.get("task", "")
+    prefix_parts = []
+
+    if task:
+        # 1. Check for digest-node memories relevant to the task
+        digest_result = daemon_call("recall", {
+            "query": task,
+            "tag": "digest-node",
+            "limit": 3,
+        })
+        if digest_result and "No memories" not in digest_result and "Error" not in digest_result:
+            prefix_parts.append("[digest-nodes]\n" + digest_result)
+
+        # 2. Check for decision memories relevant to the task
+        decision_result = daemon_call("recall", {
+            "query": task,
+            "tag": "decision",
+            "limit": 3,
+        })
+        if decision_result and "No memories" not in decision_result and "Error" not in decision_result:
+            prefix_parts.append("[decisions]\n" + decision_result)
+        else:
+            # Also try text search for [dec] prefix
+            dec_result = daemon_call("recall", {
+                "query": f"[dec] {task}",
+                "limit": 2,
+            })
+            if dec_result and "No memories" not in dec_result and "Error" not in dec_result:
+                prefix_parts.append("[decisions]\n" + dec_result)
+
+    # 3. Fall through to existing symbol/code lookup
+    code_result = daemon_call("smart_context", arguments)
+
+    if prefix_parts:
+        return "\n\n".join(prefix_parts) + "\n\n[code-context]\n" + code_result
+    return code_result
 
 
 def handle_lookup(arguments: dict) -> str:
@@ -1492,13 +1670,13 @@ def handle_soul_repl(arguments: dict) -> str:
     RLM-style REPL for programmatic soul exploration.
 
     Executes Python code in a sandbox with soul.* methods exposed.
-    Returns execution output and exploration trajectory.
+    Supports persistent sessions via session_id — variables survive across calls.
     """
     code = arguments.get("code", "")
     reset = arguments.get("reset", False)
+    session_id = arguments.get("session_id", "")
 
     if not code.strip():
-        # Return help/API reference
         return """Soul REPL - RLM-style Memory Exploration
 
 Write Python code to explore memories programmatically.
@@ -1515,29 +1693,57 @@ Available methods:
   soul.stats()                     - Soul statistics
   soul.trajectory()                - Get exploration path
 
-Example:
-  memories = soul.search("authentication bugs", limit=10)
-  relevant = [m for m in memories if m.score > 0.7]
-  for m in relevant[:3]:
-      print(f"{m.id}: {m.content[:80]}")
-  context = soul.expand(relevant[0].id, depth=3)
+Persistent sessions (variables survive across calls):
+  Pass session_id="my_session" to keep variables alive.
+  Pass reset=true to clear session state.
 """
 
     try:
         from soul_repl import execute_soul_code
-        result = execute_soul_code(code)
+        import json as _json
+
+        # Restore session namespace from chitta memory
+        initial_namespace: dict = {}
+        session_tag = f"soul_repl_session:{session_id}" if session_id else ""
+        if session_id and not reset:
+            raw = daemon_call("recall", {"query": session_tag, "limit": 1, "tag": session_tag})
+            if raw:
+                try:
+                    # Namespace is stored as JSON in memory content after the tag prefix
+                    marker = f"[{session_tag}] "
+                    for line in raw.splitlines():
+                        if line.startswith(marker):
+                            initial_namespace = _json.loads(line[len(marker):])
+                            break
+                except (ValueError, KeyError):
+                    pass
+
+        result, ns = execute_soul_code(code, initial_namespace=initial_namespace if not reset else None)
+
+        # Persist session namespace back to chitta
+        if session_id and ns:
+            try:
+                ns_json = _json.dumps(ns, separators=(',', ':'))
+                daemon_call("remember", {
+                    "content": f"[{session_tag}] {ns_json}",
+                    "type": "episode",
+                    "tags": f"soul-repl,{session_tag}",
+                    "confidence": 0.5,
+                })
+            except Exception:
+                pass
 
         output = []
         if result.output:
             output.append(result.output)
-
         if result.error:
             output.append(f"\nError:\n{result.error}")
-
         if result.trajectory:
             output.append(f"\n[Trajectory: {len(result.trajectory)} soul calls]")
-            for t in result.trajectory[-5:]:  # Show last 5
-                output.append(f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k,v in t['args'].items())})")
+            for t in result.trajectory[-5:]:
+                output.append(f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k, v in t['args'].items())})")
+        if session_id:
+            output.append(f"\n[Session: {session_id} | {len(ns)} vars persisted]")
 
         return "\n".join(output) if output else "(no output)"
 
@@ -1681,6 +1887,11 @@ COMPOSITE_HANDLERS = {
     "research_cycle": handle_research_cycle,
     # Transcript search (fast, local)
     "transcript_search": handle_transcript_search,
+    # Typed memory and signal tools
+    "verify_correction": handle_verify_correction,
+    "ack_memory": handle_ack_memory,
+    "nack_memory": handle_nack_memory,
+    "remember_typed": handle_remember_typed,
 }
 
 # Messaging tools that need session_id auto-injection
