@@ -32,9 +32,9 @@ def run():
         for sname, fn in STRATEGIES.items():
             t0 = time.perf_counter_ns()
             try:
-                new_content, payload = fn(original, case["edit_args"])
+                new_content, payload, input_ctx = fn(original, case["edit_args"])
             except Exception as e:
-                new_content, payload = original, f"<error: {e}>"
+                new_content, payload, input_ctx = original, f"<error: {e}>", original
             dt_us = (time.perf_counter_ns() - t0) / 1000
             ok = normalize(new_content) == normalize(expected)
             results.append({
@@ -42,7 +42,7 @@ def run():
                 "pattern": case["pattern"],
                 "strategy": sname,
                 "ok": ok,
-                "tokens_in": tokens(original) if sname == "baseline_read_write" else 0,
+                "tokens_in": tokens(input_ctx),
                 "tokens_out": tokens(payload),
                 "latency_us": dt_us,
             })
