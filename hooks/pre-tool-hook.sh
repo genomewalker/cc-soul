@@ -21,6 +21,28 @@ json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
+# ─── Code-intel shadow/enforcement ────────────────────────────────────────────
+# Phase 1 (default): log what the hook WOULD do without changing behavior.
+# Phase 2 (opt-in):  set CC_SOUL_HOOK_ENFORCE=1 to actually deny/route.
+# Escape hatch:      CC_SOUL_ALLOW_EDIT=1 or CC_SOUL_ALLOW_READ=1 bypass per env.
+#
+# Log format: one JSON line per Read/Edit decision →
+#   $MIND_PATH/.hook_shadow.jsonl
+# Fields: ts, tool, file, lines, indexed, decision, reason, enforced
+_shadow_log() {
+    local mind="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+    [[ -d "$mind" ]] || return 0
+    local log="$mind/.hook_shadow.jsonl"
+    local ts tool file lines indexed decision reason enforced
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    tool="$1"; file="$2"; lines="$3"; indexed="$4"
+    decision="$5"; reason="$6"; enforced="$7"
+    printf '{"ts":"%s","tool":"%s","file":%s,"lines":%s,"indexed":%s,"decision":"%s","reason":%s,"enforced":%s}\n' \
+        "$ts" "$tool" "$(echo -n "$file" | jq -Rs '.')" "${lines:-0}" "${indexed:-0}" \
+        "$decision" "$(echo -n "$reason" | jq -Rs '.')" "${enforced:-0}" \
+        >> "$log" 2>/dev/null || true
+}
+
 # ─── Safety blocks (destructive commands) ─────────────────────────────────────
 safety_check() {
     local cmd="$1"
@@ -269,8 +291,11 @@ case "$MATCHER" in
 
         # Only compress large files (≤200 lines pass through untouched)
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
+        is_indexed=0
+        [[ "$dir_syms" -gt 0 ]] 2>/dev/null && is_indexed=1
         if [[ "$line_count" -le 200 ]]; then
             # Small file — pass through, but still advise code-intel if available
+            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "pass" "small-file" 0
             if [[ -n "$advisory" ]]; then
                 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}' "$advisory"
             fi
@@ -279,6 +304,14 @@ case "$MATCHER" in
 
         # Use updatedInput to limit Read to 150 lines + advisory context.
         offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
+        # Phase 2: hard-deny on indexed-file large Read at offset=0 (unless escape hatch)
+        if [[ "${CC_SOUL_HOOK_ENFORCE:-0}" == "1" && "$is_indexed" == "1" \
+              && "$offset" == "0" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "indexed-large-offset0" 1
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file (%d lines). Use mcp__chitta-bridge__read_symbol or smart_context instead of Read. Set CC_SOUL_ALLOW_READ=1 to override."}}' "$line_count"
+            exit 0
+        fi
+        _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "truncate" "large-file" 0
         escaped_path=$(echo -n "$file_path" | jq -Rs '.')
         if [[ -n "$advisory" ]]; then
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Large file (%d lines). Reading first 150. Use offset for later sections. %s","updatedInput":{"file_path":%s,"limit":150,"offset":%s}}}' \
@@ -308,14 +341,28 @@ case "$MATCHER" in
         ;;
 
     Edit)
-        # Code intelligence advisory: suggest symbol_patch/file_patch for indexed files
+        # Code intelligence advisory / enforcement
         file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
+        old_str_len=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' | wc -c)
+        is_indexed=0
+        dir_syms=0
         if [[ -n "$file_path" && -x "$CHITTA_BIN" ]] && daemon_available; then
             dir_path=$(dirname "$file_path")
             dir_syms=$(timeout 1 "$CHITTA_BIN" code_context --path "$dir_path" --json 2>/dev/null | jq -r '.dir_symbols // 0' 2>/dev/null || echo 0)
-            if [[ "$dir_syms" -gt 0 ]]; then
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] File is indexed. Prefer symbol_patch(file,symbol,body) or file_patch(file,old_str,new_str) — no Read needed, fewer tokens."}}\n'
-            fi
+            [[ "$dir_syms" -gt 0 ]] && is_indexed=1
+        fi
+
+        # Phase 2: hard-deny on indexed + large old_str (whole-function territory)
+        if [[ "${CC_SOUL_HOOK_ENFORCE:-0}" == "1" && "$is_indexed" == "1" \
+              && "$old_str_len" -gt 500 && "${CC_SOUL_ALLOW_EDIT:-0}" != "1" ]]; then
+            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "deny" "indexed-large-old_str" 1
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file with large Edit (old_string=%d chars). Use mcp__chitta-bridge__symbol_patch or file_patch. Set CC_SOUL_ALLOW_EDIT=1 to override."}}' "$old_str_len"
+            exit 0
+        fi
+
+        if [[ "$is_indexed" == "1" ]]; then
+            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "advise" "indexed" 0
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] File is indexed. Prefer symbol_patch(file,symbol,body) or file_patch(file,old_str,new_str) — no Read needed, fewer tokens."}}\n'
         fi
 
         # ─── Edit → symbol_patch redirect ─────────────────────────────────────────────
