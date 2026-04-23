@@ -22,9 +22,34 @@ json_escape() {
 }
 
 # ─── Code-intel shadow/enforcement ────────────────────────────────────────────
-# Phase 1 (default): log what the hook WOULD do without changing behavior.
-# Phase 2 (opt-in):  set CC_SOUL_HOOK_ENFORCE=1 to actually deny/route.
+# Phase 1 (initial): log what the hook WOULD do without changing behavior.
+# Phase 2 (auto):    once shadow log has ≥100 entries AND is ≥3 days old, the
+#                    hook flips to enforce mode automatically. No env var needed.
+#                    Explicit CC_SOUL_HOOK_ENFORCE=0 disables; =1 forces on early.
 # Escape hatch:      CC_SOUL_ALLOW_EDIT=1 or CC_SOUL_ALLOW_READ=1 bypass per env.
+_should_enforce() {
+    # Explicit override wins
+    case "${CC_SOUL_HOOK_ENFORCE:-}" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    local mind="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+    local log="$mind/.hook_shadow.jsonl"
+    [[ -f "$log" ]] || return 1
+    local n age
+    n=$(wc -l < "$log" 2>/dev/null || echo 0)
+    [[ "$n" -ge 100 ]] || return 1
+    # age in days since first entry
+    age=$(( ( $(date +%s) - $(stat -c %Y "$log" 2>/dev/null || echo 0) ) / 86400 ))
+    # stat %Y is mtime — use ctime of first log line as proxy via head
+    local first_ts first_epoch
+    first_ts=$(head -1 "$log" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)
+    if [[ -n "$first_ts" ]]; then
+        first_epoch=$(date -d "$first_ts" +%s 2>/dev/null || echo 0)
+        age=$(( ( $(date +%s) - first_epoch ) / 86400 ))
+    fi
+    [[ "$age" -ge 3 ]]
+}
 #
 # Log format: one JSON line per Read/Edit decision →
 #   $MIND_PATH/.hook_shadow.jsonl
@@ -305,8 +330,8 @@ case "$MATCHER" in
         # Use updatedInput to limit Read to 150 lines + advisory context.
         offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
         # Phase 2: hard-deny on indexed-file large Read at offset=0 (unless escape hatch)
-        if [[ "${CC_SOUL_HOOK_ENFORCE:-0}" == "1" && "$is_indexed" == "1" \
-              && "$offset" == "0" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+        if _should_enforce && [[ "$is_indexed" == "1" && "$offset" == "0" \
+              && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
             _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "indexed-large-offset0" 1
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file (%d lines). Use mcp__chitta-bridge__read_symbol or smart_context instead of Read. Set CC_SOUL_ALLOW_READ=1 to override."}}' "$line_count"
             exit 0
@@ -353,8 +378,8 @@ case "$MATCHER" in
         fi
 
         # Phase 2: hard-deny on indexed + large old_str (whole-function territory)
-        if [[ "${CC_SOUL_HOOK_ENFORCE:-0}" == "1" && "$is_indexed" == "1" \
-              && "$old_str_len" -gt 500 && "${CC_SOUL_ALLOW_EDIT:-0}" != "1" ]]; then
+        if _should_enforce && [[ "$is_indexed" == "1" && "$old_str_len" -gt 500 \
+              && "${CC_SOUL_ALLOW_EDIT:-0}" != "1" ]]; then
             _shadow_log "Edit" "$file_path" 0 "$is_indexed" "deny" "indexed-large-old_str" 1
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file with large Edit (old_string=%d chars). Use mcp__chitta-bridge__symbol_patch or file_patch. Set CC_SOUL_ALLOW_EDIT=1 to override."}}' "$old_str_len"
             exit 0

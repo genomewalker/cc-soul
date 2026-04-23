@@ -27,9 +27,13 @@ pkill -f "chitta mcp" 2>/dev/null; sleep 1
 `$MIND/.hook_shadow.jsonl` (shadow mode, default). Fields:
 `tool,file,lines,indexed,decision,reason,enforced`.
 
+Enforce mode auto-activates once shadow log has ≥100 entries AND is
+≥3 days old — no manual env flip needed.
+
 | Env | Effect |
 |---|---|
-| `CC_SOUL_HOOK_ENFORCE=1` | Hard-deny Read on indexed >200L @offset=0, Edit on indexed with old_string >500 chars |
+| `CC_SOUL_HOOK_ENFORCE=1` | Force enforce on early (skip wait) |
+| `CC_SOUL_HOOK_ENFORCE=0` | Force shadow only (disable enforcement) |
 | `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session |
 | `CC_SOUL_ALLOW_EDIT=1`   | Bypass Edit deny for this session |
 
