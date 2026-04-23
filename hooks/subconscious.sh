@@ -99,6 +99,38 @@ is_running() {
     return 1
 }
 
+# Return PIDs of chittad daemons that are NOT bound to our MIND_PATH.
+# Covers bare `chittad daemon` (no --path) and daemons with a different path
+# that still share our socket dir — sources of split-brain storage.
+find_stray_daemons() {
+    local all_pids stray_pids=""
+    all_pids=$(pgrep -x chittad 2>/dev/null || true)
+    for pid in $all_pids; do
+        [[ -r "/proc/$pid/cmdline" ]] || continue
+        local cmdline
+        cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+        if [[ "$cmdline" != *"--path $MIND_PATH"* ]]; then
+            stray_pids+="$pid "
+        fi
+    done
+    echo "${stray_pids% }"
+}
+
+# Kill any daemons whose --path != MIND_PATH. Quiet when nothing to do.
+kill_stray_daemons() {
+    local strays
+    strays=$(find_stray_daemons)
+    [[ -z "$strays" ]] && return 0
+    echo "[subconscious] Killing stray daemon(s) with wrong/missing --path: $strays" >&2
+    for pid in $strays; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    sleep 1
+    for pid in $strays; do
+        kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    done
+}
+
 # Check if daemon actually responds to commands (not just running)
 is_responsive() {
     if [[ ! -S "$SOCKET_PATH" ]]; then
@@ -143,6 +175,10 @@ kill_unresponsive() {
 }
 
 cmd_start() {
+    # Sweep stray daemons (wrong/missing --path) before anything else to
+    # prevent split-brain storage with the legitimate daemon.
+    kill_stray_daemons
+
     # When systemd manages the daemon, delegate to it and just wait for readiness
     if uses_systemd; then
         systemctl --user start chittad 2>/dev/null || true
