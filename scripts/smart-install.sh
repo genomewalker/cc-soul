@@ -1002,6 +1002,9 @@ main() {
     # Mark as installed
     echo "$current_version" > "$MARKER"
     echo "[cc-soul] Installation complete (v$current_version)"
+    echo "[cc-soul] Shared backend is ready at ~/.claude/bin and ~/.claude/mind"
+    echo "[cc-soul] For dual frontend setup use: chitta-stack install all"
+    echo "[cc-soul] Inspect frontend wiring with: chitta-stack status"
 }
 
 main "$@"

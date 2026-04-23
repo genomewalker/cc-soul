@@ -115,6 +115,45 @@ git clone https://github.com/genomewalker/cc-soul.git
 cd cc-soul && ./scripts/smart-install.sh
 ```
 
+## Shared Stack: Claude Code + Codex
+
+`cc-soul` is the shared backend. Claude Code and Codex are frontend adapters that can point at the same daemon, socket, and memory store.
+
+```text
+shared backend   ~/.claude/bin/chitta + ~/.claude/bin/chittad + ~/.claude/mind
+Claude adapter   Claude Code MCP registration for `chitta`
+Codex adapter    Codex cc-soul plugin/hooks + optional `chitta-bridge`
+```
+
+Use the stack-aware installer when you want one machine to host both frontends cleanly:
+
+```bash
+# From the repo
+./scripts/shared-stack.sh install all
+
+# Or after chitta-mcp is installed
+chitta-stack install all
+
+# Inspect what is wired up
+chitta-stack status
+```
+
+Useful targets:
+
+```bash
+chitta-stack install shared       # backend only
+chitta-stack install claude-code  # Claude adapter only
+chitta-stack install codex        # Codex adapter + bridge
+chitta-stack install codex --skip-bridge
+chitta-stack uninstall codex
+```
+
+The intent is explicit:
+
+- `smart-install.sh` owns the shared runtime in `~/.claude/`
+- `chitta-mcp-install` wires Claude Code and the Codex `cc-soul` plugin to that runtime
+- `chitta-bridge-install codex` adds Codex-only bridge tools without changing the shared daemon
+
 ## How It Works
 
 ```
