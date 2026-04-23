@@ -37,13 +37,38 @@ std::vector<ConversationTurn> TranscriptParser::parse(
             auto entry = json::parse(line);
             std::string type = entry.value("type", "");
 
-            if (type != "user" && type != "assistant") continue;
+            std::string role;
+            std::string content;
 
-            std::string content = extract_content(entry, options.include_thinking, options.filter_system_reminders);
+            if (type == "user" || type == "assistant") {
+                // Claude format: top-level role, content under entry.message.content
+                role = type;
+                content = extract_content(entry, options.include_thinking, options.filter_system_reminders);
+            } else if (type == "response_item" && entry.contains("payload")) {
+                // Codex format: role + content nested under payload
+                const auto& p = entry["payload"];
+                std::string ptype = p.value("type", "");
+                std::string prole = p.value("role", "");
+
+                if (ptype == "message" && (prole == "user" || prole == "assistant")) {
+                    role = prole;
+                    content = extract_content_codex(p, options.filter_system_reminders);
+                } else if (options.include_thinking && ptype == "reasoning") {
+                    role = "assistant";
+                    content = extract_reasoning_codex(p);
+                } else if (ptype == "function_call") {
+                    role = "assistant";
+                    content = extract_function_call_codex(p);
+                } else {
+                    continue;  // developer role, tool outputs, etc.
+                }
+            } else {
+                continue;  // session_meta, event_msg, unknown
+            }
 
             if (!content.empty()) {
                 ConversationTurn turn;
-                turn.role = type;
+                turn.role = role;
                 turn.content = content;
                 turn.line_number = current_line;
                 turn.turn_index = turn_index++;
@@ -126,6 +151,52 @@ std::string TranscriptParser::extract_content(const nlohmann::json& entry, bool 
     }
 
     return content;
+}
+
+std::string TranscriptParser::extract_content_codex(const nlohmann::json& payload, bool filter_reminders) {
+    std::string content;
+    if (!payload.contains("content")) return content;
+    const auto& c = payload["content"];
+    if (!c.is_array()) return content;
+
+    for (const auto& block : c) {
+        std::string btype = block.value("type", "");
+        if ((btype == "input_text" || btype == "output_text") && block.contains("text")) {
+            std::string text = block["text"].get<std::string>();
+            if (filter_reminders) text = filter_system_reminders(text);
+            if (text.find_first_not_of(" \t\n\r") == std::string::npos) continue;
+            if (!content.empty()) content += "\n";
+            content += text;
+        }
+    }
+    return content;
+}
+
+std::string TranscriptParser::extract_reasoning_codex(const nlohmann::json& payload) {
+    std::string content;
+    if (payload.contains("summary") && payload["summary"].is_array()) {
+        for (const auto& s : payload["summary"]) {
+            if (s.is_object() && s.contains("text")) {
+                std::string t = s["text"].get<std::string>();
+                if (t.size() > 100) {
+                    if (!content.empty()) content += "\n";
+                    content += t;
+                }
+            }
+        }
+    }
+    if (content.empty()) return "";
+    return "<thinking>\n" + content + "\n</thinking>";
+}
+
+std::string TranscriptParser::extract_function_call_codex(const nlohmann::json& payload) {
+    std::string name = payload.value("name", "");
+    if (name.empty()) return "";
+    static const std::unordered_set<std::string> ops = {"Bash","Read","Write","Edit","Glob","Grep"};
+    if (!ops.count(name)) return "";
+    std::string args = payload.value("arguments", "");
+    if (args.size() > 200) args = args.substr(0, 200);
+    return "[tool:" + name + "] " + args;
 }
 
 std::string TranscriptParser::filter_system_reminders(const std::string& text) {

@@ -66,8 +66,17 @@ public:
 private:
     std::string last_error_;
 
-    // Extract text content from message JSON
+    // Extract text content from Claude message JSON
     static std::string extract_content(const nlohmann::json& entry, bool include_thinking, bool filter_reminders);
+
+    // Extract text content from Codex response_item payload (role=user|assistant, type=message)
+    static std::string extract_content_codex(const nlohmann::json& payload, bool filter_reminders);
+
+    // Extract reasoning summary from Codex response_item payload (type=reasoning)
+    static std::string extract_reasoning_codex(const nlohmann::json& payload);
+
+    // Extract function_call from Codex response_item payload as [tool:Name] args
+    static std::string extract_function_call_codex(const nlohmann::json& payload);
 
     // Filter out <system-reminder> tags from text
     static std::string filter_system_reminders(const std::string& text);

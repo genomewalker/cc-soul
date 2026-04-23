@@ -293,28 +293,54 @@
             if (obj.is_discarded()) continue;
 
             std::string type = obj.value("type", "");
-            if (type != "user" && type != "assistant") continue;
-
+            std::string role;
             std::string content;
-            if (obj.contains("message")) {
-                const auto& msg = obj["message"];
-                if (msg.contains("content")) {
-                    const auto& mc = msg["content"];
-                    if (mc.is_string()) {
-                        content = mc.get<std::string>();
-                    } else if (mc.is_array()) {
-                        for (const auto& block : mc) {
-                            if (block.contains("text") && block["text"].is_string()) {
-                                if (!content.empty()) content += "\n";
-                                content += block["text"].get<std::string>();
+
+            if (type == "user" || type == "assistant") {
+                // Claude format
+                role = type;
+                if (obj.contains("message")) {
+                    const auto& msg = obj["message"];
+                    if (msg.contains("content")) {
+                        const auto& mc = msg["content"];
+                        if (mc.is_string()) {
+                            content = mc.get<std::string>();
+                        } else if (mc.is_array()) {
+                            for (const auto& block : mc) {
+                                if (block.contains("text") && block["text"].is_string()) {
+                                    if (!content.empty()) content += "\n";
+                                    content += block["text"].get<std::string>();
+                                }
                             }
                         }
                     }
                 }
+            } else if (type == "response_item" && obj.contains("payload")) {
+                // Codex format
+                const auto& p = obj["payload"];
+                std::string ptype = p.value("type", "");
+                std::string prole = p.value("role", "");
+
+                if (ptype == "message" && (prole == "user" || prole == "assistant")
+                    && p.contains("content") && p["content"].is_array()) {
+                    role = prole;
+                    for (const auto& block : p["content"]) {
+                        std::string btype = block.value("type", "");
+                        if ((btype == "input_text" || btype == "output_text")
+                            && block.contains("text") && block["text"].is_string()) {
+                            if (!content.empty()) content += "\n";
+                            content += block["text"].get<std::string>();
+                        }
+                    }
+                } else {
+                    continue;  // reasoning/function_call/developer/tool_outputs skipped here
+                }
+            } else {
+                continue;  // session_meta, event_msg, unknown
             }
 
             if (content.empty()) continue;
-            all_turns.push_back({type, content, line_number, turn_idx++});
+            all_turns.push_back({role, content, line_number, turn_idx++});
         }
 
         size_t total_chars = 0;
