@@ -1001,10 +1001,78 @@ main() {
 
     # Mark as installed
     echo "$current_version" > "$MARKER"
+
+    # Write stack-state manifest (backend portion)
+    write_stack_state_backend "$current_version"
+
+    # Auto-refresh Codex adapter if Codex is present on this machine
+    propagate_to_codex "$current_version"
+
     echo "[cc-soul] Installation complete (v$current_version)"
     echo "[cc-soul] Shared backend is ready at ~/.claude/bin and ~/.claude/mind"
     echo "[cc-soul] For dual frontend setup use: chitta-stack install all"
     echo "[cc-soul] Inspect frontend wiring with: chitta-stack status"
+}
+
+# Write or update ~/.claude/mind/.stack-state.json (backend fields only).
+# Uses python3 for atomic JSON merge; falls back to raw overwrite.
+write_stack_state_backend() {
+    local version="$1"
+    local state_file="${MIND_PATH}/.stack-state.json"
+    local timestamp
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    mkdir -p "$MIND_PATH" 2>/dev/null || true
+
+    if command -v python3 &>/dev/null; then
+        python3 - "$state_file" "$version" "$timestamp" <<'PYEOF' 2>/dev/null || true
+import json, os, sys, tempfile
+path, version, ts = sys.argv[1], sys.argv[2], sys.argv[3]
+data = {}
+try:
+    with open(path) as f: data = json.load(f)
+except Exception: pass
+data["backend"] = version
+data["backend_updated_at"] = ts
+data.setdefault("updated_at", ts)
+data["updated_at"] = ts
+tmp = tempfile.NamedTemporaryFile("w", dir=os.path.dirname(path) or ".", delete=False)
+json.dump(data, tmp, indent=2)
+tmp.close()
+os.replace(tmp.name, path)
+PYEOF
+    else
+        printf '{"backend":"%s","backend_updated_at":"%s","updated_at":"%s"}\n' \
+            "$version" "$timestamp" "$timestamp" > "$state_file"
+    fi
+}
+
+# If Codex is installed on this machine, refresh its adapter cache to match backend.
+propagate_to_codex() {
+    local version="$1"
+    local codex_cache="${HOME}/.codex/plugins/cache/local/cc-soul/local"
+
+    [[ -d "$codex_cache" ]] || return 0
+
+    local stack_cmd
+    if command -v chitta-stack &>/dev/null; then
+        stack_cmd="chitta-stack"
+    elif [[ -x "${BIN_DIR%/bin}/bin/chitta-stack" ]]; then
+        stack_cmd="${BIN_DIR%/bin}/bin/chitta-stack"
+    elif [[ -x "${HOME}/.local/bin/chitta-stack" ]]; then
+        stack_cmd="${HOME}/.local/bin/chitta-stack"
+    else
+        echo "[cc-soul] Codex detected but chitta-stack not on PATH — skipping adapter refresh"
+        echo "[cc-soul] Run: chitta-stack install codex"
+        return 0
+    fi
+
+    echo "[cc-soul] Codex detected — refreshing adapter (v$version)"
+    if "$stack_cmd" install codex --skip-bridge >/dev/null 2>&1; then
+        echo "[cc-soul] Codex adapter refreshed"
+    else
+        echo "[cc-soul] WARN: Codex adapter refresh failed — run: chitta-stack install codex"
+    fi
 }
 
 main "$@"

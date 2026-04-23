@@ -89,6 +89,31 @@ def _json_file(path: Path) -> dict:
         return {}
 
 
+def _stack_state_path() -> Path:
+    return _claude_home() / "mind" / ".stack-state.json"
+
+
+def _read_stack_state() -> dict:
+    return _json_file(_stack_state_path())
+
+
+def _write_stack_state(patch: dict) -> None:
+    from datetime import datetime, timezone
+    path = _stack_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = _read_stack_state()
+    data.update(patch)
+    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(path)
+
+
+def _installed_backend_version() -> str:
+    raw = _command_version(str(_claude_home() / "bin" / "chitta"))
+    return raw.split()[-1] if raw else ""
+
+
 def _distribution_records(name: str) -> list[dict[str, str | Path]]:
     records: list[dict[str, str | Path]] = []
     for dist in importlib.metadata.distributions():
@@ -171,14 +196,96 @@ def install_stack(target: str, *, skip_bridge: bool) -> int:
 
     if target in {"claude-code", "all"}:
         ok = mcp_install._install_claude_code() and ok
+        _write_stack_state({"claude_adapter": _distribution_version("chitta-mcp")})
 
     if target in {"codex", "all"}:
         ok = mcp_install._install_codex() and ok
+        _write_stack_state({"codex_adapter": _distribution_version("chitta-mcp")})
         if not skip_bridge:
-            _install_codex_bridge()
+            if _install_codex_bridge():
+                _write_stack_state({"bridge": _distribution_version("chitta-bridge")})
 
     print("\ndone." if ok else "\ncompleted with warnings.")
     return 0 if ok else 1
+
+
+def heal_stack(*, check_only: bool = False) -> int:
+    """Detect drift between the stack-state manifest and the installed pieces. By default reinstalls drifted parts; with check_only=True, only reports and returns non-zero on drift."""
+    print("chitta-stack heal (check-only):" if check_only else "chitta-stack heal:")
+    drift_count = 0
+    state = _read_stack_state()
+    backend_actual = _installed_backend_version()
+    backend_recorded = state.get("backend", "")
+
+    if not backend_actual:
+        print("  backend: not installed — run: chitta-stack install shared")
+        return 1
+
+    if backend_recorded and backend_actual != backend_recorded:
+        print(f"  backend drift: installed {backend_actual}, manifest {backend_recorded}")
+        drift_count += 1
+        if not check_only:
+            if not _install_shared_backend():
+                return 1
+            backend_actual = _installed_backend_version()
+    else:
+        print(f"  backend: {backend_actual} (ok)")
+    if not check_only:
+        _write_stack_state({"backend": backend_actual})
+
+    claude_settings = _json_file(_claude_home() / "settings.json")
+    claude_configured = bool(((claude_settings.get("mcpServers") or {}).get("chitta") or {}).get("command"))
+    claude_adapter = state.get("claude_adapter", "")
+    mcp_version = _distribution_version("chitta-mcp")
+
+    if claude_configured:
+        if mcp_version and claude_adapter and mcp_version != claude_adapter:
+            print(f"  Claude adapter drift: manifest {claude_adapter}, installed {mcp_version}")
+            drift_count += 1
+            if not check_only:
+                mcp_install._install_claude_code()
+                mcp_version = _distribution_version("chitta-mcp")
+        else:
+            print(f"  Claude adapter: {mcp_version or 'unknown'} (ok)")
+        if mcp_version and not check_only:
+            _write_stack_state({"claude_adapter": mcp_version})
+    else:
+        print("  Claude adapter: not configured — run: chitta-stack install claude-code")
+
+    codex_present = (_codex_home() / "plugins" / "cache" / "local" / "cc-soul" / "local").is_dir()
+    if codex_present:
+        codex_adapter = state.get("codex_adapter", "")
+        if not codex_adapter or codex_adapter != backend_actual:
+            print(f"  Codex adapter drift: manifest {codex_adapter or 'missing'}, backend {backend_actual}")
+            drift_count += 1
+            if not check_only:
+                mcp_install._install_codex()
+                _write_stack_state({"codex_adapter": _distribution_version("chitta-mcp")})
+        else:
+            print(f"  Codex adapter: {codex_adapter} (ok)")
+
+        bridge_installed = _distribution_version("chitta-bridge")
+        bridge_recorded = state.get("bridge", "")
+        if bridge_installed and bridge_installed != bridge_recorded:
+            print(f"  Bridge manifest out of date: installed {bridge_installed}, manifest {bridge_recorded or 'missing'}")
+            drift_count += 1
+            if not check_only:
+                _write_stack_state({"bridge": bridge_installed})
+        elif bridge_installed:
+            print(f"  Bridge: {bridge_installed} (ok)")
+        else:
+            print("  Bridge: not installed")
+    else:
+        print("  Codex: not present on this machine")
+
+    if check_only:
+        if drift_count:
+            print(f"\n{drift_count} drift(s) detected — run: chitta-stack heal")
+            return 2
+        print("\nno drift.")
+        return 0
+    print("\nheal complete.")
+    return 0
 
 
 def uninstall_stack(target: str, *, skip_bridge: bool) -> int:
@@ -331,6 +438,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Remove stale dist-info directories for chitta-mcp and chitta-bridge",
     )
+    heal_p = sub.add_parser("heal", help="Reinstall any stack component that drifted from the manifest")
+    heal_p.add_argument(
+        "--check",
+        action="store_true",
+        help="Report drift without reinstalling (exit 2 when drift detected)",
+    )
     return parser
 
 
@@ -342,6 +455,8 @@ def main() -> None:
         raise SystemExit(uninstall_stack(args.target, skip_bridge=args.skip_bridge))
     if args.command == "doctor":
         raise SystemExit(doctor_stack(fix=args.fix))
+    if args.command == "heal":
+        raise SystemExit(heal_stack(check_only=args.check))
     raise SystemExit(print_status())
 
 
