@@ -33,22 +33,38 @@ _should_enforce() {
         1) return 0 ;;
         0) return 1 ;;
     esac
+    # Cache result per-session to avoid re-computing on every Read/Edit.
+    # Session_id comes from STDIN_DATA, cached in /tmp (per-node safe).
+    local sid
+    sid=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null)
+    local cache="/tmp/cc-soul-enforce-${sid:-unknown}-$USER"
+    if [[ -f "$cache" ]]; then
+        local cached
+        cached=$(cat "$cache" 2>/dev/null)
+        [[ "$cached" == "1" ]] && return 0
+        [[ "$cached" == "0" ]] && return 1
+    fi
+
     local mind="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
     local log="$mind/.hook_shadow.jsonl"
-    [[ -f "$log" ]] || return 1
-    local n age
-    n=$(wc -l < "$log" 2>/dev/null || echo 0)
-    [[ "$n" -ge 100 ]] || return 1
-    # age in days since first entry
-    age=$(( ( $(date +%s) - $(stat -c %Y "$log" 2>/dev/null || echo 0) ) / 86400 ))
-    # stat %Y is mtime — use ctime of first log line as proxy via head
-    local first_ts first_epoch
-    first_ts=$(head -1 "$log" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)
-    if [[ -n "$first_ts" ]]; then
-        first_epoch=$(date -d "$first_ts" +%s 2>/dev/null || echo 0)
-        age=$(( ( $(date +%s) - first_epoch ) / 86400 ))
+    local decision=0  # default: off
+    if [[ -f "$log" && -r "$log" ]]; then
+        local n first_ts first_epoch age
+        n=$(wc -l < "$log" 2>/dev/null || echo 0)
+        if [[ "${n:-0}" -ge 100 ]]; then
+            first_ts=$(head -1 "$log" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)
+            if [[ -n "$first_ts" ]]; then
+                first_epoch=$(date -d "$first_ts" +%s 2>/dev/null || echo 0)
+                if [[ "$first_epoch" -gt 0 ]]; then
+                    age=$(( ( $(date +%s) - first_epoch ) / 86400 ))
+                    [[ "$age" -ge 3 ]] && decision=1
+                fi
+            fi
+        fi
     fi
-    [[ "$age" -ge 3 ]]
+    # Cache for rest of session (ignore write errors)
+    [[ -n "$sid" ]] && echo "$decision" > "$cache" 2>/dev/null
+    [[ "$decision" == "1" ]]
 }
 #
 # Log format: one JSON line per Read/Edit decision →
@@ -56,15 +72,23 @@ _should_enforce() {
 # Fields: ts, tool, file, lines, indexed, decision, reason, enforced
 _shadow_log() {
     local mind="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
-    [[ -d "$mind" ]] || return 0
+    [[ -d "$mind" && -w "$mind" ]] || return 0
     local log="$mind/.hook_shadow.jsonl"
+    # Cap log at 10MB — rotate to .1 if exceeded
+    if [[ -f "$log" ]]; then
+        local sz
+        sz=$(stat -c %s "$log" 2>/dev/null || echo 0)
+        if [[ "$sz" -gt 10485760 ]]; then
+            mv "$log" "$log.1" 2>/dev/null || true
+        fi
+    fi
     local ts tool file lines indexed decision reason enforced
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     tool="$1"; file="$2"; lines="$3"; indexed="$4"
     decision="$5"; reason="$6"; enforced="$7"
     printf '{"ts":"%s","tool":"%s","file":%s,"lines":%s,"indexed":%s,"decision":"%s","reason":%s,"enforced":%s}\n' \
-        "$ts" "$tool" "$(echo -n "$file" | jq -Rs '.')" "${lines:-0}" "${indexed:-0}" \
-        "$decision" "$(echo -n "$reason" | jq -Rs '.')" "${enforced:-0}" \
+        "$ts" "$tool" "$(echo -n "$file" | jq -Rs '.' 2>/dev/null || echo '""')" "${lines:-0}" "${indexed:-0}" \
+        "$decision" "$(echo -n "$reason" | jq -Rs '.' 2>/dev/null || echo '""')" "${enforced:-0}" \
         >> "$log" 2>/dev/null || true
 }
 
