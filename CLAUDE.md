@@ -37,4 +37,6 @@ Enforce mode auto-activates once shadow log has ≥100 entries AND is
 | `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session |
 | `CC_SOUL_ALLOW_EDIT=1`   | Bypass Edit deny for this session |
 
-Review data before flipping: `jq -s 'group_by(.decision) \| map({k:.[0].decision,n:length})' ~/.claude/mind/.hook_shadow.jsonl`
+Review data: `./scripts/hook-stats.sh` (decisions, reasons, tool split, enforce-status).
+
+⚠️ **Testing manually**: `CC_SOUL_HOOK_ENFORCE=1 bash hook.sh Read` won't work — the prefix-assignment isn't exported to nested bash. Use `export CC_SOUL_HOOK_ENFORCE=1` first.
