@@ -1,0 +1,567 @@
+// field_memory_recall RPC handlers — bodies for declarations in
+// chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
+
+#include "../../include/chitta/rpc/field_handler.hpp"
+
+namespace chitta {
+
+ToolResult FieldRpcHandler::tool_remember(const json& params) {
+    std::string content = params.value("content", "");
+    if (content.empty()) return ToolResult::error("content is required");
+
+    if (sandbox::is_sandboxed()) {
+        std::string dead_id = sandbox::dead_letter_write(
+            failed_queue_path_, queue_fail_count_, "remember", params);
+        return ToolResult::ok(
+            "Sandboxed write diverted to dead-letter queue",
+            {{"sandboxed", true}, {"dead_lettered_id", dead_id}, {"tool", "remember"}});
+    }
+
+    std::string kind  = params.value("type", "episode");
+    std::string realm = params.value("realm", "brahman");
+    float confidence  = params.value("confidence", 0.8f);
+    float decay_rate  = 0.001f;
+
+    // Code-intel kinds get zero decay
+    static const std::unordered_set<std::string> code_kinds = {
+        "symbol", "projectessence", "modulestate", "patternstate"
+    };
+    if (code_kinds.count(kind)) decay_rate = 0.0f;
+
+    auto embedding = embed_text(content);
+
+    uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
+
+    // Create triplets from tags if provided (array or comma-separated string)
+    if (params.contains("tags")) {
+        if (params["tags"].is_array()) {
+            for (const auto& tag : params["tags"]) {
+                if (tag.is_string()) {
+                    field_store_->add_triplet(
+                        std::to_string(id), "tagged", tag.get<std::string>());
+                }
+            }
+        } else if (params["tags"].is_string()) {
+            std::istringstream iss(params["tags"].get<std::string>());
+            std::string tag;
+            while (std::getline(iss, tag, ',')) {
+                tag.erase(0, tag.find_first_not_of(' '));
+                tag.erase(tag.find_last_not_of(' ') + 1);
+                if (!tag.empty()) field_store_->add_triplet(std::to_string(id), "tagged", tag);
+            }
+        }
+    }
+
+    std::string id_str = std::to_string(id);
+    return ToolResult::ok("Stored memory #" + id_str, {
+        {"id", id_str}, {"type", kind}, {"realm", realm}
+    });
+}
+
+ToolResult FieldRpcHandler::tool_recall(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+
+    size_t limit      = static_cast<size_t>(params.value("limit", 10));
+    std::string realm = params.value("realm", "");
+    std::string tag   = params.value("tag", "");
+
+    auto embedding = embed_query(query);
+    if (embedding.empty()) return ToolResult::error("Failed to embed query");
+
+    // Fetch more than needed so tag filtering has candidates to work with
+    size_t fetch_limit = tag.empty() ? limit : limit * 8;
+    auto hits = field_store_->recall(embedding, fetch_limit, realm);
+
+    // Filter orphaned HNSW entries (deleted payloads with lingering vectors)
+    hits.erase(
+        std::remove_if(hits.begin(), hits.end(),
+            [](const FieldRecallHit& h) { return h.content.empty(); }),
+        hits.end());
+
+    // Hard-filter by tag: keep only memories that have (id, "tagged", tag) triplet
+    if (!tag.empty()) {
+        std::string triplets_json = field_store_->query_object(tag);
+        std::unordered_set<uint64_t> tagged_ids;
+        try {
+            auto tj = json::parse(triplets_json);
+            for (const auto& t : tj) {
+                if (t.value("predicate", "") == "tagged") {
+                    try { tagged_ids.insert(std::stoull(t.value("subject", "0"))); }
+                    catch (...) {}
+                }
+            }
+        } catch (...) {}
+
+        if (!tagged_ids.empty()) {
+            // Filter semantic hits to tagged set
+            hits.erase(
+                std::remove_if(hits.begin(), hits.end(),
+                    [&](const FieldRecallHit& h) { return tagged_ids.find(h.memory_id) == tagged_ids.end(); }),
+                hits.end());
+
+            // If no semantic hits matched tags, fetch tagged memories directly
+            if (hits.empty()) {
+                for (uint64_t tid : tagged_ids) {
+                    if (hits.size() >= limit) break;
+                    std::string content = field_store_->get_content(tid);
+                    if (content.empty()) continue;
+                    std::string meta_json = field_store_->get_memory_metadata(tid);
+                    FieldRecallHit h;
+                    h.memory_id    = tid;
+                    h.score        = 1.0f;
+                    h.semantic_score = 0.0f;
+                    h.content      = content;
+                    try {
+                        auto m = json::parse(meta_json);
+                        h.ts_ms        = m.value("ts_ms", int64_t(0));
+                        h.strength     = m.value("strength", 0.5f);
+                        h.confidence   = m.value("confidence", 0.5f);
+                        h.access_count = m.value("access_count", uint32_t(0));
+                        h.kind         = m.value("kind", "episode");
+                        h.realm        = m.value("realm", "");
+                    } catch (...) {}
+                    hits.push_back(std::move(h));
+                }
+            }
+
+            if (hits.size() > limit) hits.resize(limit);
+        }
+    }
+
+    // Hebbian co-occurrence: strengthen associations between co-retrieved memories
+    if (hits.size() >= 2) {
+        std::vector<uint64_t> ids;
+        ids.reserve(hits.size());
+        for (const auto& h : hits) ids.push_back(h.memory_id);
+        field_store_->record_co_retrieval(ids);
+    }
+
+    // Drift scoring: anti-perseveration penalty + curiosity boost
+    {
+        const size_t total = field_store_->memory_count();
+        if (total >= 5 && !hits.empty()) {
+            const float max_access = 10.0f;
+            const float exploration = 1.0f;
+            for (auto& h : hits) {
+                float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+                float anti_perserv = 1.0f - 0.25f * saturation;
+                float curiosity = (total > 0)
+                    ? exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                              (static_cast<float>(h.access_count) + 1.0f))
+                    : 0.0f;
+                float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+                h.score = h.score * anti_perserv * curiosity_mul;
+            }
+            std::sort(hits.begin(), hits.end(),
+                      [](const FieldRecallHit& a, const FieldRecallHit& b) {
+                          return a.score > b.score;
+                      });
+        }
+    }
+
+    bool explain = params.value("explain", false);
+    json results_json = hits_to_results_json(hits, explain);
+
+    std::ostringstream ss;
+    ss << "Found " << hits.size() << " results";
+    if (!realm.empty()) ss << " in realm '" << realm << "'";
+    ss << ":\n";
+    for (const auto& r : results_json) {
+        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
+           << r.value("text", "").substr(0, 400) << "\n";
+    }
+
+    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+    fire_recall_callback(results_json, 1);
+    return result;
+}
+
+ToolResult FieldRpcHandler::tool_recall_temporal(const json& params) {
+    std::string query = params.value("query", "");
+    std::string realm = params.value("realm", "");
+    size_t limit      = static_cast<size_t>(params.value("limit", 20));
+
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t start_ms = 0, end_ms = 0;
+    if (params.contains("start")) {
+        auto ts = parse_timestamp_str(params["start"].get<std::string>());
+        if (ts) start_ms = *ts;
+    }
+    if (params.contains("end")) {
+        auto ts = parse_timestamp_str(params["end"].get<std::string>());
+        if (ts) end_ms = *ts;
+    }
+
+    // Default: last 7 days when neither specified
+    if (start_ms == 0 && end_ms == 0) {
+        end_ms = now_ms;
+        start_ms = end_ms - (7LL * 24 * 3600 * 1000);
+    }
+    // If only start specified, default end to now
+    if (end_ms == 0) {
+        end_ms = now_ms;
+    }
+
+    auto hits = field_store_->recall_temporal(start_ms, end_ms, limit, realm);
+
+    // If query provided, re-rank by semantic similarity
+    if (!query.empty() && !hits.empty()) {
+        auto qemb = embed_query(query);
+        if (!qemb.empty()) {
+            auto semantic_hits = field_store_->recall(qemb, limit, realm);
+            semantic_hits.erase(
+                std::remove_if(semantic_hits.begin(), semantic_hits.end(),
+                    [](const FieldRecallHit& h) { return h.content.empty(); }),
+                semantic_hits.end());
+            json temporal_json = hits_to_results_json(hits);
+            json semantic_json = hits_to_results_json(semantic_hits);
+            json merged = merge_results(temporal_json, semantic_json);
+            if (merged.size() > limit) merged.erase(merged.begin() + static_cast<int>(limit), merged.end());
+
+            std::ostringstream ss;
+            ss << "Found " << merged.size() << " temporal+semantic results:\n";
+            for (const auto& r : merged) {
+                ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
+            }
+            return ToolResult::ok(ss.str(), {{"results", merged}, {"count", merged.size()}, {"realm", realm}});
+        }
+    }
+
+    json results_json = hits_to_results_json(hits);
+    std::ostringstream ss;
+    ss << "Found " << hits.size() << " memories:\n";
+    for (const auto& r : results_json) {
+        ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}, {"realm", realm}});
+}
+
+ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+    size_t k = static_cast<size_t>(params.value("limit", 10));
+
+    auto hits = field_store_->recall_keyword(query, k);
+    bool explain = params.value("explain", false);
+    json results_json = hits_to_results_json(hits, explain);
+
+    std::ostringstream ss;
+    ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
+    for (const auto& r : results_json) {
+        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"results", results_json}});
+}
+
+ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+
+    size_t limit      = static_cast<size_t>(params.value("limit", 10));
+    std::string realm = params.value("realm", "");
+
+    auto embedding = embed_query(query);
+    if (embedding.empty()) return ToolResult::error("Failed to embed query");
+
+    auto semantic_hits = field_store_->recall(embedding, limit, realm);
+    semantic_hits.erase(
+        std::remove_if(semantic_hits.begin(), semantic_hits.end(),
+            [](const FieldRecallHit& h) { return h.content.empty(); }),
+        semantic_hits.end());
+    auto keyword_hits  = field_store_->recall_keyword(query, limit);
+
+    // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
+    {
+        const size_t total = field_store_->memory_count();
+        if (total >= 5) {
+            auto apply_drift = [&](std::vector<FieldRecallHit>& hits) {
+                const float max_access = 10.0f;
+                const float exploration = 1.0f;
+                for (auto& h : hits) {
+                    float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+                    float anti_perserv = 1.0f - 0.25f * saturation;
+                    float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                                              (static_cast<float>(h.access_count) + 1.0f));
+                    float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+                    h.score = h.score * anti_perserv * curiosity_mul;
+                }
+            };
+            apply_drift(semantic_hits);
+            apply_drift(keyword_hits);
+        }
+    }
+
+    bool explain = params.value("explain", false);
+    json semantic = hits_to_results_json(semantic_hits, explain);
+    json keyword  = hits_to_results_json(keyword_hits, explain);
+    json merged   = merge_results(semantic, keyword);
+
+    if (merged.size() > limit) merged.erase(merged.begin() + static_cast<int>(limit), merged.end());
+
+    std::ostringstream ss;
+    ss << "Hybrid recall: " << merged.size() << " results\n";
+    for (const auto& r : merged) {
+        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
+    }
+    auto result = ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
+    fire_recall_callback(merged, 1);
+    return result;
+}
+
+ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+
+    size_t limit       = static_cast<size_t>(params.value("limit", 20));
+    std::string realm  = params.value("realm", "");
+
+    // Ask route learner for best retrieval strategy
+    auto route_sel = field_store_->select_route(query);
+    uint64_t episode_id = route_sel.episode_id;
+    uint8_t  route      = route_sel.route;
+    // 0=Semantic, 1=Keyword, 2=Temporal, 3=Artifact, 4=Hybrid, 5=Full
+
+    auto eq = expand_query(query);
+    bool is_code = looks_like_code_query(query);
+    if (is_code) route = 1;  // code queries always keyword
+
+    // Drift scoring lambda
+    auto apply_drift_smart = [&](std::vector<FieldRecallHit>& hits) {
+        const size_t total = field_store_->memory_count();
+        if (total < 5 || hits.empty()) return;
+        const float max_access = 10.0f;
+        const float exploration = 1.0f;
+        for (auto& h : hits) {
+            float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+            float anti_perserv = 1.0f - 0.25f * saturation;
+            float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                                      (static_cast<float>(h.access_count) + 1.0f));
+            float curiosity_mul = 1.0f + std::min(curiosity, 0.3f);
+            h.score = h.score * anti_perserv * curiosity_mul;
+        }
+    };
+
+    json results;
+    static const char* route_names[] = {"semantic","keyword","temporal","artifact","hybrid","full"};
+    std::string route_name = route < 6 ? route_names[route] : "hybrid";
+
+    if (route == 1) {  // Keyword
+        auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+        apply_drift_smart(kw_hits);
+        results = hits_to_results_json(kw_hits);
+    } else if (route == 2) {  // Temporal
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        auto temp_hits = field_store_->recall_temporal(now_ms - (int64_t)30*24*3600*1000, now_ms, limit, realm);
+        apply_drift_smart(temp_hits);
+        results = hits_to_results_json(temp_hits);
+    } else {  // Semantic / Hybrid / Full / Artifact — all use semantic+keyword merge
+        auto embedding = embed_query(eq.vec);
+        if (embedding.empty()) {
+            // Fallback to keyword if embedding fails
+            auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+            apply_drift_smart(kw_hits);
+            results = hits_to_results_json(kw_hits);
+            field_store_->route_feedback(episode_id, -0.1f);  // slight penalty for forced fallback
+            episode_id = 0;  // skip normal feedback
+        } else {
+            auto sem_hits = field_store_->recall(embedding, limit, realm);
+            sem_hits.erase(
+                std::remove_if(sem_hits.begin(), sem_hits.end(),
+                    [](const FieldRecallHit& h) { return h.content.empty(); }),
+                sem_hits.end());
+            if (route == 0) {  // Semantic only
+                apply_drift_smart(sem_hits);
+                results = hits_to_results_json(sem_hits);
+            } else {  // Hybrid / Full
+                auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+                apply_drift_smart(sem_hits);
+                apply_drift_smart(kw_hits);
+                results = merge_results(hits_to_results_json(sem_hits), hits_to_results_json(kw_hits));
+            }
+        }
+    }
+
+    if (results.size() > limit) results.erase(results.begin() + static_cast<int>(limit), results.end());
+
+    // Auto-expand top results
+    size_t expand_top = static_cast<size_t>(params.value("expand_top", 2));
+    if (expand_top > 0 && !results.empty()) {
+        for (size_t i = 0; i < std::min(expand_top, results.size()); ++i) {
+            std::string content = field_store_->get_content(
+                std::stoull(results[i].value("id", "0")));
+            if (!content.empty()) {
+                results[i]["full_text"] = content;
+            }
+        }
+    }
+
+    std::ostringstream ss;
+    ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
+    for (const auto& r : results) {
+        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
+           << r.value("text", "").substr(0, 400) << "\n";
+    }
+    auto result = ToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
+    fire_recall_callback(results, 1);
+    return result;
+}
+
+ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+
+    size_t k          = static_cast<size_t>(params.value("k", 10));
+    std::string realm = params.value("realm", "");
+
+    auto q0 = embed_query(query);
+    if (q0.empty()) return ToolResult::error("Failed to embed query");
+
+    auto query_embedding = q0;  // mutable copy refined each pass
+    float prev_entropy = -1.0f;
+    std::vector<uint64_t> prev_top_ids;
+    json final_merged;
+    int passes_run = 0;
+
+    for (int pass = 0; pass < kMaxResonancePasses; ++pass) {
+        passes_run = pass + 1;
+
+        // Run existing resonance phases
+        auto resonate_sem = field_store_->recall(query_embedding, k, realm);
+        resonate_sem.erase(
+            std::remove_if(resonate_sem.begin(), resonate_sem.end(),
+                [](const FieldRecallHit& h) { return h.content.empty(); }),
+            resonate_sem.end());
+        json semantic = hits_to_results_json(resonate_sem);
+        json keyword  = hits_to_results_json(field_store_->recall_keyword(query, k));
+        json merged   = merge_results(semantic, keyword);
+        if (merged.size() > k) merged.erase(merged.begin() + static_cast<int>(k), merged.end());
+        final_merged = merged;
+
+        // Collect top-k IDs and scored pairs for entropy
+        std::vector<uint64_t> cur_top_ids;
+        std::vector<std::pair<uint64_t, float>> cur_scored;
+        for (const auto& r : merged) {
+            uint64_t mid = 0;
+            try { mid = std::stoull(r.value("id", "0")); } catch (...) {}
+            if (mid != 0) {
+                cur_top_ids.push_back(mid);
+                cur_scored.emplace_back(mid, r.value("relevance", 0.0f));
+            }
+        }
+
+        // Early stop check
+        float cur_entropy = score_entropy(cur_scored);
+        bool ids_unchanged = (cur_top_ids == prev_top_ids);
+        bool entropy_converged = (prev_entropy >= 0.0f &&
+                                  std::abs(cur_entropy - prev_entropy) < kEntropyStopDelta);
+        prev_entropy = cur_entropy;
+        prev_top_ids = cur_top_ids;
+
+        if (pass == kMaxResonancePasses - 1 || ids_unchanged || entropy_converged) {
+            // Final pass — record recall batch for Hebbian learning
+            if (!cur_top_ids.empty() && field_store_->handle()) {
+                std::vector<int8_t> centroid_q;
+                float centroid_scale;
+                project_to_sketch(q0, centroid_q, centroid_scale);
+                uint64_t ctx_hash = query_context_hash(q0, realm);
+                int64_t ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                cf_record_recall_batch(
+                    field_store_->handle(),
+                    cur_top_ids.data(), cur_top_ids.size(),
+                    centroid_q.data(), centroid_q.size(),
+                    centroid_scale,
+                    ctx_hash,
+                    ts_ms,
+                    kBaseAssocDelta
+                );
+            }
+            break;
+        }
+
+        // Refine query embedding for next pass: fetch top-k embeddings
+        if (!cur_top_ids.empty() && field_store_->handle()) {
+            std::vector<char> emb_buf(cur_top_ids.size() * q0.size() * sizeof(float) + 4096);
+            size_t emb_written = 0;
+            int emb_rc = cf_get_memory_embeddings_batch(
+                field_store_->handle(),
+                cur_top_ids.data(), cur_top_ids.size(),
+                emb_buf.data(), emb_buf.size(), &emb_written);
+
+            if (emb_rc == 0 && emb_written > 0) {
+                // Parse JSON result: array of {id, embedding: [f32...]}
+                auto emb_json = json::parse(
+                    std::string_view(emb_buf.data(), emb_written), nullptr, false);
+                if (!emb_json.is_discarded() && emb_json.is_array() && !emb_json.empty()) {
+                    // Compute mean embedding
+                    std::vector<float> mean_emb(q0.size(), 0.0f);
+                    size_t emb_count = 0;
+                    for (const auto& entry : emb_json) {
+                        if (entry.contains("embedding") && entry["embedding"].is_array()) {
+                            const auto& evec = entry["embedding"];
+                            if (evec.size() == q0.size()) {
+                                for (size_t d = 0; d < q0.size(); ++d) {
+                                    mean_emb[d] += evec[d].get<float>();
+                                }
+                                ++emb_count;
+                            }
+                        }
+                    }
+                    if (emb_count > 0) {
+                        for (float& v : mean_emb) v /= static_cast<float>(emb_count);
+                        // Blend: q_next = alpha * q0 + (1-alpha) * mean
+                        for (size_t d = 0; d < query_embedding.size(); ++d) {
+                            query_embedding[d] = kResonanceAlpha * q0[d]
+                                               + (1.0f - kResonanceAlpha) * mean_emb[d];
+                        }
+                        // Normalize
+                        float norm = 0.0f;
+                        for (float v : query_embedding) norm += v * v;
+                        norm = std::sqrt(norm);
+                        if (norm > 1e-9f) {
+                            for (float& v : query_embedding) v /= norm;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (recall_callback_ && !prev_top_ids.empty()) {
+        recall_callback_(prev_top_ids, passes_run);
+    }
+
+    std::ostringstream ss;
+    ss << "Found " << final_merged.size() << " results (" << passes_run << " pass"
+       << (passes_run > 1 ? "es" : "") << "):\n";
+    for (const auto& r : final_merged) {
+        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
+           << r.value("text", "").substr(0, 400) << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
+}
+
+ToolResult FieldRpcHandler::tool_route_stats(const json&) {
+    // Returns route learner statistics via smart_recall diagnostic
+    // Since we can't directly inspect the learner, we use the route episode
+    // tracking: count how many times each route was selected recently
+    // by querying the structured_recall episode metadata from last N calls.
+    // For now: return a placeholder showing the route learner is active.
+    json stats;
+    stats["status"] = "active";
+    stats["description"] = "Route learner is Thompson-sampling over 6 routes (Semantic/Keyword/Temporal/Artifact/Hybrid/Full)";
+    stats["note"] = "Use smart_recall with different queries to observe route selection. Episode IDs are returned in structured result.";
+    stats["routes"] = json::array({"Semantic","Keyword","Temporal","Artifact","Hybrid","Full"});
+    std::string text = "Route learner: active, 6-arm Thompson sampling\nUse smart_recall to observe route selection via episode_id in results";
+    return ToolResult::ok(text, stats);
+}
+
+} // namespace chitta
