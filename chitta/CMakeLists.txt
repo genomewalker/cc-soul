@@ -429,6 +429,33 @@ add_executable(chittad
     src/sadhana/sadhana_manager.cpp
     src/handlers/field_skill.cpp
     src/handlers/field_agent.cpp
+    src/handlers/agent_protocol.cpp
+    src/handlers/compact.cpp
+    src/handlers/constraint.cpp
+    src/handlers/drift_5w.cpp
+    src/handlers/drift_consolidation.cpp
+    src/handlers/drift_probe.cpp
+    src/handlers/drift_recall.cpp
+    src/handlers/drift_recon.cpp
+    src/handlers/field_code_intel.cpp
+    src/handlers/field_contradiction.cpp
+    src/handlers/field_distill.cpp
+    src/handlers/field_lookup.cpp
+    src/handlers/field_memory_ops.cpp
+    src/handlers/field_memory_recall.cpp
+    src/handlers/field_memory_structured.cpp
+    src/handlers/field_misc.cpp
+    src/handlers/field_operator.cpp
+    src/handlers/field_session.cpp
+    src/handlers/field_system.cpp
+    src/handlers/intervention.cpp
+    src/handlers/learning.cpp
+    src/handlers/ledger.cpp
+    src/handlers/long_task.cpp
+    src/handlers/meta_memory.cpp
+    src/handlers/repl_sessions.cpp
+    src/handlers/trajectory_compact.cpp
+    src/handlers/wisdom_lineage.cpp
 )
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 find_package(Python3 REQUIRED COMPONENTS Development)
