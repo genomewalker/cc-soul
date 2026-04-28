@@ -463,6 +463,13 @@ add_executable(chittad
     src/handlers/trajectory_compact.cpp
     src/handlers/wisdom_lineage.cpp
     src/handlers/register_tools.cpp
+    src/handlers/register_memory_core_tools.cpp
+    src/handlers/register_code_intel_tools.cpp
+    src/handlers/register_distill_drift_tools.cpp
+    src/handlers/register_session_transcript_tools.cpp
+    src/handlers/register_system_tools.cpp
+    src/handlers/register_misc_tools.cpp
+    src/handlers/register_protocol_tools.cpp
 )
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 find_package(Python3 REQUIRED COMPONENTS Development)

@@ -1,0 +1,362 @@
+// register_memory_core_tools — chunk extracted from register_tools() so editing
+// tool metadata only retemplates one chunk at a time.
+
+#include "../../include/chitta/rpc/field_handler.hpp"
+
+namespace chitta {
+
+void FieldRpcHandler::register_memory_core_tools() {
+    tools_.push_back({
+        {"name", "remember"},
+        {"description", "Store text in memory with optional tags and realm"},
+        {"inputSchema", {{"type", "object"},
+            {"properties", {
+                {"content", {{"type", "string"}, {"description", "Text to remember"}}},
+                {"type", {{"type", "string"}, {"description", "Node type (wisdom, insight, signal, episode)"}}},
+                {"confidence", {{"type", "number"}, {"description", "Initial confidence 0-1 (default: 0.8)"}}},
+                {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Optional tags"}}},
+                {"realm", {{"type", "string"}, {"description", "Primary realm (default: brahman)"}}},
+                {"visibility", {{"type", "integer"}, {"description", "0=Private, 1=Shared, 2=Global (default: 0)"}}},
+                {"shared_realms", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Additional realms"}}}
+            }}, {"required", {"content"}}
+        }}
+    });
+    handlers_["remember"] = [this](const json& p) { return tool_remember(p); };
+
+    tools_.push_back({
+        {"name", "recall"},
+        {"description", "Search memory by semantic similarity with realm filtering"},
+        {"inputSchema", {{"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}, {"description", "Search query"}}},
+                {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}},
+                {"min_confidence", {{"type", "number"}, {"description", "Minimum confidence threshold"}}},
+                {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
+                {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
+                {"separation_mode", {{"type", "boolean"}, {"description", "Diverse results via MMR (default: false)"}}},
+                {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode (default: false)"}}},
+                {"explain", {{"type", "boolean"}, {"description", "Include score decomposition per hit (default: false)"}}}
+            }}, {"required", {"query"}}
+        }}
+    });
+    handlers_["recall"] = [this](const json& p) { return tool_recall(p); };
+
+    tools_.push_back({
+        {"name", "recall_temporal"},
+        {"description", "Search memories within a time window (defaults to last 7 days)"},
+        {"inputSchema", {{"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}, {"description", "Optional semantic search query"}}},
+                {"start", {{"type", "string"}, {"description", "Start date (ISO8601 or YYYY-MM-DD)"}}},
+                {"end", {{"type", "string"}, {"description", "End date"}}},
+                {"limit", {{"type", "integer"}, {"description", "Max results (default 20)"}}},
+                {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                {"include_global", {{"type", "boolean"}, {"description", "Include global memories"}}}
+            }}
+        }}
+    });
+    handlers_["recall_temporal"] = [this](const json& p) { return tool_recall_temporal(p); };
+
+    tools_.push_back({{"name","recall_keyword"},{"description","BM25 keyword search"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"},{"description","Search query"}}},
+            {"limit",{{"type","integer"},{"description","Max results (default 10)"}}},
+            {"explain",{{"type","boolean"},{"description","Include score decomposition per hit (default: false)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["recall_keyword"] = [this](const json& p) { return tool_recall_keyword(p); };
+
+    // Exploration primitives
+    tools_.push_back({{"name","explore_recall"},{"description","Lightweight recall - titles/scores only"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"},{"description","Search query"}}},
+            {"limit",{{"type","integer"},{"description","Max results (default 10)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["explore_recall"] = [this](const json& p) { return tool_explore_recall(p); };
+
+    tools_.push_back({{"name","explore_peek"},{"description","Get summary of a memory (first 200 chars)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Memory ID"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["explore_peek"] = [this](const json& p) { return tool_explore_peek(p); };
+
+    tools_.push_back({{"name","explore_expand"},{"description","Get full content of a memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Memory ID"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["explore_expand"] = [this](const json& p) { return tool_explore_expand(p); };
+
+    tools_.push_back({{"name","explore_neighbors"},{"description","Get nodes connected via triplets"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"node",{{"type","string"},{"description","Node name"}}},
+            {"direction",{{"type","string"},{"description","outgoing, incoming, or both"}}}
+        }},{"required",{"node"}}}}
+    });
+    handlers_["explore_neighbors"] = [this](const json& p) { return tool_explore_neighbors(p); };
+
+    // Graph tools
+    tools_.push_back({{"name","connect"},{"description","Create a triplet relationship"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"},{"description","Subject entity"}}},
+            {"predicate",{{"type","string"},{"description","Relationship type"}}},
+            {"object",{{"type","string"},{"description","Object entity"}}}
+        }},{"required",{"subject","predicate","object"}}}}
+    });
+    handlers_["connect"] = [this](const json& p) { return tool_connect(p); };
+
+    tools_.push_back({{"name","query_graph"},{"description","Query triplets by subject or object"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"},{"description","Query by subject"}}},
+            {"object",{{"type","string"},{"description","Query by object"}}}
+        }}}}
+    });
+    handlers_["query_graph"] = [this](const json& p) { return tool_query(p); };
+
+    tools_.push_back({{"name","query_triplets_temporal"},{"description","Query triplets at a point in time"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},
+            {"object",{{"type","string"}}},
+            {"at_date",{{"type","string"},{"description","YYYY-MM-DD"}}},
+            {"limit",{{"type","integer"}}}
+        }}}}
+    });
+    handlers_["query_triplets_temporal"] = [this](const json& p) { return tool_query_triplets_temporal(p); };
+
+    tools_.push_back({{"name","triplet_history"},{"description","Get history of a subject-predicate relationship"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},
+            {"limit",{{"type","integer"}}}
+        }},{"required",{"subject","predicate"}}}}
+    });
+    handlers_["triplet_history"] = [this](const json& p) { return tool_triplet_history(p); };
+
+    tools_.push_back({{"name","connect_temporal"},{"description","Create triplet with temporal validity"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},{"object",{{"type","string"}}},
+            {"valid_from",{{"type","string"}}},{"valid_to",{{"type","string"}}},
+            {"context_date",{{"type","string"}}}
+        }},{"required",{"subject","predicate","object"}}}}
+    });
+    handlers_["connect_temporal"] = [this](const json& p) { return tool_connect_temporal(p); };
+
+    // Strength/forget
+    tools_.push_back({{"name","strengthen"},{"description","Increase confidence of a memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Node ID"}}},
+            {"amount",{{"type","number"},{"description","Amount (default 0.1)"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["strengthen"] = [this](const json& p) { return tool_strengthen(p); };
+
+    tools_.push_back({{"name","weaken"},{"description","Decrease confidence of a memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}},{"amount",{{"type","number"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["weaken"] = [this](const json& p) { return tool_weaken(p); };
+
+    tools_.push_back({{"name","forget"},{"description","Remove a memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Node ID to forget"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["forget"] = [this](const json& p) { return tool_forget(p); };
+
+    tools_.push_back({{"name","batch_forget"},{"description","Delete multiple nodes by ID"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"ids",{{"type","array"},{"items",{{"type","string"}}}}},
+            {"pattern",{{"type","string"}}}
+        }}}}
+    });
+    handlers_["batch_forget"] = [this](const json& p) { return tool_batch_forget(p); };
+
+    // Observe/Grow
+    tools_.push_back({{"name","observe"},{"description","Store an observation/learning (SSL v0.4)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"category",{{"type","string"}}},{"title",{{"type","string"}}},
+            {"content",{{"type","string"}}},{"tags",{{"type","string"}}},
+            {"confidence",{{"type","number"}}},
+            {"valence",{{"type","number"},{"description","Affect valence: -1.0 to +1.0"}}},
+            {"arousal",{{"type","number"},{"description","Affect arousal: 0.0 to 1.0"}}},
+            {"flags",{{"type","string"},{"description","Structural flags: ORIGIN,CORE,PIVOT,GENESIS,TURNING"}}},
+            {"refs",{{"type","string"},{"description","Cross-references: comma-separated tag names or memory IDs"}}},
+            {"granularity",{{"type","integer"},{"description","SSL v0.4 granularity tier: 0=atom,1=episode,2=claim,3=operator,4=boundary"}}},
+            {"derivation",{{"type","string"},{"description","SSL v0.4 <=@ provenance: comma-separated source memory IDs this was abstracted from (required at G:1+)"}}},
+            {"source_loc",{{"type","string"},{"description","SSL v0.4 src: external source grounding, e.g. file:line or doc section"}}}
+        }},{"required",{"title","content"}}}}
+    });
+    handlers_["observe"] = [this](const json& p) { return tool_observe(p); };
+
+    tools_.push_back({{"name","full_resonate"},{"description","Semantic search with full context"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}},{"k",{{"type","integer"}}},
+            {"realm",{{"type","string"}}},{"include_global",{{"type","boolean"}}},
+            {"exclude_kinds",{{"type","array"},{"items",{{"type","string"}}}}},
+            {"partnership_only",{{"type","boolean"}}},{"separation_mode",{{"type","boolean"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["full_resonate"] = [this](const json& p) { return tool_full_resonate(p); };
+
+    tools_.push_back({{"name","grow"},{"description","Add wisdom, belief, failure, aspiration, or dream"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"type",{{"type","string"}}},{"content",{{"type","string"}}},
+            {"title",{{"type","string"}}},{"tags",{{"type","string"}}}
+        }},{"required",{"type","content"}}}}
+    });
+    handlers_["grow"] = [this](const json& p) { return tool_grow(p); };
+
+    tools_.push_back({{"name","get"},{"description","Get a node by ID"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["get"] = [this](const json& p) { return tool_get(p); };
+
+    tools_.push_back({{"name","expand_memory"},{"description","Expand a memory to full hierarchical context"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}},{"depth",{{"type","integer"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["expand_memory"] = [this](const json& p) { return tool_expand_memory(p); };
+
+    tools_.push_back({{"name","update"},{"description","Update node content"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}},{"content",{{"type","string"}}}
+        }},{"required",{"id","content"}}}}
+    });
+    handlers_["update"] = [this](const json& p) { return tool_update(p); };
+
+    tools_.push_back({{"name","query"},{"description","Query triplets with flexible filters"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},
+            {"object",{{"type","string"}}}
+        }}}}
+    });
+    handlers_["query"] = [this](const json& p) { return tool_query(p); };
+
+    tools_.push_back({{"name","tag"},{"description","Add or remove tags from a node"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}},{"add",{{"type","string"}}},{"remove",{{"type","string"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["tag"] = [this](const json& p) { return tool_tag(p); };
+
+    tools_.push_back({{"name","set_affect"},{"description","Set affect dimensions (valence, arousal) on a memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"}}},
+            {"valence",{{"type","number"},{"description","Emotional valence: -1.0 to +1.0"}}},
+            {"arousal",{{"type","number"},{"description","Emotional arousal: 0.0 to 1.0"}}}
+        }},{"required",{"id","valence","arousal"}}}}
+    });
+    handlers_["set_affect"] = [this](const json& p) { return tool_set_affect(p); };
+
+    // ── Code Intelligence tools ─────────────────────────────────────────
+    tools_.push_back({{"name","list_by_status"},{"description","List memories filtered by lifecycle status (active/superseded/contradicted/archived)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"status",{{"type","string"},{"description","Filter: active, superseded, contradicted, archived, or all"},{"default","superseded"}}},
+            {"limit",{{"type","integer"},{"description","Max results"},{"default",50}}},
+            {"realm",{{"type","string"},{"description","Filter by realm"}}}
+        }},{"required",json::array()}}}
+    });
+    handlers_["list_by_status"] = [this](const json& p) { return tool_list_by_status(p); };
+
+    tools_.push_back({{"name","list_memories_brief"},{"description","Fast memory index"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"limit",{{"type","integer"}}},{"realm",{{"type","string"}}},
+            {"kind",{{"type","string"}}},{"priority_tier",{{"type","integer"}}}
+        }}}}
+    });
+    handlers_["list_memories_brief"] = [this](const json& p) { return tool_list_memories_brief(p); };
+
+    tools_.push_back({{"name","set_priority_tier"},{"description","Set memory priority tier"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"memory_id",{{"type","integer"}}},{"tier",{{"type","integer"}}}
+        }},{"required",{"memory_id","tier"}}}}
+    });
+    handlers_["set_priority_tier"] = [this](const json& p) { return tool_set_priority_tier(p); };
+
+    tools_.push_back({{"name","recall_by_priority"},{"description","Budget-aware recall"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}},{"budget_tokens",{{"type","integer"}}},
+            {"realm",{{"type","string"}}},{"include_global",{{"type","boolean"}}}
+        }}}}
+    });
+    handlers_["recall_by_priority"] = [this](const json& p) { return tool_recall_by_priority(p); };
+
+    tools_.push_back({{"name","set_memory_type"},{"description","Set memory semantic type"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"memory_id",{{"type","integer"}}},{"type",{{"type","string"}}}
+        }},{"required",{"memory_id","type"}}}}
+    });
+    handlers_["set_memory_type"] = [this](const json& p) { return tool_set_memory_type(p); };
+
+    tools_.push_back({{"name","memory_type_stats"},{"description","Get memory type statistics"},
+        {"inputSchema",{{"type","object"},{"properties",{{"realm",{{"type","string"}}}}}}}
+    });
+    handlers_["memory_type_stats"] = [this](const json& p) { return tool_memory_type_stats(p); };
+
+    tools_.push_back({{"name","forget_kind"},{"description","Bulk-delete all memories of a given kind (e.g. 'habit'). Optionally filter by realm."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"kind",{{"type","string"},{"description","Memory kind to delete (e.g. habit, unknown)"}}},
+            {"realm",{{"type","string"},{"description","Optional realm filter"}}},
+            {"limit",{{"type","integer"},{"description","Max to delete (default 5000)"}}}
+        }},{"required",{"kind"}}}}});
+    handlers_["forget_kind"] = [this](const json& p) { return tool_forget_kind(p); };
+
+    tools_.push_back({{"name","smart_recall"},{"description","Intelligent memory recall with hierarchical expansion"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
+            {"expand_top",{{"type","integer"}}},{"realm",{{"type","string"}}},
+            {"include_global",{{"type","boolean"}}},
+            {"separation_mode",{{"type","boolean"}}},{"gwt_mode",{{"type","boolean"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["smart_recall"] = [this](const json& p) { return tool_smart_recall(p); };
+
+    tools_.push_back({{"name","hybrid_recall"},{"description","Combined vector + BM25 + graph recall"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
+            {"tag",{{"type","string"}}},{"realm",{{"type","string"}}},
+            {"vector_weight",{{"type","number"}}},{"bm25_weight",{{"type","number"}}},
+            {"graph_weight",{{"type","number"}}},{"recency_weight",{{"type","number"}}},
+            {"explain",{{"type","boolean"},{"description","Include score decomposition per hit (default: false)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
+
+    tools_.push_back({{"name","structured_recall"},{"description","Three-lens recall: facts, context, and temporal agents merged for high-fidelity retrieval"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
+            {"realm",{{"type","string"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["structured_recall"] = [this](const json& p) { return tool_structured_recall(p); };
+
+    tools_.push_back({{"name","route_stats"},{"description","Show route learner status and arm configuration for smart_recall"},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["route_stats"] = [this](const json& p) { return tool_route_stats(p); };
+
+    tools_.push_back({{"name","ask"},{"description","Natural language insight query: retrieves and synthesizes memories to answer a question about the user, session, or project"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"question",{{"type","string"}}},{"limit",{{"type","integer"}}},
+            {"realm",{{"type","string"}}}
+        }},{"required",{"question"}}}}
+    });
+    handlers_["ask"] = [this](const json& p) { return tool_ask(p); };
+
+    tools_.push_back({{"name","expand_query"},{"description","Expand query into typed variants"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["expand_query"] = [this](const json& p) { return tool_expand_query(p); };
+
+    // Anticipation/Habit/Profile/Goal/Calibration
+}
+
+} // namespace chitta
