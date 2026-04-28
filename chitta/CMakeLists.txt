@@ -428,6 +428,7 @@ add_executable(chittad
     src/sadhana/brain_provider.cpp
     src/sadhana/sadhana_manager.cpp
     src/handlers/field_skill.cpp
+    src/handlers/field_agent.cpp
 )
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 find_package(Python3 REQUIRED COMPONENTS Development)
