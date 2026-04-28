@@ -19,12 +19,20 @@ has somewhere to land.
 ## Scope of this pass
 
 In:
-- Archive or remove duplicated plan markdowns at the repo root.
 - Remove `rtk/` (vendored Rust submodule) and its build/hook wiring.
-- Replace `rtk_rewrite()` in `hooks/pre-tool-hook.sh` (no-op or leave a
-  passthrough — to decide during step).
+- Strip `rtk_rewrite()` from `hooks/pre-tool-hook.sh` (dead since the
+  user-global hook switched to sqz).
 - Decide what to do with the registered `worktree-agent-aaaffe7d`
   worktree.
+
+**Correction during pass 1**: the original plan also targeted ~10
+top-level `*.md` plan/proposal documents (`ALL_PROPOSALS`,
+`IMPLEMENTATION_PLAN`, `SCALE_100M_PLAN`, etc). Verification showed all
+of those are `.gitignore`d local scratchpads, not repo content. Tracked
+root markdowns are only `README.md`, `CHANGELOG.md`, `CLAUDE.md`,
+`CLAUDE.lean.md`. The "plans-as-scratchpads" smell from the analysis
+was a working-tree artefact, not a repo problem. No action needed in
+this pass.
 
 Out:
 - Any C++ ↔ Rust boundary changes. That's pass 2 and requires a separate
@@ -34,32 +42,25 @@ Out:
 
 ## Steps (each step = one commit)
 
-1. **Archive plan markdowns.** Move the redundant top-level `*.md`
-   plan/proposal documents to `docs/archive/`. Keep `README.md`,
-   `CHANGELOG.md`, `CLAUDE.md`, `CONTRACTS.md`, `POLICY.md`. The rest go.
-
-2. **Pick one canonical contract.** Rename or symlink the chosen file
-   so future work has a single place to anchor. (Likely `CONTRACTS.md`
-   or `README.md`; decide on inspection.)
-
-3. **Remove `rtk/` build wiring.** Strip `chitta/CMakeLists.txt:410-448`
+1. **Remove `rtk/` build wiring.** Strip `chitta/CMakeLists.txt:410-448`
    so a missing `rtk/` is the new normal, not a "skipping" warning.
 
-4. **Strip `rtk_rewrite()` from `hooks/pre-tool-hook.sh`.** The user
+2. **Strip `rtk_rewrite()` from `hooks/pre-tool-hook.sh`.** The user
    replaced the user-global rtk hook with sqz; this in-repo function
    is dead weight. Remove the function and its invocation site;
    leave the rest of the hook untouched.
 
-5. **Delete `rtk/`.** Now it's safe.
+3. **Delete `rtk/`.** Now it's safe.
 
-6. **Verify.** `cmake --build build --parallel` (or whatever the
-   project's smoke command is) must still succeed. `git status` clean.
+4. **Verify.** `cmake -S chitta -B chitta/build` must still configure
+   without rtk-related errors. Build target list should no longer
+   include `rtk`. `git status` clean.
 
-7. **Decision point — `worktree-agent-aaaffe7d`.** Stop here. Ask the
+5. **Decision point — `worktree-agent-aaaffe7d`.** Stop here. Ask the
    user whether the registered worktree is in flight. If yes — leave.
    If no — `git worktree remove` properly.
 
-8. **Decision point — boundary call.** Stop. Pass 2 needs the user
+6. **Decision point — boundary call.** Stop. Pass 2 needs the user
    to decide: collapse C++ daemon into Rust core, or formalise the
    split. Don't proceed without that.
 
