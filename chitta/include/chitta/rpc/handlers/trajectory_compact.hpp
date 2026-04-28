@@ -57,7 +57,7 @@
         if (path.empty())
             return ToolResult::error("No transcript: provide path or session_id");
 
-        // ── Parse transcript into turns ──────────────────────────────────────
+        // ── Parse transcript via shared TranscriptParser ─────────────────────
         struct Turn {
             std::string role;
             std::string content;
@@ -66,62 +66,19 @@
 
         std::vector<Turn> turns;
         {
-            std::ifstream file(path);
-            if (!file)
-                return ToolResult::error("Cannot open transcript: " + path);
+            chitta::TranscriptParser tp;
+            chitta::TranscriptParseOptions opts;
+            opts.include_thinking = false;       // task-similarity scoring uses surface content
+            opts.filter_system_reminders = true; // strip the noise tags
+            auto convs = tp.parse(path, opts);
+            if (convs.empty() && !tp.last_error().empty())
+                return ToolResult::error(tp.last_error());
 
-            std::string line;
             int turn_idx = 0;
-            while (std::getline(file, line)) {
-                if (line.empty()) continue;
-                auto obj = json::parse(line, nullptr, false);
-                if (obj.is_discarded()) continue;
-
-                std::string type = obj.value("type", "");
-                if (type != "user" && type != "assistant") continue;
-                if (!role_filter.empty() && type != role_filter) continue;
-
-                std::string content;
-                if (obj.contains("message")) {
-                    const auto& msg = obj["message"];
-                    if (msg.contains("content")) {
-                        const auto& mc = msg["content"];
-                        if (mc.is_string()) {
-                            content = mc.get<std::string>();
-                        } else if (mc.is_array()) {
-                            for (const auto& block : mc) {
-                                if (block.contains("text") && block["text"].is_string()) {
-                                    if (!content.empty()) content += "\n";
-                                    content += block["text"].get<std::string>();
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (content.empty()) continue;
-
-                // Strip <system-reminder> noise
-                static const std::string sr_open  = "<system-reminder>";
-                static const std::string sr_close = "</system-reminder>";
-                std::string cleaned;
-                size_t pos = 0;
-                while (pos < content.size()) {
-                    size_t start = content.find(sr_open, pos);
-                    if (start == std::string::npos) {
-                        cleaned += content.substr(pos);
-                        break;
-                    }
-                    cleaned += content.substr(pos, start - pos);
-                    size_t end = content.find(sr_close, start);
-                    if (end == std::string::npos) break;
-                    pos = end + sr_close.size();
-                }
-                content = cleaned;
-
-                if (content.size() < 20) continue;
-
-                turns.push_back({type, std::move(content), turn_idx++});
+            for (auto& c : convs) {
+                if (!role_filter.empty() && c.role != role_filter) continue;
+                if (c.content.size() < 20) continue;          // drop trivially short turns
+                turns.push_back({std::move(c.role), std::move(c.content), turn_idx++});
             }
         }
 
