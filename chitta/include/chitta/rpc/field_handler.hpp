@@ -617,6 +617,13 @@ private:
     // ═══════════════════════════════════════════════════════════════════════
 
     void register_tools();
+    void register_memory_core_tools();
+    void register_code_intel_tools();
+    void register_distill_drift_tools();
+    void register_session_transcript_tools();
+    void register_system_tools();
+    void register_misc_tools();
+    void register_protocol_tools();
     void classify_tools();
 
 };
