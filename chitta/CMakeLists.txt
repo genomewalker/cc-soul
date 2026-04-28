@@ -444,7 +444,13 @@ add_executable(chittad
     src/handlers/field_memory_ops.cpp
     src/handlers/field_memory_recall.cpp
     src/handlers/field_memory_structured.cpp
-    src/handlers/field_misc.cpp
+    src/handlers/field_misc_sadhana.cpp
+    src/handlers/field_misc_anticipation.cpp
+    src/handlers/field_misc_profile_goal.cpp
+    src/handlers/field_misc_memory.cpp
+    src/handlers/field_misc_file_index.cpp
+    src/handlers/field_misc_knowledge.cpp
+    src/handlers/field_misc_io.cpp
     src/handlers/field_operator.cpp
     src/handlers/field_session.cpp
     src/handlers/field_system.cpp
