@@ -56,13 +56,33 @@ Out:
    without rtk-related errors. Build target list should no longer
    include `rtk`. `git status` clean.
 
-5. **Decision point — `worktree-agent-aaaffe7d`.** Stop here. Ask the
-   user whether the registered worktree is in flight. If yes — leave.
-   If no — `git worktree remove` properly.
+5. ~~**Decision point — `worktree-agent-aaaffe7d`.**~~ **Resolved.**
+   Branch was fully merged into main (main 86 commits ahead, 0 unique
+   to the worktree branch). 718 MB on disk, last touched 2026-04-15,
+   but contained 224 LOC of uncommitted edits across 4 chitta files
+   (`field_store.hpp`, `subconscious.hpp/cpp`, `field_code_intel.hpp`).
+   Decision per user: stash + remove. The 224 LOC are preserved on
+   branch `refactor/agent-aaaffe7d-stash`; worktree removed; branch
+   `worktree-agent-aaaffe7d` deleted.
 
 6. **Decision point — boundary call.** Stop. Pass 2 needs the user
    to decide: collapse C++ daemon into Rust core, or formalise the
    split. Don't proceed without that.
+
+## Verification (step 4 result)
+
+`cmake -S chitta -B chitta/build-verify` from the demolition worktree
+produced **zero rtk-related output** before stopping at an unrelated
+chitta-field submodule check (the throwaway worktree didn't have that
+submodule initialised). Conclusion: rtk-removal is build-clean.
+
+## Outcome of pass 1
+
+- 4 commits on `refactor/demolition-pass-1`.
+- `-156 lines` of dead code (CMakeLists rtk block + rtk_rewrite + `.gitmodules` entry + gitlink).
+- `-718 MB` of disk freed (agent-aaaffe7d worktree).
+- 1 branch preserved (`refactor/agent-aaaffe7d-stash`) with 224 LOC of in-flight work for later review.
+- 0 behaviour changes to the live system.
 
 ## Reversibility
 
