@@ -52,17 +52,6 @@
             return "";
         };
 
-        auto estimate_tokens = [](const std::string& text) -> size_t {
-            if (text.empty()) return 0;
-            size_t words = 0;
-            bool in_word = false;
-            for (unsigned char ch : text) {
-                if (std::isspace(ch)) { in_word = false; }
-                else if (!in_word)   { in_word = true; ++words; }
-            }
-            return static_cast<size_t>(words * 1.3f);
-        };
-
         auto cosine_sim = [](const std::vector<float>& a, const std::vector<float>& b) -> float {
             if (a.size() != b.size() || a.empty()) return 0.0f;
             float dot = 0, na = 0, nb = 0;

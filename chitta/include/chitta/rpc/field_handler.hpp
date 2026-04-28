@@ -12,6 +12,7 @@
 #include "../wiki_export.hpp"
 #include "../embedding_export.hpp"
 #include "../query_intent.hpp"
+#include "../text_utils.hpp"
 #include "sandbox.hpp"
 #include <nlohmann/json.hpp>
 #include <string>

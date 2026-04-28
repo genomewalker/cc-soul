@@ -128,18 +128,6 @@
         if (turns.empty())
             return ToolResult::error("No turns found in transcript");
 
-        // ── Token estimation ─────────────────────────────────────────────────
-        auto estimate_tokens = [](const std::string& text) -> size_t {
-            if (text.empty()) return 0;
-            size_t words = 0;
-            bool in_word = false;
-            for (unsigned char ch : text) {
-                if (std::isspace(ch)) { in_word = false; }
-                else if (!in_word)    { in_word = true; ++words; }
-            }
-            return static_cast<size_t>(words * 1.3f);
-        };
-
         std::vector<size_t> token_counts(turns.size());
         size_t total_tokens = 0;
         for (size_t i = 0; i < turns.size(); ++i) {
