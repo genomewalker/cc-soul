@@ -1,9 +1,13 @@
 #!/bin/bash
-# PreToolUse hook: RTK token compression + soul corrections/gotchas
+# PreToolUse hook: safety blocks, large-output guards, soul corrections.
 #
-# Two-stage pipeline:
-# 1. RTK: intercept known commands and return token-optimized output
-# 2. Soul: surface corrections/gotchas from memory before execution
+# Stages:
+# 1. Safety: block obviously destructive commands (rm -rf /, etc.).
+# 2. Fallback: warn on unbounded find/grep/ls; suggest a safer form.
+# 3. Soul: surface corrections/gotchas from chitta memory before execution.
+#
+# Output compression for Bash is handled upstream by sqz at the user-global
+# hook layer — this hook no longer rewrites commands for token reduction.
 
 # Don't use set -e: we want hooks to succeed even if some parts fail
 
@@ -11,7 +15,6 @@ MATCHER="${1:-}"
 [[ -z "$MATCHER" ]] && exit 0
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-RTK_BIN="${RTK_BIN:-$HOME/.claude/bin/rtk}"
 STDIN_DATA=$(cat)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,122 +113,8 @@ safety_check() {
     return 0
 }
 
-# ─── RTK rewrite: map command → rtk equivalent ────────────────────────────────
-# Returns the rtk command to run, or empty string if not applicable.
-# Skips: piped commands (rtk works on raw output), already-rtk commands,
-#        commands with redirects (rtk can't intercept those cleanly).
-rtk_rewrite() {
-    local cmd="$1"
-    [[ ! -x "$RTK_BIN" ]] && return 1
 
-    # Skip if already using rtk, or if command is piped/redirected
-    echo "$cmd" | grep -q 'rtk ' && return 1
-    echo "$cmd" | grep -qE '[|>&]' && return 1
-
-    # git subcommands
-    if echo "$cmd" | grep -qE '^\s*git\s+(status|log|diff|show|branch|stash)\b'; then
-        local subcmd rest
-        subcmd=$(echo "$cmd" | sed 's/^\s*git\s\+//')
-        echo "$RTK_BIN git $subcmd"
-        return 0
-    fi
-
-    # gh subcommands
-    if echo "$cmd" | grep -qE '^\s*gh\s+(pr|issue|run)\s+(list|view|status)\b'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*gh\s\+//')
-        echo "$RTK_BIN gh $rest"
-        return 0
-    fi
-
-    # ls (but not ls with -la / for safety check)
-    if echo "$cmd" | grep -qE '^\s*ls(\s+|$)' && ! echo "$cmd" | grep -qE '^\s*ls\s+-la\s+/\s*$'; then
-        echo "$RTK_BIN $(echo "$cmd" | sed 's/^\s*//')"
-        return 0
-    fi
-
-    # find
-    if echo "$cmd" | grep -qE '^\s*find\s+'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*find\s\+//')
-        echo "$RTK_BIN find $rest"
-        return 0
-    fi
-
-    # grep (not piped, already checked above)
-    if echo "$cmd" | grep -qE '^\s*(grep|rg)\s+'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*\(grep\|rg\)\s\+//')
-        echo "$RTK_BIN grep $rest"
-        return 0
-    fi
-
-    # diff
-    if echo "$cmd" | grep -qE '^\s*diff\s+'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*diff\s\+//')
-        echo "$RTK_BIN diff $rest"
-        return 0
-    fi
-
-    # docker
-    if echo "$cmd" | grep -qE '^\s*docker\s+(ps|images|logs)\b'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*docker\s\+//')
-        echo "$RTK_BIN docker $rest"
-        return 0
-    fi
-
-    # cargo
-    if echo "$cmd" | grep -qE '^\s*cargo\s+(test|build|clippy|check)\b'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*cargo\s\+//')
-        echo "$RTK_BIN cargo $rest"
-        return 0
-    fi
-
-    # pytest
-    if echo "$cmd" | grep -qE '^\s*pytest(\s|$)'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*pytest//')
-        echo "$RTK_BIN test pytest$rest"
-        return 0
-    fi
-
-    # snakemake
-    if echo "$cmd" | grep -qE '^\s*snakemake(\s|$)'; then
-        echo "$RTK_BIN $(echo "$cmd" | sed 's/^\s*//')"
-        return 0
-    fi
-
-    # nextflow
-    if echo "$cmd" | grep -qE '^\s*nextflow(\s+run|\s+log|\s+list)'; then
-        echo "$RTK_BIN $(echo "$cmd" | sed 's/^\s*//')"
-        return 0
-    fi
-
-    # curl (single URL, no -o/-O output flags)
-    if echo "$cmd" | grep -qE '^\s*curl\s+' && ! echo "$cmd" | grep -qE '\s-[oO]\s'; then
-        local rest
-        rest=$(echo "$cmd" | sed 's/^\s*curl\s\+//')
-        echo "$RTK_BIN curl $rest"
-        return 0
-    fi
-
-    # cat (use rtk read for plain file reads)
-    if echo "$cmd" | grep -qE '^\s*cat\s+[^ ]+$'; then
-        local file
-        file=$(echo "$cmd" | sed -n 's/^\s*cat\s\+\([^ ]*\)\s*$/\1/p')
-        if [[ -n "$file" && -f "$file" ]]; then
-            echo "$RTK_BIN read $file"
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
-# ─── Fallback: large-output safety rewrites (no RTK) ─────────────────────────
+# ─── Fallback: large-output safety rewrites ──────────────────────────────────
 fallback_rewrite() {
     local cmd="$1"
     local rewritten="" reason=""
