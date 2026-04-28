@@ -456,6 +456,7 @@ add_executable(chittad
     src/handlers/repl_sessions.cpp
     src/handlers/trajectory_compact.cpp
     src/handlers/wisdom_lineage.cpp
+    src/handlers/register_tools.cpp
 )
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 find_package(Python3 REQUIRED COMPONENTS Development)
