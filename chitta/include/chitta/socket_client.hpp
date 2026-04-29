@@ -110,6 +110,7 @@ private:
     std::string socket_path_;
     int fd_ = -1;
     std::string last_error_;
+    std::string read_buffer_;  // bytes read past the last \n, kept for next request
 
     // Internal request without auto-reconnect (used by request())
     std::optional<std::string> request_internal(const std::string& json_rpc);
