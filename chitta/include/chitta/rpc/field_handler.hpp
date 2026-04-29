@@ -28,6 +28,7 @@
 #include <fstream>
 #include <algorithm>
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 #include <optional>
 #include <cctype>
@@ -93,14 +94,15 @@ public:
     bool get_distill_enabled() const { return distill_enabled_.load(); }
     void set_distill_enabled(bool e) { distill_enabled_.store(e); }
 
-    // Serialize direct field_store access outside handle() (maintenance thread, queue processor)
-    std::unique_lock<std::mutex> acquire_lock() { return std::unique_lock<std::mutex>(rpc_mutex_); }
+    // Serialize direct field_store access outside handle() (maintenance thread, queue processor).
+    // Returns an exclusive lock — write-side use only.
+    std::unique_lock<std::shared_mutex> acquire_lock() { return std::unique_lock<std::shared_mutex>(rpc_mutex_); }
 
     void run_belief_maintenance(float stale_strength_threshold = 0.1f,
                                 int stale_days = 30,
                                 float dup_threshold = 0.97f,
                                 size_t max_dups = 5) {
-        std::unique_lock<std::mutex> _lk(rpc_mutex_);
+        std::unique_lock<std::shared_mutex> _lk(rpc_mutex_);
         size_t demoted = 0, contradictions_archived = 0, dups_merged = 0;
 
         // 1. Stale belief demotion: archive Active memories with decayed strength below threshold
@@ -188,13 +190,27 @@ public:
                   << " dups_merged=" << dups_merged << "\n";
     }
 
+    // Read-only tools that may run concurrently under a shared lock.
+    // Anything not in this set takes an exclusive lock (safe default).
+    static bool is_read_only_tool(const std::string& name) {
+        static const std::unordered_set<std::string> kReads = {
+            "health_check", "version_check", "soul_context", "hygiene_stats",
+            "recall", "search_memories", "list_memories", "list_memories_brief",
+            "expand_memory", "get_memory_metadata", "explain_fact", "memory_stats",
+            "find_symbol", "read_symbol", "read_function", "describe_symbol",
+            "code_context", "codebase_overview", "smart_context",
+            "symbol_callers", "symbol_callees", "search_symbols",
+        };
+        return kReads.count(name) > 0;
+    }
+
     json handle(const json& request) {
-        std::unique_lock<std::mutex> _lk(rpc_mutex_);
         std::string method = request.value("method", "");
         json params = request.value("params", json::object());
         auto id = request.value("id", json());
 
         if (method == "tools/list") {
+            std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
             return make_response(id, tool_list());
         }
         if (method == "tools/call") {
@@ -204,7 +220,14 @@ public:
             if (it == handlers_.end()) {
                 return make_error(id, -32601, "Unknown tool: " + name);
             }
-            auto result = it->second(args);
+            ToolResult result;
+            if (is_read_only_tool(name)) {
+                std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
+                result = it->second(args);
+            } else {
+                std::unique_lock<std::shared_mutex> _lk(rpc_mutex_);
+                result = it->second(args);
+            }
             return make_tool_response(id, result);
         }
         return make_error(id, -32601, "Unknown method: " + method);
@@ -220,7 +243,7 @@ private:
     std::string failed_queue_path_;
     RecallCallback recall_callback_;
 
-    mutable std::mutex rpc_mutex_;    // Serializes all field_store FFI access (not thread-safe)
+    mutable std::shared_mutex rpc_mutex_;    // Reads share, writes exclusive; see is_read_only_tool()
     mutable std::mutex distill_mutex_;
     std::string distill_model_ = "github-copilot/gpt-5-mini";
     std::atomic<bool> distill_enabled_{true};
