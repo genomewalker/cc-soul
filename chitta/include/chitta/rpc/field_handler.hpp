@@ -98,6 +98,13 @@ public:
     // Returns an exclusive lock — write-side use only.
     std::unique_lock<std::shared_mutex> acquire_lock() { return std::unique_lock<std::shared_mutex>(rpc_mutex_); }
 
+    // Shared lock for maintenance ops whose mutations are protected by their
+    // own internal Rust locks (parking_lot RwLock inside FieldStore). Using a
+    // shared lock here means periodic background work (sync_foreign, flush,
+    // demotion) does not starve concurrent reader RPCs. Writer RPCs still
+    // serialize via the exclusive side.
+    std::shared_lock<std::shared_mutex> acquire_shared_lock() { return std::shared_lock<std::shared_mutex>(rpc_mutex_); }
+
     void run_belief_maintenance(float stale_strength_threshold = 0.1f,
                                 int stale_days = 30,
                                 float dup_threshold = 0.97f,
@@ -200,6 +207,14 @@ public:
             "find_symbol", "read_symbol", "read_function", "describe_symbol",
             "code_context", "codebase_overview", "smart_context",
             "symbol_callers", "symbol_callees", "search_symbols",
+            // Read-only event/queue queries — without these, hook-driven calls
+            // like msg_inbox take the exclusive lock and starve every other
+            // RPC for the duration of their event scan.
+            "msg_inbox", "msg_history",
+            "queue_status", "distill_status", "enrichment_status",
+            "agent_list", "agent_get", "agent_protocol_stats",
+            "dream_list", "dream_status",
+            "file_at_time", "file_timeline", "file_dependents", "file_imports",
         };
         return kReads.count(name) > 0;
     }

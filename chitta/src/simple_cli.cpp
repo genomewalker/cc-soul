@@ -260,22 +260,31 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 }
             }
 
-            // Backfill embeddings for memories stored while yantra was unavailable
+            // Backfill embeddings for memories stored while yantra was unavailable.
+            // Acquire the rpc lock only briefly per memory (and never around the
+            // yantra transform, which is the slow part) so concurrent readers
+            // don't stall during the batch.
             if (yantra && (now_time - last_pending_embed >= pending_embed_interval)) {
                 last_pending_embed = now_time;
                 try {
-                    auto _lk = handler.acquire_lock();
-                    auto pending = field_store.pending_embeddings(50);
+                    std::vector<uint64_t> pending;
+                    {
+                        auto _lk = handler.acquire_lock();
+                        pending = field_store.pending_embeddings(50);
+                    }
                     if (!pending.empty()) {
                         std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
                         for (uint64_t id : pending) {
-                            auto mem = field_store.get_content(id);
-                            if (!mem.empty()) {
-                                auto emb = yantra->transform(mem).nu.data;
-                                if (emb.size() == 768) {
-                                    field_store.backfill_embedding(id, emb);
-                                }
+                            std::string mem;
+                            {
+                                auto _lk = handler.acquire_lock();
+                                mem = field_store.get_content(id);
                             }
+                            if (mem.empty()) continue;
+                            auto emb = yantra->transform(mem).nu.data;
+                            if (emb.size() != 768) continue;
+                            auto _lk = handler.acquire_lock();
+                            field_store.backfill_embedding(id, emb);
                         }
                     }
                 } catch (const std::exception& e) {
@@ -304,7 +313,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             if (seg_event || (now_time - last_foreign_sync >= foreign_sync_interval)) {
                 last_foreign_sync = now_time;
                 try {
-                    auto _lk = handler.acquire_lock();
+                    auto _lk = handler.acquire_shared_lock();
                     int applied = field_store.sync_foreign();
                     if (verbose_mode && applied > 0) {
                         std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
@@ -343,7 +352,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 cycle_count++;
 
                 try {
-                    auto _lk = handler.acquire_lock();
+                    auto _lk = handler.acquire_shared_lock();
                     field_store.flush();
                     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
