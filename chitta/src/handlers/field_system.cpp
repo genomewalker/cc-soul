@@ -8,18 +8,80 @@ namespace chitta {
 namespace {
 // Shared cache for memory_stats() — full O(N) scan, expensive under writer contention.
 // Used by tool_health_check, tool_soul_context, tool_hygiene_stats. 30s TTL.
+//
+// Single-flight refresh: the recompute runs OUTSIDE the protecting mutex so
+// concurrent readers don't block on the scan (which itself contends with
+// FieldStore writers). One leader recomputes; followers return the prior
+// cached value, even if stale, rather than queue.
 std::string get_memory_stats_cached(FieldStore* store) {
     static std::mutex mu;
     static std::string cache;
     static std::chrono::steady_clock::time_point ts;
-    std::lock_guard<std::mutex> lk(mu);
-    auto now = std::chrono::steady_clock::now();
-    if (cache.empty() ||
-        std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 30) {
-        cache = store->memory_stats();
-        ts = now;
+    static bool in_flight = false;
+
+    bool i_am_leader = false;
+    std::string snapshot;
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        auto now = std::chrono::steady_clock::now();
+        bool expired = cache.empty() ||
+            std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 30;
+        if (expired && !in_flight) {
+            in_flight = true;
+            i_am_leader = true;
+        }
+        snapshot = cache;
     }
-    return cache;
+
+    if (i_am_leader) {
+        std::string fresh;
+        try { fresh = store->memory_stats(); } catch (...) {}
+        std::lock_guard<std::mutex> lk(mu);
+        if (!fresh.empty()) {
+            cache = std::move(fresh);
+            ts = std::chrono::steady_clock::now();
+        }
+        in_flight = false;
+        return cache;
+    }
+    // Followers: return whatever we have (possibly stale, possibly empty on
+    // very first call before the leader finishes).
+    return snapshot;
+}
+
+// Same single-flight pattern for spectral stats (60s TTL).
+std::string get_spectral_stats_cached(FieldStore* store) {
+    static std::mutex mu;
+    static std::string cache;
+    static std::chrono::steady_clock::time_point ts;
+    static bool in_flight = false;
+
+    bool i_am_leader = false;
+    std::string snapshot;
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        auto now = std::chrono::steady_clock::now();
+        bool expired = cache.empty() ||
+            std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 60;
+        if (expired && !in_flight) {
+            in_flight = true;
+            i_am_leader = true;
+        }
+        snapshot = cache;
+    }
+
+    if (i_am_leader) {
+        std::string fresh;
+        try { fresh = store->spectral_stats_by_realm(); } catch (...) {}
+        std::lock_guard<std::mutex> lk(mu);
+        if (!fresh.empty()) {
+            cache = std::move(fresh);
+            ts = std::chrono::steady_clock::now();
+        }
+        in_flight = false;
+        return cache;
+    }
+    return snapshot;
 }
 }
 
@@ -62,22 +124,10 @@ ToolResult FieldRpcHandler::tool_health_check(const json&) {
         out["avg_confidence"]   = stats_j.value("avg_confidence", 0.0f);
     }
 
-    // Per-realm/kind embedding geometry — reuse soul_context cache (60s TTL)
+    // Per-realm/kind embedding geometry — single-flight cached (60s TTL)
     try {
-        static std::mutex spectral_mu_;
-        static std::string spectral_cache_;
-        static std::chrono::steady_clock::time_point spectral_ts_;
-        std::string _spec_str;
-        {
-            std::lock_guard<std::mutex> lk(spectral_mu_);
-            auto now = std::chrono::steady_clock::now();
-            if (spectral_cache_.empty() ||
-                std::chrono::duration_cast<std::chrono::seconds>(now - spectral_ts_).count() > 60) {
-                spectral_cache_ = field_store_->spectral_stats_by_realm();
-                spectral_ts_ = now;
-            }
-            _spec_str = spectral_cache_;
-        }
+        std::string _spec_str = get_spectral_stats_cached(field_store_);
+        if (_spec_str.empty()) throw std::runtime_error("spectral cache cold");
         auto spectral_j = json::parse(_spec_str);
         auto& by_realm = spectral_j["by_realm"];
         auto& by_kind  = spectral_j["by_kind"];
@@ -260,21 +310,8 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
         }
     }
 
-    // Spectral stats — cached 60s to avoid per-call SVD cost
-    static std::mutex spectral_mu_;
-    static std::string spectral_cache_;
-    static std::chrono::steady_clock::time_point spectral_ts_;
-    std::string spectral_str;
-    {
-        std::lock_guard<std::mutex> lk(spectral_mu_);
-        auto now = std::chrono::steady_clock::now();
-        if (spectral_cache_.empty() ||
-            std::chrono::duration_cast<std::chrono::seconds>(now - spectral_ts_).count() > 60) {
-            spectral_cache_ = field_store_->spectral_stats_by_realm();
-            spectral_ts_ = now;
-        }
-        spectral_str = spectral_cache_;
-    }
+    // Spectral stats — single-flight cached (60s TTL) to avoid per-call SVD cost
+    std::string spectral_str = get_spectral_stats_cached(field_store_);
 
     json out = {
         {"version",        CHITTA_VERSION},
