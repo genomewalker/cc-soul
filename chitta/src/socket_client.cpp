@@ -53,6 +53,7 @@ void SocketClient::disconnect() {
         close(fd_);
         fd_ = -1;
     }
+    read_buffer_.clear();
 }
 
 bool SocketClient::ensure_daemon_running() {
@@ -188,10 +189,20 @@ bool SocketClient::wait_for_socket_gone(int timeout_ms) {
 
 
 std::optional<std::string> SocketClient::request_internal(const std::string& json_rpc) {
+    using json = nlohmann::json;
+
     if (fd_ < 0) {
         last_error_ = "Not connected";
         return std::nullopt;
     }
+
+    // Extract request id so we can match it against the response id.
+    // If the request has no id, accept any response.
+    std::optional<json> expected_id;
+    try {
+        auto req = json::parse(json_rpc);
+        if (req.contains("id")) expected_id = req["id"];
+    } catch (...) { /* malformed request: skip id check */ }
 
     // Send request (newline-delimited)
     std::string msg = json_rpc + "\n";
@@ -200,7 +211,6 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
         ssize_t n = write(fd_, msg.data() + sent, msg.size() - sent);
         if (n <= 0) {
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                // Would block - wait for writable
                 pollfd pfd = {fd_, POLLOUT, 0};
                 poll(&pfd, 1, 1000);
                 continue;
@@ -211,11 +221,35 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
         sent += static_cast<size_t>(n);
     }
 
-    // Wait for response
-    std::string response;
+    // Read newline-terminated frames, keeping leftover bytes in read_buffer_.
+    // Skip any frame whose id doesn't match expected_id (stale/out-of-order response).
     pollfd pfd = {fd_, POLLIN, 0};
 
+    auto extract_frame = [this]() -> std::optional<std::string> {
+        size_t pos = read_buffer_.find('\n');
+        if (pos == std::string::npos) return std::nullopt;
+        std::string frame = read_buffer_.substr(0, pos);
+        read_buffer_.erase(0, pos + 1);
+        return frame;
+    };
+
+    auto frame_id_matches = [&](const std::string& frame) -> bool {
+        if (!expected_id) return true;
+        try {
+            auto j = json::parse(frame);
+            return j.contains("id") && j["id"] == *expected_id;
+        } catch (...) {
+            return false;
+        }
+    };
+
     while (true) {
+        if (auto frame = extract_frame()) {
+            if (frame_id_matches(*frame)) return frame;
+            // id mismatch: stale frame, drop and keep reading
+            continue;
+        }
+
         int ret = poll(&pfd, 1, RESPONSE_TIMEOUT_MS);
 
         if (ret < 0) {
@@ -223,7 +257,6 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
             last_error_ = std::string("poll() failed: ") + strerror(errno);
             return std::nullopt;
         }
-
         if (ret == 0) {
             last_error_ = "Response timeout";
             return std::nullopt;
@@ -231,23 +264,16 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
 
         char buf[4096];
         ssize_t n = read(fd_, buf, sizeof(buf));
-
         if (n <= 0) {
             last_error_ = n == 0 ? "Connection closed" :
                           std::string("read() failed: ") + strerror(errno);
             return std::nullopt;
         }
 
-        response.append(buf, static_cast<size_t>(n));
-        if (response.size() > SocketClient::MAX_RESPONSE_SIZE) {
+        read_buffer_.append(buf, static_cast<size_t>(n));
+        if (read_buffer_.size() > SocketClient::MAX_RESPONSE_SIZE) {
             last_error_ = "Response too large";
             return std::nullopt;
-        }
-
-        // Check for complete message (newline)
-        size_t pos = response.find('\n');
-        if (pos != std::string::npos) {
-            return response.substr(0, pos);
         }
     }
 }

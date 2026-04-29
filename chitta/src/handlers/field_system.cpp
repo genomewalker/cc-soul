@@ -5,6 +5,24 @@
 
 namespace chitta {
 
+namespace {
+// Shared cache for memory_stats() — full O(N) scan, expensive under writer contention.
+// Used by tool_health_check, tool_soul_context, tool_hygiene_stats. 30s TTL.
+std::string get_memory_stats_cached(FieldStore* store) {
+    static std::mutex mu;
+    static std::string cache;
+    static std::chrono::steady_clock::time_point ts;
+    std::lock_guard<std::mutex> lk(mu);
+    auto now = std::chrono::steady_clock::now();
+    if (cache.empty() ||
+        std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 30) {
+        cache = store->memory_stats();
+        ts = now;
+    }
+    return cache;
+}
+}
+
 ToolResult FieldRpcHandler::tool_health_check(const json&) {
     if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
@@ -13,7 +31,7 @@ ToolResult FieldRpcHandler::tool_health_check(const json&) {
 
     json stats_j;
     try {
-        stats_j = json::parse(field_store_->memory_stats());
+        stats_j = json::parse(get_memory_stats_cached(field_store_));
     } catch (...) {
         stats_j = json::object();
     }
@@ -196,7 +214,7 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
 
     json stats_j;
     try {
-        stats_j = json::parse(field_store_->memory_stats());
+        stats_j = json::parse(get_memory_stats_cached(field_store_));
     } catch (...) {
         stats_j = json::object();
     }
@@ -422,7 +440,7 @@ ToolResult FieldRpcHandler::tool_hygiene_stats(const json&) {
 
     json stats_j;
     try {
-        stats_j = json::parse(field_store_->memory_stats());
+        stats_j = json::parse(get_memory_stats_cached(field_store_));
     } catch (...) {
         stats_j = json::object();
     }

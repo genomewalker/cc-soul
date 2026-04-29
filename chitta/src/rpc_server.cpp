@@ -961,23 +961,6 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         return 1;
     }
 
-    // Send initialize
-    json init_req = {
-        {"jsonrpc", "2.0"},
-        {"method", "initialize"},
-        {"params", {
-            {"protocolVersion", "2024-11-05"},
-            {"capabilities", json::object()},
-            {"clientInfo", {{"name", "chittad"}, {"version", CHITTA_VERSION}}}
-        }},
-        {"id", 0}
-    };
-    auto init_resp = client.request(init_req.dump());
-    if (!init_resp) {
-        std::cerr << "Error: Initialize failed: " << client.last_error() << "\n";
-        return 1;
-    }
-
     // For session-aware tools, inject PPID for session lookup if session_id not provided
     static const std::set<std::string> SESSION_TOOLS = {
         "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
