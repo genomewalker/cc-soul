@@ -128,12 +128,19 @@ void QueueProcessor::run() {
             if (!daemon_running) break;
 
             try {
-                auto _lk = handler_.acquire_lock();
                 auto j = json::parse(line);
                 std::string tool = j.value("tool", "");
                 auto args = j.value("args", json::object());
 
-                // FieldStore is always ready (synchronous init)
+                // FieldStore is always ready (synchronous init).
+                // distill_trigger spawns an LLM call (10–30s); it must NOT hold
+                // the unique rpc_mutex_ during that work, or every reader RPC
+                // (health_check, msg_inbox, …) stalls. run_distillation takes
+                // &handler_ and acquires the lock itself for the brief writes.
+                std::unique_lock<std::shared_mutex> _lk;
+                if (tool != "distill_trigger") {
+                    _lk = handler_.acquire_lock();
+                }
 
                 if (tool == "observe") {
                     std::string category = args.value("category", "wisdom");
