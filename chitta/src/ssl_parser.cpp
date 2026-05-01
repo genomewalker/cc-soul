@@ -36,6 +36,7 @@ std::string SSLParser::type_to_category(const std::string& type) {
     if (type == "DECISION") return "decision";
     if (type == "PATTERN") return "pattern";
     if (type == "PREFERENCE") return "preference";
+    if (type == "BELIEF") return "belief";
     if (type == "FAILURE") return "failure";
     if (type == "AFFECT") return "affect";
     if (type == "CORRECTION") return "correction";

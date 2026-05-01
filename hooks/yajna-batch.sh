@@ -10,10 +10,18 @@ CHITTA="${HOME}/.claude/bin/chitta"
 BATCH_SIZE="${1:-50}"
 MIN_LENGTH="${2:-200}"
 
-# Ensure daemon is running
+# Ensure daemon is running. Prefer systemd if a unit is installed — bare
+# "chittad daemon" calls race with the systemd-managed instance and trigger
+# SIGKILL self-clobbers via daemon_lifecycle's stale-PID handler.
 if ! pgrep -f "chittad daemon" >/dev/null; then
     echo "[yajna] Starting daemon..." >&2
-    "${HOME}/.claude/bin/chittad" daemon
+    if [[ -f "${HOME}/.config/systemd/user/chittad.service" ]] && \
+       command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start chittad 2>/dev/null || true
+    else
+        "${HOME}/.claude/bin/chittad" daemon &
+        disown
+    fi
     sleep 2
 fi
 

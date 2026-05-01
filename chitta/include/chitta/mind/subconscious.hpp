@@ -22,6 +22,7 @@
 #include <atomic>
 #include <regex>
 #include <chrono>
+#include <shared_mutex>
 
 namespace chitta {
 
@@ -202,10 +203,12 @@ public:
 
     // Wire in embedder (may be initialized after construction).
     void set_embedder(VakYantra* e) { embedder_ = e; }
+    void set_rpc_mutex(std::shared_mutex* m) { rpc_mutex_ = m; }
 
 private:
     FieldStore* field_store_;
     VakYantra* embedder_;
+    std::shared_mutex* rpc_mutex_{nullptr};
     SubconsciousConfig config_;
     SubconsciousStats stats_;
 
@@ -248,6 +251,7 @@ private:
     std::mutex tool_sequence_mutex_;
 
     // Main processing loop
+    std::unique_lock<std::shared_mutex> write_lock();
     void process_loop();
 
     // Event handlers

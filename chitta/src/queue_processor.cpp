@@ -41,6 +41,7 @@ void QueueProcessor::stop() {
 
 float QueueProcessor::category_to_confidence(const std::string& category) {
     if (category == "correction") return 0.95f;
+    if (category == "belief")     return 0.90f;
     if (category == "preference") return 0.90f;
     if (category == "solution")   return 0.90f;
     if (category == "milestone")  return 0.90f;
@@ -60,8 +61,11 @@ std::vector<float> QueueProcessor::embed_text(const std::string& text) {
 }
 
 std::string QueueProcessor::category_to_kind(const std::string& cat) {
-    if (cat == "episode") return "episode";
-    if (cat == "belief")  return "belief";
+    if (cat == "episode")    return "episode";
+    if (cat == "belief")     return "belief";
+    if (cat == "correction") return "correction";
+    if (cat == "preference") return "preference";
+    if (cat == "event")      return "milestone";
     return "wisdom";
 }
 

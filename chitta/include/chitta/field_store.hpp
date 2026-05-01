@@ -1018,18 +1018,25 @@ public:
     }
 
     /// 2. Paginated memory listing sorted by strength/recency/confidence.
+    /// Retries with a growing buffer on -2 (truncated) up to 64 MiB so large
+    /// limits don't silently return an empty string.
     std::string list_memories(const std::string& kind = "", const std::string& realm = "",
                               const std::string& sort_by = "recency",
                               size_t limit = 50, size_t offset = 0) {
-        std::vector<uint8_t> buf(262144);
-        size_t written = 0;
         const char* kind_ptr = kind.empty() ? nullptr : kind.c_str();
         const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
-        int r = cf_list_memories(handle_, kind_ptr, realm_ptr,
-                                 sort_by.c_str(), limit, offset,
-                                 buf.data(), buf.size(), &written);
-        if (r != 0 && r != -2) return "[]";
-        return std::string(reinterpret_cast<char*>(buf.data()), written);
+        size_t cap = 262144;
+        constexpr size_t kMaxCap = 64 * 1024 * 1024;
+        for (;;) {
+            std::vector<uint8_t> buf(cap);
+            size_t written = 0;
+            int r = cf_list_memories(handle_, kind_ptr, realm_ptr,
+                                     sort_by.c_str(), limit, offset,
+                                     buf.data(), buf.size(), &written);
+            if (r == 0) return std::string(reinterpret_cast<char*>(buf.data()), written);
+            if (r != -2 || cap >= kMaxCap) return "[]";
+            cap = std::min(cap * 4, kMaxCap);
+        }
     }
 
     /// 3. Aggregate memory stats. Returns JSON with count_by_kind, avg_confidence, etc.

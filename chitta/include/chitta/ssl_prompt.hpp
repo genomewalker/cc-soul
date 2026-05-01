@@ -51,9 +51,10 @@ Types:
 | [GOTCHA] | 1 | Traps: counterintuitive behavior, silent failures, edge cases |
 | [PATTERN] | 1 | Reusable techniques that generalize |
 | [DECISION] | 2 | Design choices: why X over Y, tradeoffs considered |
-| [PREFERENCE] | 2 | User preferences, working style, identity facts |
+| [BELIEF] | 2 | **Stable assumptions** about user/env/project that persist across sessions: who they are, how their system is set up, invariants. Triggers: "user is X", "project uses X", "X is always Y", "system requires Y". |
+| [PREFERENCE] | 2 | **How the user wants things done.** Triggers: "I prefer X", "always use X", "never X", "don't X", "use X over Y", "I like X", "please always/never". Personal style, not technical knowledge. |
 | [FAILURE] | 2 | What did not work and why |
-| [CORRECTION] | 1 | Updates to prior beliefs: supersedes earlier knowledge |
+| [CORRECTION] | 1 | **Explicit update to a prior belief or action.** Triggers: "was wrong", "actually it's X not Y", "should NOT have", "incorrectly Xed", "the right answer is Y", user contradicting earlier output. Supersedes earlier knowledge. |
 | [EVENT] | 2 | Significant action taken this session (deployed, merged, configured) |
 | [OPERATIONAL] | 1 | Working-state facts: paths, configs, env vars, versions, active states |
 
@@ -98,7 +99,9 @@ When referencing specific code, include @file:line. Use [CITE] for multiple:
 2. **Compress**: Tier 2 types use dense symbol chains — no [ε] line
 3. **Specific**: File paths, line numbers, exact values when available
 4. **No fluff**: Skip obvious things
-5. **Corrections are first-class**: If something was previously wrong, emit [CORRECTION] — these supersede old beliefs
+5. **Corrections are first-class**: If something was previously wrong, emit [CORRECTION] — these supersede old beliefs. Watch for user contradicting earlier output, "actually X", "no/not X", "was wrong".
+5b. **Beliefs are first-class**: When the conversation reveals or confirms a stable fact about the user, their environment, project setup, or an invariant, emit [BELIEF]. These are NOT technical knowledge (that's wisdom) — they are facts that should still be true next session.
+5c. **Preferences are first-class**: Any time the user expresses how they want things done, emit [PREFERENCE]. "I prefer", "always", "never", "don't", "please always/never" are strong signals. Default to emitting if the signal is present.
 6. **Affect required**: Every learning must have A:v,a — estimate from conversation tone
 7. **Flags when significant**: Add F: only for structurally important entries (origins, pivots, core decisions)
 8. **Cross-ref when related**: Use →@tag to link learnings that reference each other
@@ -122,7 +125,10 @@ When referencing specific code, include @file:line. Use [CITE] for multiple:
 ### Tier 2 (narrative — dense, no [ε]):
 ```
 [DECISION] [arch] sqlite>postgres|metadata|single-file+no-daemon+<100k A:+0.5,0.4 F:PIVOT
+[BELIEF] [user] runs-on-shared-cluster+slurm+conda-bioinfo-env A:+0.1,0.2 F:CORE
+[BELIEF] [project] cc-soul-uses-rpc-mutex-shared_lock-for-reads A:+0.1,0.1
 [PREFERENCE] [partnership] no-shortcuts+proper-solutions+no-stubs A:+0.2,0.1 F:CORE
+[PREFERENCE] [comms] short-replies+cite-file:line+no-summary-tables A:+0.1,0.1
 [FAILURE] [http] http-daemon>unix-socket|200ms-latency+hooks-need-<50ms A:-0.3,0.6 →@queue-architecture
 [EVENT] [release] v5.7.0→deployed→ssl-v0.3-active A:+0.8,0.5 F:GENESIS
 ```

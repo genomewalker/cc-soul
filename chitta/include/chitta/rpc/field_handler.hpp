@@ -104,6 +104,7 @@ public:
     // demotion) does not starve concurrent reader RPCs. Writer RPCs still
     // serialize via the exclusive side.
     std::shared_lock<std::shared_mutex> acquire_shared_lock() { return std::shared_lock<std::shared_mutex>(rpc_mutex_); }
+    std::shared_mutex& rpc_mutex() { return rpc_mutex_; }
 
     void run_belief_maintenance(float stale_strength_threshold = 0.1f,
                                 int stale_days = 30,

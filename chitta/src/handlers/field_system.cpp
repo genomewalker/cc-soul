@@ -85,8 +85,23 @@ std::string get_spectral_stats_cached(FieldStore* store) {
 }
 }
 
-ToolResult FieldRpcHandler::tool_health_check(const json&) {
+ToolResult FieldRpcHandler::tool_health_check(const json& params) {
     if (!field_store_) return ToolResult::error("chitta-field store unavailable");
+
+    // Fast path (default): only emit cheap fields. This is what hooks poll
+    // every few seconds — full O(N) state scan + spectral stats can take
+    // 15-30s under writer contention and stacks concurrent clients, which
+    // has been a heap-corruption trigger. Pass `details=true` for the
+    // expensive metrics.
+    bool details = params.contains("arguments")
+                       ? params["arguments"].value("details", false)
+                       : params.value("details", false);
+
+    std::ostringstream ss;
+    ss << "Status: ok\n"
+       << "chitta-field daemon healthy\n"
+       << "  yantra   : " << (yantra_ ? "loaded" : "unavailable") << "\n"
+       << "  backend  : chitta-field\n";
 
     size_t mem_count = field_store_->memory_count();
     size_t sym_count = field_store_->symbol_count();
@@ -98,31 +113,31 @@ ToolResult FieldRpcHandler::tool_health_check(const json&) {
         stats_j = json::object();
     }
 
-    std::ostringstream ss;
-    ss << "chitta-field daemon healthy\n"
-       << "  memories : " << mem_count << "\n"
-       << "  symbols  : " << sym_count << "\n"
-       << "  yantra   : " << (yantra_ ? "loaded" : "unavailable") << "\n"
-       << "  backend  : chitta-field\n";
-
-    std::string chain = field_store_->chain_head();
+    ss << "  memories : " << mem_count << "\n"
+       << "  symbols  : " << sym_count << "\n";
 
     json out = {
         {"status",           "ok"},
-        {"memory_count",     mem_count},
-        {"symbol_count",     sym_count},
         {"backend",          "chitta-field"},
         {"yantra",           yantra_ ? "loaded" : "unavailable"},
         {"software_version", CHITTA_VERSION},
         {"protocol_major",   CHITTA_PROTOCOL_VERSION_MAJOR},
         {"protocol_minor",   CHITTA_PROTOCOL_VERSION_MINOR},
         {"pid",              static_cast<int>(getpid())},
-        {"chain_head",       chain.empty() ? "none (v1 data)" : chain},
+        {"memory_count",     mem_count},
+        {"symbol_count",     sym_count},
     };
     if (!stats_j.is_null() && stats_j.contains("count_by_kind")) {
-        out["count_by_kind"]    = stats_j["count_by_kind"];
-        out["avg_confidence"]   = stats_j.value("avg_confidence", 0.0f);
+        out["count_by_kind"]  = stats_j["count_by_kind"];
+        out["avg_confidence"] = stats_j.value("avg_confidence", 0.0f);
     }
+
+    if (!details) {
+        return ToolResult::ok(ss.str(), out);
+    }
+
+    std::string chain = field_store_->chain_head();
+    out["chain_head"] = chain.empty() ? "none (v1 data)" : chain;
 
     // Per-realm/kind embedding geometry — single-flight cached (60s TTL)
     try {
