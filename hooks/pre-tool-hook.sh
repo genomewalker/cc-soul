@@ -152,9 +152,12 @@ case "$MATCHER" in
         fi
 
         # Stage 2: Soul memory — surface corrections/gotchas
-        # Skip for subagent calls (agent_id present) — saves 2s timeout per tool call
+        # Skip for subagent calls by default (saves 2s timeout per tool call).
+        # Set CC_SOUL_SUBAGENT_BASH_RECALL=1 to enable Bash recall for subagents too.
         agent_id=$(echo "$STDIN_DATA" | jq -r '.agent_id // empty')
-        [[ -n "$agent_id" ]] && exit 0
+        if [[ -n "$agent_id" && "${CC_SOUL_SUBAGENT_BASH_RECALL:-0}" != "1" ]]; then
+            exit 0
+        fi
 
         [[ ! -x "$CHITTA_BIN" ]] && exit 0
         daemon_available || exit 0
@@ -334,11 +337,25 @@ case "$MATCHER" in
         ;;
 
     Agent)
-        # ─── Subagent budget tracking ────────────────────────────────────────────
+        # ─── Subagent budget + model routing ─────────────────────────────────────
         # Each subagent cold-starts a new cache window (~$5-50 per agent).
-        # Track count per session and warn/advise when spending is high.
         MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
         _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty')
+        agent_type=$(echo "$STDIN_DATA" | jq -r '.tool_input.subagent_type // .tool_input.description // empty' 2>/dev/null)
+        agent_model=$(echo "$STDIN_DATA" | jq -r '.tool_input.model // empty' 2>/dev/null)
+
+        # Force haiku for research/exploration subagents (default ON).
+        # Denies the call so Claude retries with model:"haiku" — 10x cheaper.
+        # Bypass with CC_SOUL_AGENT_NO_FORCE=1 (falls back to advisory).
+        if [[ -z "$agent_model" ]] && echo "$agent_type" | grep -qiE '(explore|search|find|research|grep|glob|read)'; then
+            if [[ "${CC_SOUL_AGENT_NO_FORCE:-0}" != "1" ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Research/exploration subagent must use a cheaper model. Resubmit this Agent call with model:\\"haiku\\" (10x cheaper, sufficient for find/search/read tasks). Bypass with CC_SOUL_AGENT_NO_FORCE=1."}}\n'
+                exit 0
+            fi
+            # Legacy advisory mode
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[token-hint] Exploration subagent inherits parent model. Add model:\\"haiku\\" for 10x cheaper research agents."}}\n'
+        fi
+
         if [[ -n "$_session_id" ]]; then
             AGENT_COUNT_FILE="$MIND_PATH/.subagent_count_${_session_id}"
             AGENT_COUNT=$(cat "$AGENT_COUNT_FILE" 2>/dev/null || echo 0)
@@ -354,16 +371,6 @@ case "$MATCHER" in
             elif [[ $AGENT_COUNT -gt $AGENT_WARN_THRESHOLD ]]; then
                 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d subagents this session. Each spawns a new cache window. Batch independent queries into single agents where possible."}}\n' \
                     "$AGENT_COUNT"
-            fi
-
-            # Model routing advice: suggest haiku for exploration/research subagents
-            agent_type=$(echo "$STDIN_DATA" | jq -r '.tool_input.subagent_type // .tool_input.description // empty' 2>/dev/null)
-            agent_model=$(echo "$STDIN_DATA" | jq -r '.tool_input.model // empty' 2>/dev/null)
-            if [[ -z "$agent_model" ]]; then
-                # No model override — check if this is a research/exploration task
-                if echo "$agent_type" | grep -qiE '(explore|search|find|research|grep|glob|read)'; then
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[token-hint] Exploration subagent inherits parent model. Add model:\"haiku\" for 10x cheaper research agents."}}\n'
-                fi
             fi
         fi
         ;;

@@ -20,6 +20,25 @@ jobs:
         with:
           toolchain: "1.92.0"
 
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            chitta-field/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('chitta-field/Cargo.lock', 'chitta-field/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Cache cmake build
+        uses: actions/cache@v4
+        with:
+          path: chitta/build
+          key: cmake-${{ runner.os }}-${{ hashFiles('chitta/CMakeLists.txt', 'chitta/cmake/**', 'chitta/src/**', 'chitta/include/**') }}
+          restore-keys: |
+            cmake-${{ runner.os }}-
+
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -51,7 +70,7 @@ jobs:
             -DPython3_FIND_STRATEGY=LOCATION \
             -DPython3_FIND_VIRTUALENV=ONLY \
             -DPython3_EXECUTABLE="$PYO3_PYTHON"
-          cmake --build . --parallel
+          cmake --build . -j2
 
       - name: Verify binaries
         run: |

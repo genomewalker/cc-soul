@@ -133,6 +133,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 
     subconscious.start();
     handler.set_subconscious(&subconscious);
+    subconscious.set_rpc_mutex(&handler.rpc_mutex());
 
     // HTTP visualization server (optional)
     std::unique_ptr<VizServer> viz_server;
@@ -640,15 +641,25 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     }
 
     // Stop socket first — removes file immediately, prevents new connections
-    // while threads finish their current work. Lock is held until after joins
-    // to prevent conflicts with a new daemon starting too early.
+    // while threads finish their current work.
     server.stop();
     if (viz_server) viz_server->stop();
 
+    // Clean pid/lock BEFORE joining: distillation/enrichment may be in a long
+    // LLM call (>15s) that cannot be interrupted; the alarm below will _Exit
+    // the process if joins overrun, and we want the next daemon start to find
+    // a clean state without relying on cleanup_stale_daemon().
+    if (!pid_file.empty()) std::remove(pid_file.c_str());
+    release_lock(lock);
+
     // Watchdog: force-exit if background threads don't finish within 15s.
-    // Socket is already closed so no clients will be left hanging.
-    // cleanup_stale_daemon() handles any leftover pid/lock files on next start.
-    std::signal(SIGALRM, [](int) { std::_Exit(0); });
+    // The pid/lock cleanup above already ran, so a forced _Exit leaves clean
+    // state for the next daemon. Detaching threads is unsafe — captures-by-ref
+    // outlive main()'s stack frame, risking UAF under heavy concurrency.
+    std::signal(SIGALRM, [](int) {
+        std::cerr << "[daemon] Shutdown timeout — forcing exit\n";
+        std::_Exit(0);
+    });
     alarm(15);
 
     maintenance.join();
@@ -658,9 +669,6 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     subconscious.stop();
 
     alarm(0);  // Cancel watchdog — all threads finished normally
-
-    if (!pid_file.empty()) std::remove(pid_file.c_str());
-    release_lock(lock);
 
     const auto& sc_stats = subconscious.stats();
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count

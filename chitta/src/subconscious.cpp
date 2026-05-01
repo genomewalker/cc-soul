@@ -92,6 +92,11 @@ void Subconscious::stop() {
               << ", hygiene_runs=" << stats_.hygiene_runs << ")\n";
 }
 
+std::unique_lock<std::shared_mutex> Subconscious::write_lock() {
+    if (rpc_mutex_) return std::unique_lock<std::shared_mutex>(*rpc_mutex_);
+    return {};
+}
+
 void Subconscious::push_event(SubconsciousEvent event) {
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -390,9 +395,9 @@ void Subconscious::store_correction(const std::string& context, const std::strin
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("correction",
+    { auto lk = write_lock(); field_store_->remember("correction",
                            realm.empty() ? "brahman" : realm,
-                           content.str(), embedding, confidence, 0.005f);
+                           content.str(), embedding, confidence, 0.005f); }
 }
 
 void Subconscious::store_preference(const std::string& preference, const std::string& realm) {
@@ -402,8 +407,8 @@ void Subconscious::store_preference(const std::string& preference, const std::st
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("preference", "brahman",
-                           content.str(), embedding, 0.8f, 0.0f);
+    { auto lk = write_lock(); field_store_->remember("preference", "brahman",
+                           content.str(), embedding, 0.8f, 0.0f); }
 }
 
 void Subconscious::store_frustration(const std::string& context, const std::string& realm) {
@@ -414,9 +419,9 @@ void Subconscious::store_frustration(const std::string& context, const std::stri
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("episode",
+    { auto lk = write_lock(); field_store_->remember("episode",
                            realm.empty() ? "default" : realm,
-                           content.str(), embedding, 0.8f, 0.03f);
+                           content.str(), embedding, 0.8f, 0.03f); }
 }
 
 void Subconscious::store_milestone(const std::string& achievement, const std::string& realm) {
@@ -426,9 +431,9 @@ void Subconscious::store_milestone(const std::string& achievement, const std::st
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("wisdom",
+    { auto lk = write_lock(); field_store_->remember("wisdom",
                            realm.empty() ? "default" : realm,
-                           content.str(), embedding, 0.8f, 0.005f);
+                           content.str(), embedding, 0.8f, 0.005f); }
 }
 
 void Subconscious::store_uncertainty(const std::string& context, const std::string& realm) {
@@ -438,9 +443,9 @@ void Subconscious::store_uncertainty(const std::string& context, const std::stri
     auto embedding = embed(content.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("episode",
+    { auto lk = write_lock(); field_store_->remember("episode",
                            realm.empty() ? "brahman" : realm,
-                           content.str(), embedding, 0.8f, 0.03f);
+                           content.str(), embedding, 0.8f, 0.03f); }
 }
 
 // Suggestion Tracking
@@ -457,8 +462,9 @@ void Subconscious::track_suggestion(const std::string& content, const std::strin
     auto embedding = embed(text.str());
     if (embedding.empty()) return;
 
-    uint64_t id = field_store_->remember("episode", realm.empty() ? "brahman" : realm,
-                                          text.str(), embedding, 0.6f, 0.03f);
+    uint64_t id;
+    { auto lk = write_lock(); id = field_store_->remember("episode", realm.empty() ? "brahman" : realm,
+                                          text.str(), embedding, 0.6f, 0.03f); }
 
     if (id > 0) {
         std::lock_guard<std::mutex> lock(suggestions_mutex_);
@@ -484,9 +490,9 @@ void Subconscious::check_outcomes(const std::string& user_message, const std::st
         if (it->realm == realm || realm.empty()) {
             // Strengthen or weaken the suggestion memory based on outcome
             if (indicates_success) {
-                field_store_->strengthen(static_cast<uint64_t>(it->db_id), 0.2f);
+                { auto lk = write_lock(); field_store_->strengthen(static_cast<uint64_t>(it->db_id), 0.2f); }
             } else {
-                field_store_->weaken(static_cast<uint64_t>(it->db_id), 0.2f);
+                { auto lk = write_lock(); field_store_->weaken(static_cast<uint64_t>(it->db_id), 0.2f); }
             }
             stats_.outcomes_verified++;
             it = pending_suggestions_.erase(it);
@@ -508,8 +514,8 @@ void Subconscious::observe_pattern(const std::string& context, const std::string
     auto embedding = embed(text.str());
     if (embedding.empty()) return;
 
-    field_store_->remember("episode", realm.empty() ? "brahman" : realm,
-                           text.str(), embedding, 0.5f, 0.03f);
+    { auto lk = write_lock(); field_store_->remember("episode", realm.empty() ? "brahman" : realm,
+                           text.str(), embedding, 0.5f, 0.03f); }
 }
 
 void Subconscious::verify_prediction(const std::string& actual_action, const std::string& realm) {
@@ -586,8 +592,8 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 
             auto embedding = embed(text.str());
             if (!embedding.empty()) {
-                field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
-                                       text.str(), embedding, 0.6f, 0.005f);
+                { auto lk = write_lock(); field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
+                                       text.str(), embedding, 0.6f, 0.005f); }
                 stats_.habits_formed++;
             }
         }
@@ -613,8 +619,8 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 
             auto embedding = embed(text.str());
             if (!embedding.empty()) {
-                field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
-                                       text.str(), embedding, 0.6f, 0.005f);
+                { auto lk = write_lock(); field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
+                                       text.str(), embedding, 0.6f, 0.005f); }
                 stats_.habits_formed++;
             }
         }
@@ -626,6 +632,7 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 void Subconscious::run_theme_maintenance() {
     if (!is_idle() || !field_store_) return;
 
+    auto lk = write_lock();
     try {
         auto result_json = field_store_->theme_maintain();
         stats_.theme_maintenance_runs++;
@@ -651,7 +658,6 @@ bool Subconscious::time_for_theme_maintenance() const {
 
 void Subconscious::run_sleep_consolidation() {
     stats_.last_sleep_consolidation_at = now_ms();
-
     try {
         size_t encoded = field_store_->encode_all();
         bool snapped      = field_store_->save_snapshot();
@@ -692,7 +698,7 @@ bool Subconscious::time_for_sleep_consolidation() const {
 
 void Subconscious::run_demotion_pass() {
     stats_.last_demotion_at = now_ms();
-
+    auto lk = write_lock();
     try {
         auto [demoted, deleted] = field_store_->run_demotion(now_ms());
 
@@ -734,7 +740,7 @@ void Subconscious::run_learning_cycle() {
     last_learning_cycle_ = std::chrono::steady_clock::now();
     stats_.learning_cycle_runs++;
     stats_.last_learning_cycle_at = now_ms();
-
+    auto lk = write_lock();
     try {
         // Move 3: Auto-resolve epistemic debts with sufficient evidence
         {
@@ -848,7 +854,6 @@ bool Subconscious::time_for_code_intel_staleness() const {
 void Subconscious::run_code_intel_staleness() {
     last_code_intel_staleness_ = std::chrono::steady_clock::now();
     stats_.code_intel_staleness_runs++;
-
     try {
         const std::vector<std::string> kinds = {
             "symbol", "projectessence", "modulestate", "patternstate"
@@ -860,7 +865,7 @@ void Subconscious::run_code_intel_staleness() {
                 if (h.confidence < config_.code_intel_min_confidence) {
                     float delta = config_.code_intel_target_confidence - h.confidence;
                     if (delta > 0.0f) {
-                        field_store_->strengthen(h.memory_id, delta);
+                        { auto lk = write_lock(); field_store_->strengthen(h.memory_id, delta); }
                         restored++;
                     }
                 }
@@ -885,7 +890,6 @@ bool Subconscious::time_for_correction_promotion() const {
 void Subconscious::run_correction_promotion() {
     last_correction_promotion_ = std::chrono::steady_clock::now();
     stats_.correction_promotion_runs++;
-
     try {
         auto json_str = field_store_->recall_filtered("wisdom", "", 0.0f, 0.0f, 5000);
         auto mems = nlohmann::json::parse(json_str, nullptr, false);
@@ -921,7 +925,9 @@ void Subconscious::run_correction_promotion() {
 
             // Promote the first entry: move it to brahman
             auto it = realm_map.begin();
-            if (field_store_->set_realm(it->second, "brahman")) {
+            bool promoted_now;
+            { auto lk = write_lock(); promoted_now = field_store_->set_realm(it->second, "brahman"); }
+            if (promoted_now) {
                 promoted++;
                 std::cerr << "[subconscious] Correction promoted to brahman (id="
                           << it->second << ", realms=" << realm_map.size() << ")\n";
@@ -949,30 +955,31 @@ bool Subconscious::time_for_background_embedding() const {
 void Subconscious::run_background_embedding() {
     stats_.last_embedding_at = now_ms();
 
-    auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
+    std::vector<uint64_t> pending;
+    { auto lk = write_lock(); pending = field_store_->pending_embeddings(config_.embedding_batch_size); }
     if (pending.empty()) return;
 
     size_t embedded = 0;
     for (uint64_t id : pending) {
         if (!running_.load()) break;
-        auto meta_json = field_store_->get_memory_metadata(id);
+
+        std::string meta_json;
+        { auto lk = write_lock(); meta_json = field_store_->get_memory_metadata(id); }
         if (meta_json.empty()) continue;
 
+        std::string text;
         try {
             auto meta = nlohmann::json::parse(meta_json, nullptr, false);
             if (meta.is_discarded()) continue;
-            auto text = meta.value("content", std::string{});
-            if (text.empty()) continue;
+            text = meta.value("content", std::string{});
+        } catch (...) { continue; }
+        if (text.empty()) continue;
 
-            auto emb = embed(text);
-            if (emb.empty()) {
-                stats_.embedding_skips++;
-                continue;
-            }
+        auto emb = embed(text);  // no lock — expensive ONNX transform
+        if (emb.empty()) { stats_.embedding_skips++; continue; }
 
-            field_store_->backfill_embedding(id, emb);
-            embedded++;
-        } catch (...) {}
+        { auto lk = write_lock(); field_store_->backfill_embedding(id, emb); }
+        embedded++;
     }
 
     if (embedded > 0) {

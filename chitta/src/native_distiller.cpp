@@ -16,6 +16,7 @@ NativeDistiller::NativeDistiller(FieldStore& field, EmbedFn embedder,
 
 float NativeDistiller::category_to_confidence(const std::string& category) {
     if (category == "correction") return 0.95f;
+    if (category == "belief")     return 0.90f;
     if (category == "preference") return 0.90f;
     if (category == "solution")   return 0.90f;
     if (category == "decision")   return 0.85f;
@@ -26,12 +27,23 @@ float NativeDistiller::category_to_confidence(const std::string& category) {
 }
 
 float NativeDistiller::category_to_decay(const std::string& category) {
-    // Corrections and preferences are long-lived; general wisdom decays faster
+    // Corrections, beliefs, preferences are long-lived; general wisdom decays faster
     if (category == "correction") return 0.0001f;
     if (category == "preference") return 0.0001f;
+    if (category == "belief")     return 0.0001f;
     if (category == "solution")   return 0.001f;
     if (category == "decision")   return 0.001f;
     return 0.005f;
+}
+
+// SSL category → storage kind. Most categories collapse to "wisdom"; only the
+// four first-class kinds get distinct storage so soul_context can surface them.
+static std::string distill_category_to_kind(const std::string& cat) {
+    if (cat == "correction") return "correction";
+    if (cat == "preference") return "preference";
+    if (cat == "belief")     return "belief";
+    if (cat == "event")      return "milestone";
+    return "wisdom";
 }
 
 void NativeDistiller::log(const std::string& msg) {
@@ -112,7 +124,8 @@ void NativeDistiller::store_learnings(
 
         uint64_t mem_id = 0;
         try {
-            mem_id = field_store_->remember("wisdom", realm, full_text,
+            mem_id = field_store_->remember(distill_category_to_kind(learning.category),
+                                            realm, full_text,
                                             embedding, confidence, decay);
         } catch (...) {
             continue;

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <sstream>
 #include <atomic>
+#include <shared_mutex>
 
 // Global flags shared with simple_cli.cpp
 extern std::atomic<bool> daemon_running;
@@ -49,24 +50,36 @@ bool run_distillation(
         });
     }
 
-    auto result = distiller->distill_session(
-        state.session_id,
-        state.transcript_path,
-        state.realm,
-        state.last_processed_line,
-        queue_triggered
-    );
+    // Hold the exclusive rpc lock across distill_session: NativeDistiller writes
+    // to field_store directly (episode, learnings, triplets, edges, affect,
+    // strengthen) and these MUST be serialized with main-thread RPC writers or
+    // the chain-hash invariant breaks ("chain record warning ... resetting
+    // chain") and concurrent FFI writes have corrupted the heap (double-free /
+    // fasttop). The LLM HTTP call inside takes 10-30s, but with the
+    // health_check fast-path readers no longer poll-spam during it.
+    DistillResult result;
+    {
+        std::unique_lock<std::shared_mutex> _lk;
+        if (handler) _lk = handler->acquire_lock();
+        result = distiller->distill_session(
+            state.session_id,
+            state.transcript_path,
+            state.realm,
+            state.last_processed_line,
+            queue_triggered
+        );
 
-    if (!result.success) {
-        if (!result.error.empty())
-            std::cerr << "[distill] " << state.session_id << ": " << result.error << "\n";
-        return false;
+        if (!result.success) {
+            if (!result.error.empty())
+                std::cerr << "[distill] " << state.session_id << ": " << result.error << "\n";
+            return false;
+        }
+
+        field_store.emit_event("transcript", "progress",
+                               state.session_id,
+                               "{\"last_line\":" + std::to_string(result.last_line) + "}");
+        field_store.emit_event("transcript", "distilled", state.session_id, "{}");
     }
-
-    field_store.emit_event("transcript", "progress",
-                           state.session_id,
-                           "{\"last_line\":" + std::to_string(result.last_line) + "}");
-    field_store.emit_event("transcript", "distilled", state.session_id, "{}");
 
     if (verbose_mode) {
         std::cerr << "[distill] Completed " << state.session_id
