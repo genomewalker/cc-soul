@@ -636,10 +636,6 @@ _append() {
     FINAL_OUTPUT="${FINAL_OUTPUT}${text}"
 }
 
-# 0. Infrastructure warnings (highest urgency — always shown first)
-[[ -n "$CACHE_WARN" ]] && _append "${CACHE_WARN}"$'\n'
-[[ -n "$SESSION_WARN" ]] && _append "${SESSION_WARN}"$'\n'
-
 # 1. Learning hints (action items — highest priority)
 _append "$LEARNING_HINTS"
 [[ -n "$LEARNING_HINTS" ]] && _append $'\n'
@@ -682,7 +678,7 @@ fi
 # (managed independently during compaction, not just system-reminder text)
 # Plain text fallback if jq unavailable
 # ===========================================
-if [[ -n "$FINAL_OUTPUT" ]]; then
+if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
     # Strip trailing whitespace
     FINAL_OUTPUT=$(echo -n "$FINAL_OUTPUT" | sed 's/[[:space:]]*$//')
 
@@ -691,8 +687,10 @@ if [[ -n "$FINAL_OUTPUT" ]]; then
         # systemMessage: urgent items shown as warning to user (corrections)
         # additionalContext: everything else, injected as context attachment
         SYSTEM_MSG=""
+        [[ -n "$CACHE_WARN" ]] && SYSTEM_MSG="${CACHE_WARN}"
+        [[ -n "$SESSION_WARN" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${SESSION_WARN}"
         if [[ -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"CORRECTION"* ]]; then
-            SYSTEM_MSG="$LEARNING_HINTS"
+            SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${LEARNING_HINTS}"
         fi
 
         JSON_OUT=$(jq -n \
