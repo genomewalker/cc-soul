@@ -53,7 +53,8 @@ if [[ "$_ctx_max" -gt 0 ]]; then
         _compact_sentinel="${MIND_PATH}/.compact_advised_${SESSION_ID}"
         if [[ ! -f "$_compact_sentinel" ]]; then
             touch "$_compact_sentinel" 2>/dev/null || true
-            echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"[context] At ${_ctx_pct}% (${_ctx_used}/${_ctx_max} tokens). Run /compact now — cache prefix stays stable and per-turn cost stays low. Waiting until 85%+ is 2-3× more expensive.\"}}"
+            echo "{\"decision\":\"block\",\"reason\":\"Context at ${_ctx_pct}% (${_ctx_used}/${_ctx_max} tokens). Run /compact to continue — keeps cache prefix stable and avoids 2-3× per-turn cost inflation. After compacting, work resumes normally.\"}"
+            exit 0
         fi
     fi
     if [[ "$_ctx_pct" -ge 85 ]]; then
