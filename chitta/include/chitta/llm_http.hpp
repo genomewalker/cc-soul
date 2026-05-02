@@ -289,7 +289,25 @@ inline std::string call_llm_http(const std::string& endpoint,
     try {
         auto resp = nlohmann::json::parse(output);
         if (resp.contains("choices") && !resp["choices"].empty()) {
-            return resp["choices"][0]["message"]["content"].get<std::string>();
+            const auto& msg = resp["choices"][0]["message"];
+            if (msg.contains("content")) {
+                const auto& content = msg["content"];
+                if (content.is_string()) {
+                    return content.get<std::string>();
+                }
+                // Thinking models (e.g. gemma4) return content as an array of blocks.
+                // Concatenate text blocks; skip thinking blocks so SSL parser sees clean output.
+                if (content.is_array()) {
+                    std::string out;
+                    for (const auto& block : content) {
+                        if (block.value("type", "") == "text") {
+                            if (!out.empty()) out += "\n";
+                            out += block.value("text", "");
+                        }
+                    }
+                    return out;
+                }
+            }
         }
         if (resp.contains("error")) {
             log("[llm] Error: " + resp["error"].value("message", "unknown"));
