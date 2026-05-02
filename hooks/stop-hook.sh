@@ -49,6 +49,13 @@ _ctx_used=$(echo "$INPUT" | jq -r '.context_window.used_tokens // 0' 2>/dev/null
 _ctx_max=$(echo "$INPUT" | jq -r '.context_window.max_tokens // 0' 2>/dev/null || echo 0)
 if [[ "$_ctx_max" -gt 0 ]]; then
     _ctx_pct=$(( _ctx_used * 100 / _ctx_max ))
+    if [[ "$_ctx_pct" -ge 65 && "$_ctx_pct" -lt 85 ]]; then
+        _compact_sentinel="${MIND_PATH}/.compact_advised_${SESSION_ID}"
+        if [[ ! -f "$_compact_sentinel" ]]; then
+            touch "$_compact_sentinel" 2>/dev/null || true
+            echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"[context] At ${_ctx_pct}% (${_ctx_used}/${_ctx_max} tokens). Run /compact now — cache prefix stays stable and per-turn cost stays low. Waiting until 85%+ is 2-3× more expensive.\"}}"
+        fi
+    fi
     if [[ "$_ctx_pct" -ge 85 ]]; then
         _sentinel="${MIND_PATH}/.size_warned_${SESSION_ID}"
         if [[ ! -f "$_sentinel" ]]; then

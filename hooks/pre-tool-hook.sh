@@ -264,6 +264,24 @@ case "$MATCHER" in
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
         is_indexed=0
         [[ "$dir_syms" -gt 0 ]] 2>/dev/null && is_indexed=1
+
+        # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
+        # Forces sqz_read_file which returns a 13-token §ref§ for cached content.
+        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null || true)
+        if [[ "$line_count" -gt 200 && -n "$_session_id" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+            _file_mtime=$(stat -c %Y "$file_path" 2>/dev/null || echo 0)
+            _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
+            _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
+            if grep -qF "$_file_hash" "$_read_cache" 2>/dev/null; then
+                _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "read-dedup" 0
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[read-dedup] %s already read this session (mtime unchanged, %d lines). Use sqz_read_file (13-token §ref§) or read_symbol for targeted extraction. CC_SOUL_ALLOW_READ=1 to force re-read."}}\n' \
+                    "$(basename "$file_path")" "$line_count"
+                exit 0
+            fi
+            printf '%s\n' "$_file_hash" >> "$_read_cache" 2>/dev/null || true
+        fi
+        # ─────────────────────────────────────────────────────────────────────────
+
         if [[ "$line_count" -le 200 ]]; then
             # Small file — pass through, but still advise code-intel if available
             _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "pass" "small-file" 0
@@ -368,22 +386,22 @@ case "$MATCHER" in
 
     Agent)
         # ─── Subagent budget + model routing ─────────────────────────────────────
-        # Each subagent cold-starts a new cache window (~$5-50 per agent).
         MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
         _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty')
-        agent_type=$(echo "$STDIN_DATA" | jq -r '.tool_input.subagent_type // .tool_input.description // empty' 2>/dev/null)
+        _subtype=$(echo "$STDIN_DATA" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)
+        _desc=$(echo "$STDIN_DATA" | jq -r '.tool_input.description // empty' 2>/dev/null)
         agent_model=$(echo "$STDIN_DATA" | jq -r '.tool_input.model // empty' 2>/dev/null)
 
-        # Force haiku for research/exploration subagents (default ON).
-        # Denies the call so Claude retries with model:"haiku" — 10x cheaper.
-        # Bypass with CC_SOUL_AGENT_NO_FORCE=1 (falls back to advisory).
-        if [[ -z "$agent_model" ]] && echo "$agent_type" | grep -qiE '(explore|search|find|research|grep|glob|read)'; then
-            if [[ "${CC_SOUL_AGENT_NO_FORCE:-0}" != "1" ]]; then
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Research/exploration subagent must use a cheaper model. Resubmit this Agent call with model:\\"haiku\\" (10x cheaper, sufficient for find/search/read tasks). Bypass with CC_SOUL_AGENT_NO_FORCE=1."}}\n'
+        # Route search/lookup/research agents to haiku + inject ≤200 word limit.
+        # Uses updatedInput (no deny+retry round trip). Bypass: CC_SOUL_AGENT_NO_FORCE=1.
+        if [[ -z "$agent_model" && "${CC_SOUL_AGENT_NO_FORCE:-0}" != "1" ]]; then
+            if echo "${_subtype} ${_desc}" | grep -qiE '(explore|search|find|research|grep|glob|read|locate|list|lookup|where|enumerate|check if)'; then
+                _prompt=$(echo "$STDIN_DATA" | jq -r '.tool_input.prompt // empty')
+                _updated=$(echo "$STDIN_DATA" | jq --arg p "Report in ≤200 words.\n\n${_prompt}" \
+                    '.tool_input | .model = "haiku" | .prompt = $p')
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[token-route] lookup→haiku + ≤200 word limit","updatedInput":%s}}\n' "$_updated"
                 exit 0
             fi
-            # Legacy advisory mode
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[token-hint] Exploration subagent inherits parent model. Add model:\\"haiku\\" for 10x cheaper research agents."}}\n'
         fi
 
         if [[ -n "$_session_id" ]]; then
@@ -396,10 +414,10 @@ case "$MATCHER" in
             AGENT_HARD_LIMIT="${CC_SOUL_AGENT_LIMIT:-50}"
 
             if [[ $AGENT_COUNT -gt $AGENT_HARD_LIMIT ]]; then
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d/%d subagents spawned this session. Each agent cold-starts a new cache (~$5-50). Consider batching work into fewer agents, or start a fresh session with /recap."}}\n' \
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d/%d subagents. Each cold-starts a cache (~$5-50). Batch work or /recap for fresh session."}}\n' \
                     "$AGENT_COUNT" "$AGENT_HARD_LIMIT"
             elif [[ $AGENT_COUNT -gt $AGENT_WARN_THRESHOLD ]]; then
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d subagents this session. Each spawns a new cache window. Batch independent queries into single agents where possible."}}\n' \
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d subagents this session. Batch independent queries where possible."}}\n' \
                     "$AGENT_COUNT"
             fi
         fi
