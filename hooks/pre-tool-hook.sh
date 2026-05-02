@@ -114,28 +114,53 @@ safety_check() {
 }
 
 
-# ─── Fallback: large-output safety rewrites ──────────────────────────────────
-fallback_rewrite() {
+# ─── find: memory-first search strategy ──────────────────────────────────────
+# 1. chitta recall  → if known, deny + show path
+# 2. folder in mem  → rewrite find root to mem dir, maxdepth 3
+# 3. cwd            → rewrite to find . -maxdepth 3
+# 4. expand         → allow if CC_SOUL_DEEP_SEARCH=1
+find_strategy() {
     local cmd="$1"
-    local rewritten="" reason=""
+    echo "$cmd" | grep -qE '\bfind\b' || return 1
+    echo "$cmd" | grep -qE '\-maxdepth\s+[0-3]\b' && return 1
+    [[ "${CC_SOUL_DEEP_SEARCH:-0}" == "1" ]] && return 1
 
-    if echo "$cmd" | grep -qE '^\s*find\s+(/|~)\s+-name' && ! echo "$cmd" | grep -q 'maxdepth'; then
-        rewritten=$(echo "$cmd" | sed 's/\(find\s\+[^ ]*\)/\1 -maxdepth 5/')
-        reason="Unbounded find; added -maxdepth 5"
-    elif echo "$cmd" | grep -qE '^\s*grep\s+-r\s+' && ! echo "$cmd" | grep -q 'head'; then
-        rewritten="$cmd | head -200"
-        reason="Unbounded recursive grep; added head limit"
-    elif echo "$cmd" | grep -qE '^\s*ls\s+.*-[^ ]*R|^\s*ls\s+-la\s+/\s*$' && ! echo "$cmd" | grep -q 'head'; then
-        rewritten="$cmd | head -100"
-        reason="Large directory listing; added head limit"
+    local term
+    term=$(echo "$cmd" | sed -nE 's/.*-[i]?name[[:space:]]+([^[:space:]]+).*/\1/p' | tr -d '"'"'"'*?[]' || true)
+
+    if [[ -n "$term" && -x "$CHITTA_BIN" ]] && daemon_available 2>/dev/null; then
+        local sym_json sym_file sym_dir
+        sym_json=$(timeout 2 "$CHITTA_BIN" find_symbol --name "$term" --json 2>/dev/null || true)
+        if [[ -n "$sym_json" ]]; then
+            sym_file=$(echo "$sym_json" | jq -r '.symbols[0].file // empty' 2>/dev/null || true)
+            if [[ -n "$sym_file" && -e "$sym_file" ]]; then
+                local msg
+                msg=$(jq -Rn --arg t "$term" --arg p "$sym_file" \
+                    '"[memory-first] chitta knows \($t): \($p) — use read_symbol/smart_context instead of find."')
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' "$msg"
+                return 0
+            fi
+            sym_dir=$(echo "$sym_json" | jq -r 'if .symbols[0].file then (.symbols[0].file | split("/")[:-1] | join("/")) else empty end' 2>/dev/null || true)
+            if [[ -n "$sym_dir" && -d "$sym_dir" ]]; then
+                local new_cmd ctx new_cmd_json
+                new_cmd=$(echo "$cmd" | sed -E "s|find[[:space:]]+[./~][^[:space:]]*|find $sym_dir -maxdepth 3|")
+                ctx=$(jq -Rn --arg d "$sym_dir" '"[memory-first] No exact match but memory hints at \($d). Scoped find there (maxdepth 3). CC_SOUL_DEEP_SEARCH=1 to expand."')
+                new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s,"updatedInput":{"command":%s}}}\n' "$ctx" "$new_cmd_json"
+                return 0
+            fi
+        fi
     fi
 
-    if [[ -n "$rewritten" ]]; then
-        echo "⚠️ Large output warning: $reason"
-        echo "Consider running instead: $rewritten"
-        return 0
-    fi
-    return 1
+    local new_cmd ctx new_cmd_json term_label
+    new_cmd=$(echo "$cmd" | sed -E 's|find[[:space:]]+[./~][^[:space:]]*|find . -maxdepth 3|')
+    echo "$new_cmd" | grep -qE '\-maxdepth' || \
+        new_cmd=$(echo "$cmd" | sed -E 's|^([[:space:]]*)find[[:space:]]|\1find . -maxdepth 3 |')
+    term_label="${term:-(pattern)}"
+    ctx=$(jq -Rn --arg t "$term_label" '"[search-strategy] No memory hit for \($t). Scoped to cwd -maxdepth 3. CC_SOUL_DEEP_SEARCH=1 to expand."')
+    new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s,"updatedInput":{"command":%s}}}\n' "$ctx" "$new_cmd_json"
+    return 0
 }
 
 case "$MATCHER" in
@@ -149,6 +174,11 @@ case "$MATCHER" in
         if [[ $safety_rc -eq 2 ]]; then
             echo "$safety_result"
             exit 2
+        fi
+
+        # Stage 1b: find — memory-first search strategy
+        if find_strategy "$command"; then
+            exit 0
         fi
 
         # Stage 2: Soul memory — surface corrections/gotchas
