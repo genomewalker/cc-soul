@@ -49,8 +49,12 @@ _ctx_used=$(echo "$INPUT" | jq -r '.context_window.used_tokens // 0' 2>/dev/null
 _ctx_max=$(echo "$INPUT" | jq -r '.context_window.max_tokens // 0' 2>/dev/null || echo 0)
 if [[ "$_ctx_max" -gt 0 ]]; then
     _ctx_pct=$(( _ctx_used * 100 / _ctx_max ))
+    _compact_sentinel="${MIND_PATH}/.compact_advised_${SESSION_ID}"
+    # Auto-reset: if context dropped below 50% since last block, compact happened — allow re-trigger
+    if [[ -f "$_compact_sentinel" && "$_ctx_pct" -lt 50 ]]; then
+        rm -f "$_compact_sentinel" 2>/dev/null || true
+    fi
     if [[ "$_ctx_pct" -ge 65 && "$_ctx_pct" -lt 85 ]]; then
-        _compact_sentinel="${MIND_PATH}/.compact_advised_${SESSION_ID}"
         if [[ ! -f "$_compact_sentinel" ]]; then
             touch "$_compact_sentinel" 2>/dev/null || true
             echo "{\"decision\":\"block\",\"reason\":\"Context at ${_ctx_pct}% (${_ctx_used}/${_ctx_max} tokens). Run /compact to continue — keeps cache prefix stable and avoids 2-3× per-turn cost inflation. After compacting, work resumes normally.\"}"

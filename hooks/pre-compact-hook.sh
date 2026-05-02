@@ -22,6 +22,8 @@ INPUT=$(cat)
 TRIGGER=$(echo "$INPUT" | jq -r '.trigger // "auto"')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+# Clear 65% compact sentinel so the next session (same or new id) can block again
+[[ -n "$REAL_SESSION_ID" ]] && rm -f "${MIND_PATH}/.compact_advised_${REAL_SESSION_ID}" 2>/dev/null || true
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
