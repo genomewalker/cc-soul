@@ -40,6 +40,7 @@ Enforce mode auto-activates once shadow log has ≥100 entries AND is
 | `CC_SOUL_AGENT_WARN=N` | Subagent count to warn at (default 20) |
 | `CC_SOUL_AGENT_LIMIT=N` | Subagent count for hard advisory (default 50) |
 | `CC_SOUL_SUBAGENT_BASH_RECALL=1` | Run Bash recall for subagent calls too (adds 2s/call) |
+| `CC_SOUL_ALLOW_READ=1` | Bypass Read dedup deny for this session (also bypasses indexed-large deny) |
 
 Review data: `./scripts/hook-stats.sh` (decisions, reasons, tool split, enforce-status).
 
