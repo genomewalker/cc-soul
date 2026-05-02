@@ -761,6 +761,8 @@ void print_usage(const char* prog) {
               << "  --distill-model MODEL    LLM model for distillation (default: gemma4:26b)\n"
               << "  --distill-token-trigger N  Token-triggered: chars threshold (default: 120000 ~30k tokens, 0=off)\n"
               << "  --distill-cooldown SECS  Min seconds between token-triggered distillations (default: 180)\n"
+              << "  --distill-max-tokens N   LLM output token limit (default: 8192)\n"
+              << "  --distill-context-chars N  Max input chars (0=unlimited, default: 0)\n"
               << "  --no-distill             Disable automatic distillation\n"
               << "\nCode Enrichment (semantic descriptions):\n"
               << "  --enrich-interval MINS   Enrichment interval (default: 2)\n"
@@ -848,6 +850,10 @@ int main(int argc, char* argv[]) {
             distill_config.token_trigger_chars = safe_stoi(argv[++i], "--distill-token-trigger");
         } else if (strcmp(argv[i], "--distill-cooldown") == 0 && i + 1 < argc) {
             distill_config.cooldown_seconds = safe_stoi(argv[++i], "--distill-cooldown");
+        } else if (strcmp(argv[i], "--distill-max-tokens") == 0 && i + 1 < argc) {
+            distill_config.max_tokens = safe_stoi(argv[++i], "--distill-max-tokens");
+        } else if (strcmp(argv[i], "--distill-context-chars") == 0 && i + 1 < argc) {
+            distill_config.max_context_chars = static_cast<size_t>(safe_stoi(argv[++i], "--distill-context-chars"));
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
         } else if (strcmp(argv[i], "--no-enrich") == 0) {

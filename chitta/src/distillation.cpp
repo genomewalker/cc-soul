@@ -32,6 +32,8 @@ bool run_distillation(
     native_config.timeout_secs = 180;
     native_config.min_turns = config.min_turns;
     native_config.verbose = verbose_mode;
+    native_config.max_context_chars = config.max_context_chars;
+    native_config.max_tokens = config.max_tokens;
 
     auto embed_fn = [yantra](const std::string& text) -> std::vector<float> {
         if (!yantra) return {};

@@ -38,6 +38,8 @@ struct DistillConfig {
     bool enabled = true;
     int64_t token_trigger_chars = 120000;
     int cooldown_seconds = 180;
+    size_t max_context_chars = 0;  // 0 = no limit (full transcript)
+    int max_tokens = 8192;         // LLM output token limit
 };
 
 struct EnrichConfig {
