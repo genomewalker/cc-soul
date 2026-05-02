@@ -632,9 +632,9 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 void Subconscious::run_theme_maintenance() {
     if (!is_idle() || !field_store_) return;
 
-    auto lk = write_lock();
     try {
-        auto result_json = field_store_->theme_maintain();
+        std::string result_json;
+        { auto lk = write_lock(); result_json = field_store_->theme_maintain(); }
         stats_.theme_maintenance_runs++;
         stats_.last_theme_maintenance_at = now_ms();
 
@@ -698,9 +698,11 @@ bool Subconscious::time_for_sleep_consolidation() const {
 
 void Subconscious::run_demotion_pass() {
     stats_.last_demotion_at = now_ms();
-    auto lk = write_lock();
     try {
-        auto [demoted, deleted] = field_store_->run_demotion(now_ms());
+        auto [demoted, deleted] = [&] {
+            auto lk = write_lock();
+            return field_store_->run_demotion(now_ms());
+        }();
 
         stats_.demotion_runs++;
         stats_.field_demoted += demoted;
@@ -740,11 +742,11 @@ void Subconscious::run_learning_cycle() {
     last_learning_cycle_ = std::chrono::steady_clock::now();
     stats_.learning_cycle_runs++;
     stats_.last_learning_cycle_at = now_ms();
-    auto lk = write_lock();
     try {
         // Move 3: Auto-resolve epistemic debts with sufficient evidence
         {
-            auto* raw = cf_auto_resolve_debts(field_store_->handle(), 0.70f);
+            char* raw;
+            { auto lk = write_lock(); raw = cf_auto_resolve_debts(field_store_->handle(), 0.70f); }
             if (raw) {
                 auto result = nlohmann::json::parse(raw, nullptr, false);
                 cf_free_string(raw);
@@ -754,23 +756,17 @@ void Subconscious::run_learning_cycle() {
             }
         }
 
-        // Move 5: Query recent surprise events → cluster by (domain, action) → upsert wisdom candidates
+        // Move 5: Query recent surprise events — read-only stats, no lock needed
         {
             auto* raw = cf_surprise_learning_stats(field_store_->handle());
             if (raw) {
                 auto sl_stats = nlohmann::json::parse(raw, nullptr, false);
                 cf_free_string(raw);
-                if (!sl_stats.is_discarded() && sl_stats.value("total_gates_passed", 0) > 0) {
-                    // Wisdom candidates are created by the subconscious when patterns
-                    // emerge from clustered surprise credits. The actual clustering
-                    // happens in the Rust layer via the wisdom promotion store.
-                    // Here we just trigger a stats check — the real upserts happen
-                    // via MCP tool calls from the dream/think cycles.
-                }
+                (void)sl_stats;
             }
         }
 
-        // Move 6: Batch scorer calibration from accumulated outcomes
+        // Move 6: Batch scorer calibration — read-only stats, no lock needed
         {
             auto* raw = cf_learned_scorer_stats(field_store_->handle());
             if (raw) {
@@ -788,7 +784,8 @@ void Subconscious::run_learning_cycle() {
 
         // Layer 7: Auto-close stale open interventions (> 30 min)
         {
-            int closed = cf_close_stale_interventions(field_store_->handle(), 1800000LL);
+            int closed;
+            { auto lk = write_lock(); closed = cf_close_stale_interventions(field_store_->handle(), 1800000LL); }
             if (closed > 0) {
                 stats_.interventions_auto_closed += static_cast<size_t>(closed);
             }
@@ -796,7 +793,8 @@ void Subconscious::run_learning_cycle() {
 
         // Move: Auto-complete tasks whose all criteria are met
         {
-            auto* raw = cf_auto_complete_tasks(field_store_->handle());
+            char* raw;
+            { auto lk = write_lock(); raw = cf_auto_complete_tasks(field_store_->handle()); }
             if (raw) {
                 auto result = nlohmann::json::parse(raw, nullptr, false);
                 cf_free_string(raw);
@@ -809,8 +807,8 @@ void Subconscious::run_learning_cycle() {
 
         // Layer 9: Wisdom Homeostasis — staleness tick + TTL expiry demotions
         {
-            // Grow staleness on lineages with no recent support
-            auto* tick_raw = cf_tick_lineage_staleness(field_store_->handle());
+            char* tick_raw;
+            { auto lk = write_lock(); tick_raw = cf_tick_lineage_staleness(field_store_->handle()); }
             if (tick_raw) {
                 auto result = nlohmann::json::parse(tick_raw, nullptr, false);
                 cf_free_string(tick_raw);
@@ -822,8 +820,8 @@ void Subconscious::run_learning_cycle() {
                 }
             }
 
-            // Demote Inflamed lineages past TTL
-            auto* expiry_raw = cf_lineage_expiry_check(field_store_->handle());
+            char* expiry_raw;
+            { auto lk = write_lock(); expiry_raw = cf_lineage_expiry_check(field_store_->handle()); }
             if (expiry_raw) {
                 auto result = nlohmann::json::parse(expiry_raw, nullptr, false);
                 cf_free_string(expiry_raw);
@@ -831,9 +829,9 @@ void Subconscious::run_learning_cycle() {
                     if (result.contains("expired_ids") && result["expired_ids"].is_array()) {
                         for (auto& id_val : result["expired_ids"]) {
                             auto lid = id_val.get<uint64_t>();
-                            cf_transition_wisdom_lineage(
+                            { auto lk = write_lock(); cf_transition_wisdom_lineage(
                                 field_store_->handle(), lid, 3 /*Demoted*/,
-                                "rederive_ttl_expired", 0);
+                                "rederive_ttl_expired", 0); }
                             stats_.lineages_demoted_ttl++;
                         }
                     }
