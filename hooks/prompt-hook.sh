@@ -61,6 +61,8 @@ QUERY="$CLEAN_QUERY"
 # ===========================================
 # CACHE EXPIRY WARNING: Warn when >5 min idle
 # ===========================================
+CACHE_WARN=""
+SESSION_WARN=""
 LAST_STOP_FILE="${MIND_PATH}/.last_stop_time"
 if [[ -f "$LAST_STOP_FILE" ]]; then
     LAST_STOP=$(cat "$LAST_STOP_FILE" 2>/dev/null || echo 0)
@@ -68,7 +70,7 @@ if [[ -f "$LAST_STOP_FILE" ]]; then
     GAP=$(( NOW - LAST_STOP ))
     if [[ $GAP -gt 300 ]]; then
         GAP_MIN=$(( GAP / 60 ))
-        echo "[cache-expired: ${GAP_MIN}m idle — full context re-prices at cache-write rates; run /compact or start new session with /recap]"
+        CACHE_WARN="[cache-expired: ${GAP_MIN}m idle — full context re-prices at cache-write rates; run /compact or start new session with /recap]"
     fi
 fi
 
@@ -80,10 +82,10 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     TRANSCRIPT_MB=$(( TRANSCRIPT_SIZE / 1048576 ))
     # >50MB = expensive session, warn every prompt
     if [[ $TRANSCRIPT_MB -gt 50 ]]; then
-        echo "[context-bloat: ${TRANSCRIPT_MB}MB transcript — consider /compact or start fresh with /recap to reduce cache-write costs]"
+        SESSION_WARN="[context-bloat: ${TRANSCRIPT_MB}MB transcript — consider /compact or start fresh with /recap to reduce cache-write costs]"
     # >20MB = getting large, warn once
     elif [[ $TRANSCRIPT_MB -gt 20 && ! -f "$MIND_PATH/.size_warned_${SESSION_ID}" ]]; then
-        echo "[context-growing: ${TRANSCRIPT_MB}MB — /compact saves cache-write tokens; /recap starts lean]"
+        SESSION_WARN="[context-growing: ${TRANSCRIPT_MB}MB — /compact saves cache-write tokens; /recap starts lean]"
         touch "$MIND_PATH/.size_warned_${SESSION_ID}" 2>/dev/null || true
     fi
 fi
@@ -173,7 +175,8 @@ else
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
-    exit 0
+    [[ -z "$CACHE_WARN" && -z "$SESSION_WARN" ]] && exit 0
+    memories=""
 fi
 
 # Filter and format results
@@ -632,6 +635,10 @@ _append() {
     fi
     FINAL_OUTPUT="${FINAL_OUTPUT}${text}"
 }
+
+# 0. Infrastructure warnings (highest urgency — always shown first)
+[[ -n "$CACHE_WARN" ]] && _append "${CACHE_WARN}"$'\n'
+[[ -n "$SESSION_WARN" ]] && _append "${SESSION_WARN}"$'\n'
 
 # 1. Learning hints (action items — highest priority)
 _append "$LEARNING_HINTS"
