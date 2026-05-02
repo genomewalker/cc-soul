@@ -35,6 +35,8 @@ struct NativeDistillConfig {
     bool verbose = false;                     // Enable verbose logging
     float dedup_threshold = 0.92f;            // Cosine similarity above which we strengthen
                                               // instead of storing a duplicate
+    size_t max_context_chars = 0;             // 0 = no limit (pass full transcript to LLM)
+    int max_tokens = 8192;                    // LLM output token limit
 };
 
 struct DistillResult {

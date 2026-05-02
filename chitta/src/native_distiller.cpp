@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace chitta {
 
@@ -74,7 +75,7 @@ std::string NativeDistiller::call_llm(const std::string& prompt) {
         cached_endpoint_, config_.model, prompt,
         "You are a knowledge distiller. Extract learnings in SSL v0.3 format. "
         "Output ONLY SSL-formatted learnings with A:v,a affect annotations.",
-        config_.timeout_secs, 0.3f, 4096,
+        config_.timeout_secs, 0.3f, config_.max_tokens,
         [this](const std::string& msg) { log(msg); });
 }
 
@@ -233,7 +234,15 @@ DistillResult NativeDistiller::distill_session(
     log("[distill] Session " + session_id + ": " + std::to_string(turns.size()) + " turns");
 
     // 3. Build conversation with smart truncation
-    auto conversation = TranscriptParser::build_conversation(turns);
+    TruncationParams trunc;
+    if (config_.max_context_chars > 0) {
+        trunc.max_chars   = config_.max_context_chars;
+        trunc.head_chars  = config_.max_context_chars / 4;
+        trunc.tail_chars  = (config_.max_context_chars * 3) / 4;
+    } else {
+        trunc.max_chars = std::numeric_limits<size_t>::max();
+    }
+    auto conversation = TranscriptParser::build_conversation(turns, trunc);
 
     // 4. Build SSL prompt
     auto prompt = ssl::build_prompt(conversation);
