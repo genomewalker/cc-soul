@@ -311,6 +311,13 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
         return ToolResult::error("Sadhana manager not initialized");
     if (subconscious_) subconscious_->notify_query();
 
+    // Skip if a dream sadhana is already running.
+    for (const auto& s : sadhana_manager_->list_active()) {
+        if (s.goal_dsl.value("kind", "") == "dream")
+            return ToolResult::ok("Dream sadhana already active, skipping",
+                {{"sadhana_id", s.id}, {"status", "already_running"}});
+    }
+
     std::string realm        = params.value("realm", "brahman");
     std::string publish_path = params.value("publish_path", "");
     if (publish_path.empty()) {
@@ -463,6 +470,13 @@ ToolResult FieldRpcHandler::tool_think_wander(const json& params) {
     if (subconscious_) subconscious_->notify_query();
     if (!sadhana_manager_)
         return ToolResult::error("Sadhana manager not available");
+
+    // Skip if a think sadhana is already running to prevent uncontrolled token usage.
+    for (const auto& s : sadhana_manager_->list_active()) {
+        if (s.goal_dsl.value("kind", "") == "think")
+            return ToolResult::ok("Think sadhana already active, skipping",
+                {{"sadhana_id", s.id}, {"status", "already_running"}});
+    }
 
     std::string realm = params.value("realm", std::string("brahman"));
     json goal_dsl = {{"kind", "think"}};
