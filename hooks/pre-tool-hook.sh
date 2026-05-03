@@ -423,6 +423,44 @@ case "$MATCHER" in
         fi
         ;;
 
+    ScheduleWakeup)
+        # ─── Loop-budget guard ────────────────────────────────────────────────────
+        # Warn at CC_SOUL_LOOP_WARN (default 10), block at CC_SOUL_LOOP_LIMIT (default 20)
+        # for autonomous-loop-dynamic re-fires. Legitimate poll wakeups get a softer total advisory.
+        MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null)
+        _sw_prompt=$(echo "$STDIN_DATA" | jq -r '.tool_input.prompt // empty' 2>/dev/null)
+
+        if [[ -n "$_session_id" ]]; then
+            WAKEUP_FILE="$MIND_PATH/.wakeup_count_${_session_id}"
+            WAKEUP_COUNT=$(cat "$WAKEUP_FILE" 2>/dev/null || echo 0)
+            WAKEUP_COUNT=$((WAKEUP_COUNT + 1))
+            echo "$WAKEUP_COUNT" > "$WAKEUP_FILE"
+
+            if [[ "$_sw_prompt" == "<<autonomous-loop-dynamic>>" ]]; then
+                LOOP_FILE="$MIND_PATH/.loop_count_${_session_id}"
+                LOOP_COUNT=$(cat "$LOOP_FILE" 2>/dev/null || echo 0)
+                LOOP_COUNT=$((LOOP_COUNT + 1))
+                echo "$LOOP_COUNT" > "$LOOP_FILE"
+
+                LOOP_WARN="${CC_SOUL_LOOP_WARN:-10}"
+                LOOP_LIMIT="${CC_SOUL_LOOP_LIMIT:-20}"
+
+                if [[ $LOOP_COUNT -gt $LOOP_LIMIT ]]; then
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"[loop-budget] %d autonomous loop iterations this session (limit %d). Use /compact then restart the loop, or set CC_SOUL_LOOP_LIMIT=N to raise."}}\n' \
+                        "$LOOP_COUNT" "$LOOP_LIMIT"
+                    exit 2
+                elif [[ $LOOP_COUNT -gt $LOOP_WARN ]]; then
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[loop-budget] %d autonomous loop iterations this session (warn at %d, limit %d). Consider /compact to reset context."}}\n' \
+                        "$LOOP_COUNT" "$LOOP_WARN" "$LOOP_LIMIT"
+                fi
+            elif [[ $WAKEUP_COUNT -gt 30 ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[loop-budget] %d total wakeups this session. Verify the loop has a termination condition."}}\n' \
+                    "$WAKEUP_COUNT"
+            fi
+        fi
+        ;;
+
     *)
         exit 0
         ;;
