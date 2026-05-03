@@ -52,6 +52,16 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         }
     }
 
+    // Apply visibility if provided (0=Private default, 1=Shared, 2=Global)
+    int visibility = params.value("visibility", 0);
+    if (visibility > 0) {
+        std::string id_str_vis = std::to_string(id);
+        try {
+            field_store_->emit_event("realm", "visibility", "memory:" + id_str_vis,
+                                     std::to_string(visibility));
+        } catch (...) {}
+    }
+
     std::string id_str = std::to_string(id);
     return ToolResult::ok("Stored memory #" + id_str, {
         {"id", id_str}, {"type", kind}, {"realm", realm}

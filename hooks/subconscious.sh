@@ -131,9 +131,16 @@ kill_stray_daemons() {
     done
 }
 
+# Cache for is_responsive — reset by kill_unresponsive after daemon restart
+_responsive_cache=""
+
 # Check if daemon actually responds to commands (not just running)
 is_responsive() {
+    if [[ "$_responsive_cache" == "yes" ]]; then return 0; fi
+    if [[ "$_responsive_cache" == "no" ]];  then return 1; fi
+
     if [[ ! -S "$SOCKET_PATH" ]]; then
+        _responsive_cache="no"
         return 1
     fi
 
@@ -141,8 +148,10 @@ is_responsive() {
     local response
     response=$(timeout 3 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
     if [[ -n "$response" && "$response" == *"Status:"* ]]; then
+        _responsive_cache="yes"
         return 0
     fi
+    _responsive_cache="no"
     return 1
 }
 
@@ -292,6 +301,7 @@ cmd_start() {
     fi
 
     # Start daemon - it will fork and return immediately
+    _responsive_cache=""  # invalidate cache — daemon was just (re)started
     "$CHITTA_CLI" "${daemon_args[@]}" 2>>"$LOG_FILE"
 
     # Wait for socket AND verify daemon responds
