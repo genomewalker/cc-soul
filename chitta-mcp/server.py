@@ -2004,6 +2004,26 @@ def get_current_realm() -> Optional[str]:
     return None
 
 
+_SQZ_BIN = os.path.expanduser("~/.claude/bin/sqz")
+_SQZ_THRESHOLD = 500
+
+def _sqz_compress(text: str, tool_name: str = "mcp") -> str:
+    if len(text) < _SQZ_THRESHOLD:
+        return text
+    sqz = _SQZ_BIN if os.path.isfile(_SQZ_BIN) else None
+    if not sqz:
+        return text
+    try:
+        import subprocess
+        proc = subprocess.run(
+            [sqz, "compress", "--cmd", tool_name],
+            input=text, capture_output=True, text=True, timeout=5
+        )
+        return proc.stdout if proc.returncode == 0 and proc.stdout else text
+    except Exception:
+        return text
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls - composite tools handled locally, others forwarded to daemon."""
@@ -2088,7 +2108,7 @@ async def call_tool(name: str, arguments: dict):
         # Forward to daemon
         result = await loop.run_in_executor(_executor, daemon_call, name, arguments)
 
-    return [TextContent(type="text", text=result)]
+    return [TextContent(type="text", text=_sqz_compress(result, name))]
 
 
 def main():
