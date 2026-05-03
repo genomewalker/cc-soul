@@ -393,6 +393,7 @@ class ChittaClient:
         try:
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.connect(self.socket_path)
+            self.sock.settimeout(30.0)
             return True
         except Exception:
             self.sock = None
