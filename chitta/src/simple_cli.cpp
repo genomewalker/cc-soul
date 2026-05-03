@@ -167,6 +167,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     if (!no_autonomous) {
         // Wire dream callback: auto-explore when soul has been idle for 10+ minutes
         subconscious.set_dream_callback([&]() {
+            if (sadhana_manager)
+                for (const auto& s : sadhana_manager->list_active())
+                    if (s.goal_dsl.value("kind", "") == "dream") return;
             try {
                 json req = {
                     {"method", "tools/call"},
@@ -185,6 +188,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 
         // Wire think callback: internal memory synthesis when idle 5+ min, hourly
         subconscious.set_think_callback([&]() {
+            if (sadhana_manager)
+                for (const auto& s : sadhana_manager->list_active())
+                    if (s.goal_dsl.value("kind", "") == "think") return;
             try {
                 json req = {
                     {"method", "tools/call"},
