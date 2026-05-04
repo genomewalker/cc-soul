@@ -52,24 +52,30 @@ bool run_distillation(
         });
     }
 
-    // Hold the exclusive rpc lock across distill_session: NativeDistiller writes
-    // to field_store directly (episode, learnings, triplets, edges, affect,
-    // strengthen) and these MUST be serialized with main-thread RPC writers or
-    // the chain-hash invariant breaks ("chain record warning ... resetting
-    // chain") and concurrent FFI writes have corrupted the heap (double-free /
-    // fasttop). The LLM HTTP call inside takes 10-30s, but with the
-    // health_check fast-path readers no longer poll-spam during it.
+    // Phase 1 (lock-free): parse transcript + LLM call + SSL parse.
+    // The LLM HTTP call takes 10-30s — running it without the lock keeps the
+    // daemon responsive to health_check and other read queries during distillation.
+    auto prep = distiller->prepare_distillation(
+        state.session_id,
+        state.transcript_path,
+        state.realm,
+        state.last_processed_line,
+        queue_triggered
+    );
+
+    if (!prep.valid) {
+        if (!prep.error.empty())
+            std::cerr << "[distill] " << state.session_id << ": " << prep.error << "\n";
+        return false;
+    }
+
+    // Phase 2 (exclusive lock): episode + learnings + triplets writes.
+    // Lock scope is now milliseconds, not 10-30s.
     DistillResult result;
     {
         std::unique_lock<std::shared_mutex> _lk;
         if (handler) _lk = handler->acquire_lock();
-        result = distiller->distill_session(
-            state.session_id,
-            state.transcript_path,
-            state.realm,
-            state.last_processed_line,
-            queue_triggered
-        );
+        result = distiller->commit_distillation(prep);
 
         if (!result.success) {
             if (!result.error.empty())

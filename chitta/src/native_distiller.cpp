@@ -79,55 +79,66 @@ std::string NativeDistiller::call_llm(const std::string& prompt) {
         [this](const std::string& msg) { log(msg); });
 }
 
-// ── store_learnings (FieldStore) ─────────────────────────────────────────────
+// ── precompute_dedup (lock-free: embed + recall, no writes) ──────────────────
+
+void NativeDistiller::precompute_dedup(PreparedDistillation& prep) {
+    prep.learning_preps.clear();
+    prep.learning_preps.reserve(prep.ssl_result.learnings.size());
+    for (const auto& learning : prep.ssl_result.learnings) {
+        LearningPrep lp;
+        std::string full_text = learning.title + "\n" + learning.content;
+        if (embedder_) lp.embedding = embedder_(full_text);
+        if (!lp.embedding.empty() && config_.dedup_threshold > 0.0f) {
+            auto hits = field_store_->recall(lp.embedding, 5, prep.realm);
+            for (const auto& hit : hits) {
+                if (hit.semantic_score >= config_.dedup_threshold) {
+                    lp.is_dup       = true;
+                    lp.dup_mem_id   = hit.memory_id;
+                    lp.dup_confidence = hit.confidence;
+                    break;
+                }
+            }
+        }
+        prep.learning_preps.push_back(std::move(lp));
+    }
+}
+
+// ── store_learnings (writes only — uses precomputed dedup from LearningPrep) ─
 
 void NativeDistiller::store_learnings(
     const SSLParser::Result& ssl_result,
     const std::string& realm,
     uint64_t episode_mem_id,
+    const std::vector<LearningPrep>& learning_preps,
     DistillResult& result
 ) {
-    for (const auto& learning : ssl_result.learnings) {
+    for (size_t i = 0; i < ssl_result.learnings.size(); ++i) {
+        const auto& learning = ssl_result.learnings[i];
+        const LearningPrep& lp = (i < learning_preps.size())
+                                    ? learning_preps[i] : LearningPrep{};
         float confidence = category_to_confidence(learning.category);
         float decay      = category_to_decay(learning.category);
         std::string full_text = learning.title + "\n" + learning.content;
 
-        // Embed the learning text
-        std::vector<float> embedding;
-        if (embedder_) {
-            embedding = embedder_(full_text);
-        }
-
-        // Dedup: if a near-identical memory exists, strengthen it instead
-        bool deduped = false;
-        if (!embedding.empty() && config_.dedup_threshold > 0.0f) {
-            auto hits = field_store_->recall(embedding, 5, realm);
-            for (const auto& hit : hits) {
-                if (hit.semantic_score >= config_.dedup_threshold) {
-                    field_store_->strengthen(hit.memory_id, 0.05f);
-                    // Promote provisional hook memories to distillation-tier confidence
-                    if (hit.confidence < 0.75f) {
-                        float target = category_to_confidence(learning.category);
-                        field_store_->update_confidence(hit.memory_id, target - hit.confidence);
-                        log("[distill]   promoted confidence: " + learning.category +
-                            " " + std::to_string(hit.confidence) + "→" + std::to_string(target));
-                    }
-                    result.learnings_deduped++;
-                    log("[distill]   ~dup " + learning.category + ": " +
-                        learning.title.substr(0, 50) + " (strengthened existing)");
-                    deduped = true;
-                    break;
-                }
+        if (lp.is_dup) {
+            field_store_->strengthen(lp.dup_mem_id, 0.05f);
+            if (lp.dup_confidence < 0.75f) {
+                float target = category_to_confidence(learning.category);
+                field_store_->update_confidence(lp.dup_mem_id, target - lp.dup_confidence);
+                log("[distill]   promoted confidence: " + learning.category +
+                    " " + std::to_string(lp.dup_confidence) + "→" + std::to_string(target));
             }
+            result.learnings_deduped++;
+            log("[distill]   ~dup " + learning.category + ": " +
+                learning.title.substr(0, 50) + " (strengthened existing)");
+            continue;
         }
-
-        if (deduped) continue;
 
         uint64_t mem_id = 0;
         try {
             mem_id = field_store_->remember(distill_category_to_kind(learning.category),
                                             realm, full_text,
-                                            embedding, confidence, decay);
+                                            lp.embedding, confidence, decay);
         } catch (...) {
             continue;
         }
@@ -202,33 +213,33 @@ void NativeDistiller::store_learnings(
 
 // ── distill_session ──────────────────────────────────────────────────────────
 
-DistillResult NativeDistiller::distill_session(
+PreparedDistillation NativeDistiller::prepare_distillation(
     const std::string& session_id,
     const std::string& transcript_path,
     const std::string& realm,
     int64_t skip_lines,
     bool queue_triggered
 ) {
-    DistillResult result;
+    PreparedDistillation prep;
+    prep.session_id = session_id;
+    prep.realm = realm;
 
     // 1. Parse transcript
     TranscriptParseOptions parse_opts;
     parse_opts.skip_lines = skip_lines;
-
-    int64_t last_line = 0;
-    auto turns = parser_.parse(transcript_path, parse_opts, &last_line);
+    auto turns = parser_.parse(transcript_path, parse_opts, &prep.last_line);
 
     if (turns.empty()) {
-        result.error = parser_.last_error().empty() ? "No turns found" : parser_.last_error();
-        return result;
+        prep.error = parser_.last_error().empty() ? "No turns found" : parser_.last_error();
+        return prep;
     }
 
     // 2. Check minimum turns
     int effective_min_turns = queue_triggered ? 1 : config_.min_turns;
     if (static_cast<int>(turns.size()) < effective_min_turns) {
-        result.error = "Insufficient turns: " + std::to_string(turns.size()) +
-                       " < " + std::to_string(effective_min_turns);
-        return result;
+        prep.error = "Insufficient turns: " + std::to_string(turns.size()) +
+                     " < " + std::to_string(effective_min_turns);
+        return prep;
     }
 
     log("[distill] Session " + session_id + ": " + std::to_string(turns.size()) + " turns");
@@ -236,9 +247,9 @@ DistillResult NativeDistiller::distill_session(
     // 3. Build conversation with smart truncation
     TruncationParams trunc;
     if (config_.max_context_chars > 0) {
-        trunc.max_chars   = config_.max_context_chars;
-        trunc.head_chars  = config_.max_context_chars / 4;
-        trunc.tail_chars  = (config_.max_context_chars * 3) / 4;
+        trunc.max_chars  = config_.max_context_chars;
+        trunc.head_chars = config_.max_context_chars / 4;
+        trunc.tail_chars = (config_.max_context_chars * 3) / 4;
     } else {
         trunc.max_chars = std::numeric_limits<size_t>::max();
     }
@@ -247,58 +258,90 @@ DistillResult NativeDistiller::distill_session(
     // 4. Build SSL prompt
     auto prompt = ssl::build_prompt(conversation);
 
-    // 5. Get turn range for episode
-    int start_turn = turns.empty() ? 0 : turns.front().turn_index;
-    int end_turn   = turns.empty() ? 0 : turns.back().turn_index;
-
-    // 6. Create episode record in FieldStore
-    int64_t episode_id = 0;
+    // 5. Capture turn range; pre-build episode string + embedding (no field_store writes)
+    prep.start_turn = turns.empty() ? 0 : turns.front().turn_index;
+    prep.end_turn   = turns.empty() ? 0 : turns.back().turn_index;
     std::ostringstream ep_content;
     ep_content << "[episode] session=" << session_id
-               << " turns=" << start_turn << "-" << end_turn
+               << " turns=" << prep.start_turn << "-" << prep.end_turn
                << " realm=" << realm;
-    std::vector<float> ep_embedding;
+    prep.ep_content = ep_content.str();
     if (embedder_) {
-        ep_embedding = embedder_(ep_content.str());
+        prep.ep_embedding = embedder_(prep.ep_content);
     }
+
+    // 6. Call LLM — the slow part, zero field_store access
+    log("[distill] Calling " + config_.model + " via HTTP...");
+    std::string llm_output = call_llm(prompt);
+    if (llm_output.empty()) {
+        prep.error = "No result from LLM";
+        return prep;
+    }
+
+    // 7. Parse SSL output
+    log("[distill] Processing SSL results...");
+    prep.ssl_result = ssl_parser_.parse(llm_output);
+
+    // 8. Precompute embeddings + dedup recalls (no writes, safe outside lock)
+    precompute_dedup(prep);
+
+    prep.valid = true;
+    return prep;
+}
+
+DistillResult NativeDistiller::commit_distillation(const PreparedDistillation& prep) {
+    DistillResult result;
+    if (!prep.valid) {
+        result.error = prep.error;
+        return result;
+    }
+
+    // Create episode record
+    int64_t episode_id = 0;
     try {
         episode_id = static_cast<int64_t>(
-            field_store_->remember("episode", realm, ep_content.str(),
-                                   ep_embedding, 1.0f, 0.0f));
+            field_store_->remember("episode", prep.realm, prep.ep_content,
+                                   prep.ep_embedding, 1.0f, 0.0f));
     } catch (...) {}
 
     if (episode_id > 0) {
         result.episode_id = episode_id;
         log("[distill]   Episode: " + std::to_string(episode_id) +
-            " (turns " + std::to_string(start_turn) + "-" + std::to_string(end_turn) + ")");
+            " (turns " + std::to_string(prep.start_turn) + "-" +
+            std::to_string(prep.end_turn) + ")");
     }
 
-    // 7. Call LLM for distillation via HTTP (Ollama/vLLM)
-    log("[distill] Calling " + config_.model + " via HTTP...");
-    std::string llm_output = call_llm(prompt);
+    // Store learnings and triplets (writes only — dedup precomputed in prepare phase)
+    store_learnings(prep.ssl_result, prep.realm,
+                    static_cast<uint64_t>(episode_id), prep.learning_preps, result);
+    result.triplets_created = static_cast<int>(prep.ssl_result.triplets.size());
 
-    if (llm_output.empty()) {
-        result.error = "No result from LLM";
-        return result;
-    }
-
-    // 8. Parse SSL output
-    log("[distill] Processing SSL results...");
-    auto ssl_result = ssl_parser_.parse(llm_output);
-
-    // 9. Store learnings and citations
-    store_learnings(ssl_result, realm, static_cast<uint64_t>(episode_id), result);
-    result.triplets_created = static_cast<int>(ssl_result.triplets.size());
-
-    log("[distill] Session " + session_id + ": Done (+" +
+    log("[distill] Session " + prep.session_id + ": Done (+" +
         std::to_string(result.learnings_stored) + " new, " +
         std::to_string(result.learnings_deduped) + " deduped, " +
         std::to_string(result.triplets_created) + " triplets, " +
         std::to_string(result.citations_linked) + " citations)");
 
-    result.last_line = last_line;
+    result.last_line = prep.last_line;
     result.success = true;
     return result;
+}
+
+DistillResult NativeDistiller::distill_session(
+    const std::string& session_id,
+    const std::string& transcript_path,
+    const std::string& realm,
+    int64_t skip_lines,
+    bool queue_triggered
+) {
+    auto prep = prepare_distillation(session_id, transcript_path, realm,
+                                     skip_lines, queue_triggered);
+    if (!prep.valid) {
+        DistillResult r;
+        r.error = prep.error;
+        return r;
+    }
+    return commit_distillation(prep);
 }
 
 } // namespace chitta
