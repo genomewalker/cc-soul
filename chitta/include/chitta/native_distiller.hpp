@@ -50,6 +50,32 @@ struct DistillResult {
     std::string error;
 };
 
+// Per-learning result from the lock-free dedup precompute phase.
+// Holds the embedding and any matching existing memory, so commit_distillation
+// can skip field_store_->recall() (an O(N) embedding scan) while holding the lock.
+struct LearningPrep {
+    std::vector<float> embedding;
+    bool is_dup = false;
+    uint64_t dup_mem_id = 0;
+    float dup_confidence = 0.0f;
+};
+
+// Output of the lock-free preparation phase (transcript parse + LLM call + SSL parse
+// + dedup embedding recalls).  Pass to commit_distillation() under the write lock.
+struct PreparedDistillation {
+    std::string session_id;
+    std::string realm;
+    int start_turn = 0;
+    int end_turn = 0;
+    int64_t last_line = 0;
+    std::string ep_content;
+    std::vector<float> ep_embedding;
+    SSLParser::Result ssl_result;
+    std::vector<LearningPrep> learning_preps;  // indexed 1:1 with ssl_result.learnings
+    bool valid = false;
+    std::string error;
+};
+
 // Embedder function type — takes text, returns 768-dim float vector (or empty on failure)
 using EmbedFn = std::function<std::vector<float>(const std::string&)>;
 
@@ -57,14 +83,28 @@ class NativeDistiller {
 public:
     NativeDistiller(FieldStore& field, EmbedFn embedder, const NativeDistillConfig& config = {});
 
-    // Main entry point - distill a session transcript
-    // Returns result with counts of stored learnings/triplets
+    // Phase 1 (lock-free): parse transcript, call LLM, parse SSL output.
+    // No field_store writes — safe to call without holding the RPC mutex.
+    PreparedDistillation prepare_distillation(
+        const std::string& session_id,
+        const std::string& transcript_path,
+        const std::string& realm,
+        int64_t skip_lines = 0,
+        bool queue_triggered = false
+    );
+
+    // Phase 2 (needs write lock): create episode + store learnings/triplets.
+    // Must be called while holding the exclusive RPC mutex.
+    DistillResult commit_distillation(const PreparedDistillation& prep);
+
+    // Combined convenience wrapper — holds lock across both phases.
+    // Use only when the caller cannot split (e.g. manual distill command).
     DistillResult distill_session(
         const std::string& session_id,
         const std::string& transcript_path,
         const std::string& realm,
         int64_t skip_lines = 0,
-        bool queue_triggered = false  // If true, use min_turns=1
+        bool queue_triggered = false
     );
 
     // Set callback for progress messages
@@ -89,11 +129,16 @@ private:
     // Call LLM via HTTP (Ollama/vLLM)
     std::string call_llm(const std::string& prompt);
 
-    // Store learnings via FieldStore with dedup
+    // Phase 1b (lock-free): embed all learnings + run recall-based dedup checks.
+    // Populates prep.learning_preps so commit_distillation needs no recall calls.
+    void precompute_dedup(PreparedDistillation& prep);
+
+    // Store learnings using precomputed dedup results — no field_store reads, writes only.
     void store_learnings(
         const SSLParser::Result& ssl_result,
         const std::string& realm,
         uint64_t episode_mem_id,
+        const std::vector<LearningPrep>& learning_preps,
         DistillResult& result
     );
 
