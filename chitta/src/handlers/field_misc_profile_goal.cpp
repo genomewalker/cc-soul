@@ -222,9 +222,3 @@ ToolResult FieldRpcHandler::tool_narrative_history(const json& params) {
         {{"session_id", session_id}, {"count", segments.size()}, {"segments", segments}});
 }
 } // namespace chitta
-    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
-        return ToolResult::error("Goal #" + id_str + " not found");
-    }
-    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
-        return ToolResult::error("Goal #" + id_str + " not found");
-    }

@@ -341,6 +341,3 @@ ToolResult FieldRpcHandler::tool_habit_list(const json& params) {
     return ToolResult::ok(ss.str(), {{"count", habits.size()}, {"habits", habits}});
 }
 } // namespace chitta
-    if (field_store_->get_content(static_cast<uint64_t>(candidate_id)).empty()) {
-        return ToolResult::error("Candidate #" + candidate_str + " not found");
-    }
