@@ -223,7 +223,7 @@ void FieldRpcHandler::register_system_tools() {
     tools_.push_back({{"name","ledger_load"},{"description","Load most recent checkpoint"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"session_id",{{"type","string"}}},{"project",{{"type","string"}}},
-            {"include_snapshot",{{"type","boolean"},{"description","Include snapshot preview (truncated) in response"}}
+            {"include_snapshot",{{"type","boolean"},{"description","Include snapshot preview (truncated) in response"}}}
         }}}}
     });
     handlers_["ledger_load"] = [this](const json& p) { return tool_ledger_load(p); };
@@ -235,22 +235,32 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["ledger_list"] = [this](const json& p) { return tool_ledger_list(p); };
 
-    tools_.push_back({{"name","ledger_get"},{"description","Get checkpoint by key or session/project"},
-        {"inputSchema",{{"type","object"},{"properties",{
-            {"key",{{"type","string"},{"description","Canonical checkpoint key (session:project)"}},
-            {"session_id",{{"type","string"}}},
-            {"project",{{"type","string"}}},
-            {"include_snapshot",{{"type","boolean"},{"description","Include snapshot preview (truncated) in response"}}
-        }}}}
+    tools_.push_back({
+        {"name","ledger_get"},
+        {"description","Get checkpoint by key or session/project"},
+        {"inputSchema", {
+            {"type","object"},
+            {"properties", {
+                {"key", {{"type","string"}, {"description","Canonical checkpoint key (session:project)"}}},
+                {"session_id", {{"type","string"}}},
+                {"project", {{"type","string"}}},
+                {"include_snapshot", {{"type","boolean"}, {"description","Include snapshot preview (truncated) in response"}}}
+            }}
+        }}
     });
     handlers_["ledger_get"] = [this](const json& p) { return tool_ledger_get(p); };
 
-    tools_.push_back({{"name","ledger_delete"},{"description","Delete checkpoint"},
-        {"inputSchema",{{"type","object"},{"properties",{
-            {"key",{{"type","string"},{"description","Canonical checkpoint key (session:project)"}},
-            {"session_id",{{"type","string"}}},
-            {"project",{{"type","string"}}}
-        }}}}
+    tools_.push_back({
+        {"name","ledger_delete"},
+        {"description","Delete checkpoint"},
+        {"inputSchema", {
+            {"type","object"},
+            {"properties", {
+                {"key", {{"type","string"}, {"description","Canonical checkpoint key (session:project)"}}},
+                {"session_id", {{"type","string"}}},
+                {"project", {{"type","string"}}}
+            }}
+        }}
     });
     handlers_["ledger_delete"] = [this](const json& p) { return tool_ledger_delete(p); };
 
