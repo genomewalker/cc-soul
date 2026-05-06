@@ -121,8 +121,12 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
     codex_hooks: dict[str, list] = {}
 
     # Event mapping: which cc-soul events map to Codex
+    # Codex hook schema compatibility:
+    # PreToolUse payload contracts differ from Claude's and currently reject
+    # some cc-soul outputs (e.g. additionalContext), so we do not install that
+    # event for Codex until a dedicated Codex-safe pre-tool hook is provided.
     supported_events = {
-        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"
+        "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"
     }
 
     for event, matchers in cc_hooks.items():
@@ -144,6 +148,15 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
                 # (Codex requires SessionStart hooks to output JSON {"context": "..."})
                 if event == "SessionStart" and cmd.endswith("session-start-hook.sh"):
                     cmd = str(hooks_dir / "codex-session-start-wrapper.sh")
+                elif event == "UserPromptSubmit" and cmd.endswith("prompt-hook.sh"):
+                    cmd = str(hooks_dir / "codex-prompt-hook.sh")
+                elif event == "Stop" and cmd.endswith("stop-hook.sh"):
+                    cmd = str(hooks_dir / "codex-stop-hook.sh")
+
+                # SessionStart: skip standalone subconscious hook in Codex.
+                # The wrapper runs subconscious and then emits valid JSON.
+                if event == "SessionStart" and cmd.endswith("subconscious.sh start"):
+                    continue
 
                 # SessionStart: subconscious.sh needs more time in Codex (daemon startup)
                 timeout = hook.get("timeout")
@@ -155,14 +168,26 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
                     codex_hook["timeout"] = timeout
                 codex_hook_list.append(codex_hook)
 
-            codex_matchers.append({
-                "matcher": codex_matcher,
-                "hooks": codex_hook_list,
-            })
+            if codex_hook_list:
+                codex_matchers.append({
+                    "matcher": codex_matcher,
+                    "hooks": codex_hook_list,
+                })
 
         codex_hooks[event] = codex_matchers
 
     return {"hooks": codex_hooks}
+
+
+def _is_cc_soul_hook_command(cmd: str, hooks_dir: Path) -> bool:
+    """Return True when a hook command belongs to cc-soul.
+
+    Matches current install path and legacy Claude plugin-cache paths that may
+    have been merged into Codex hooks.json by older installers.
+    """
+    if str(hooks_dir) in cmd:
+        return True
+    return "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" in cmd
 
 
 def _install_codex():
@@ -225,16 +250,29 @@ def _install_codex():
         # Merge with existing hooks if present
         if hooks_file.is_file():
             existing = json.loads(hooks_file.read_text())
-            hooks_dir_str = str(hooks_dir)
+            # First remove all existing cc-soul hook matchers across all events
+            # (including events not regenerated in this install pass).
+            for event in list(existing.get("hooks", {}).keys()):
+                kept = [
+                    m for m in existing["hooks"][event]
+                    if not any(_is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
+                               for h in m.get("hooks", []))
+                ]
+                if kept:
+                    existing["hooks"][event] = kept
+                else:
+                    del existing["hooks"][event]
+
             for event, matchers in codex_hooks["hooks"].items():
                 if event not in existing.get("hooks", {}):
                     existing.setdefault("hooks", {})[event] = matchers
                 else:
-                    # Remove existing cc-soul matchers (identified by hooks_dir path),
-                    # then append the fresh ones — preserves third-party hooks.
+                    # Remove existing cc-soul matchers (current + legacy cache paths),
+                    # then append fresh ones — preserves third-party hooks.
                     kept = [
                         m for m in existing["hooks"][event]
-                        if not any(hooks_dir_str in h.get("command", "") for h in m.get("hooks", []))
+                        if not any(_is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
+                                   for h in m.get("hooks", []))
                     ]
                     existing["hooks"][event] = kept + matchers
             codex_hooks = existing
@@ -259,14 +297,17 @@ def _uninstall_codex():
     # Remove hooks that reference our hook scripts
     hooks_file = _codex_hooks_file()
     if hooks_file.is_file():
-        hooks_dir_str = str(_hooks_source())
+        hooks_dir = _hooks_source()
         data = json.loads(hooks_file.read_text())
         changed = False
         for event in list(data.get("hooks", {}).keys()):
             matchers = data["hooks"][event]
             filtered = []
             for m in matchers:
-                remaining = [h for h in m.get("hooks", []) if hooks_dir_str not in h.get("command", "")]
+                remaining = [
+                    h for h in m.get("hooks", [])
+                    if not _is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
+                ]
                 if remaining:
                     m["hooks"] = remaining
                     filtered.append(m)
