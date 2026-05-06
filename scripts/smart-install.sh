@@ -1070,6 +1070,11 @@ propagate_to_codex() {
     echo "[cc-soul] Codex detected — refreshing adapter (v$version)"
     if "$stack_cmd" install codex --skip-bridge >/dev/null 2>&1; then
         echo "[cc-soul] Codex adapter refreshed"
+        # Ensure Codex hook wiring is deterministic and matches repo adapters.
+        if [[ -x "$PLUGIN_DIR/scripts/configure-codex-hooks.sh" ]]; then
+            "$PLUGIN_DIR/scripts/configure-codex-hooks.sh" >/dev/null 2>&1 || \
+                echo "[cc-soul] WARN: Codex hooks config failed — run scripts/configure-codex-hooks.sh"
+        fi
     else
         echo "[cc-soul] WARN: Codex adapter refresh failed — run: chitta-stack install codex"
     fi

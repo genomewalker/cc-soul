@@ -123,6 +123,10 @@ ToolResult FieldRpcHandler::tool_consolidation_merge(const json& params) {
         return ToolResult::error("primary_id and secondary_id are required");
     if (merged_content.empty())
         return ToolResult::error("merged_content is required");
+    if (field_store_->get_content(static_cast<uint64_t>(primary_id)).empty())
+        return ToolResult::error("primary_id not found: " + primary_str);
+    if (field_store_->get_content(static_cast<uint64_t>(secondary_id)).empty())
+        return ToolResult::error("secondary_id not found: " + secondary_str);
 
     auto embedding = embed_text(merged_content);
     uint64_t new_id = field_store_->remember(
@@ -318,6 +322,8 @@ ToolResult FieldRpcHandler::tool_curiosity_gaps(const json& params) {
 ToolResult FieldRpcHandler::tool_curiosity_resolve(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id <= 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty())
+        return ToolResult::error("gap not found: " + id_str);
 
     std::string learned = params.value("learned", "");
 

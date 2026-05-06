@@ -9,6 +9,9 @@ ToolResult FieldRpcHandler::tool_strengthen(const json& params) {
     uint64_t id  = extract_id(params);
     float amount = params.value("amount", 0.1f);
     if (id == 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
     field_store_->strengthen(id, amount);
     return ToolResult::ok("Strengthened memory #" + std::to_string(id));
 }
@@ -17,6 +20,9 @@ ToolResult FieldRpcHandler::tool_weaken(const json& params) {
     uint64_t id  = extract_id(params);
     float amount = params.value("amount", 0.1f);
     if (id == 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
     field_store_->weaken(id, amount);
     return ToolResult::ok("Weakened memory #" + std::to_string(id));
 }
@@ -24,7 +30,13 @@ ToolResult FieldRpcHandler::tool_weaken(const json& params) {
 ToolResult FieldRpcHandler::tool_forget(const json& params) {
     uint64_t id = extract_id(params);
     if (id == 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
     field_store_->forget(id);
+    if (!field_store_->get_content(id).empty()) {
+        return ToolResult::error("failed to forget memory #" + std::to_string(id));
+    }
     return ToolResult::ok("Forgot memory #" + std::to_string(id));
 }
 

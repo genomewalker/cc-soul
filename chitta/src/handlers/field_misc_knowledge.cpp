@@ -20,6 +20,9 @@ ToolResult FieldRpcHandler::tool_episode_cluster_status(const json& params) {
 ToolResult FieldRpcHandler::tool_insight_promote(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id <= 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Insight #" + id_str + " not found");
+    }
 
     std::string reason = params.value("reason", "");
     field_store_->strengthen(static_cast<uint64_t>(id), 0.5f);

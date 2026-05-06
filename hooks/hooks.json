@@ -147,6 +147,83 @@
             "statusMessage": "checking command patterns\u2026"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Read",
+            "timeout": 10,
+            "statusMessage": "checking read budget\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Grep",
+            "timeout": 10,
+            "statusMessage": "checking grep budget\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Glob",
+            "timeout": 10,
+            "statusMessage": "checking glob budget\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Edit",
+            "timeout": 10,
+            "statusMessage": "checking edit strategy\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Write",
+            "timeout": 10,
+            "statusMessage": "checking write strategy\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Agent",
+            "timeout": 10,
+            "statusMessage": "checking agent budget\u2026"
+          }
+        ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh ScheduleWakeup",
+            "timeout": 10,
+            "statusMessage": "checking loop budget\u2026"
+          }
+        ]
       }
     ],
     "PostToolUse": [

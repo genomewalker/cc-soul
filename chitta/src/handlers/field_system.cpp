@@ -14,35 +14,40 @@ namespace {
 // FieldStore writers). One leader recomputes; followers return the prior
 // cached value, even if stale, rather than queue.
 std::string get_memory_stats_cached(FieldStore* store) {
+    struct CacheEntry {
+        std::string cache;
+        std::chrono::steady_clock::time_point ts{};
+        bool in_flight = false;
+    };
     static std::mutex mu;
-    static std::string cache;
-    static std::chrono::steady_clock::time_point ts;
-    static bool in_flight = false;
+    static std::unordered_map<FieldStore*, CacheEntry> entries;
 
     bool i_am_leader = false;
     std::string snapshot;
     {
         std::lock_guard<std::mutex> lk(mu);
+        auto& e = entries[store];
         auto now = std::chrono::steady_clock::now();
-        bool expired = cache.empty() ||
-            std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 30;
-        if (expired && !in_flight) {
-            in_flight = true;
+        bool expired = e.cache.empty() ||
+            std::chrono::duration_cast<std::chrono::seconds>(now - e.ts).count() > 30;
+        if (expired && !e.in_flight) {
+            e.in_flight = true;
             i_am_leader = true;
         }
-        snapshot = cache;
+        snapshot = e.cache;
     }
 
     if (i_am_leader) {
         std::string fresh;
         try { fresh = store->memory_stats(); } catch (...) {}
         std::lock_guard<std::mutex> lk(mu);
+        auto& e = entries[store];
         if (!fresh.empty()) {
-            cache = std::move(fresh);
-            ts = std::chrono::steady_clock::now();
+            e.cache = std::move(fresh);
+            e.ts = std::chrono::steady_clock::now();
         }
-        in_flight = false;
-        return cache;
+        e.in_flight = false;
+        return e.cache;
     }
     // Followers: return whatever we have (possibly stale, possibly empty on
     // very first call before the leader finishes).
@@ -51,35 +56,40 @@ std::string get_memory_stats_cached(FieldStore* store) {
 
 // Same single-flight pattern for spectral stats (60s TTL).
 std::string get_spectral_stats_cached(FieldStore* store) {
+    struct CacheEntry {
+        std::string cache;
+        std::chrono::steady_clock::time_point ts{};
+        bool in_flight = false;
+    };
     static std::mutex mu;
-    static std::string cache;
-    static std::chrono::steady_clock::time_point ts;
-    static bool in_flight = false;
+    static std::unordered_map<FieldStore*, CacheEntry> entries;
 
     bool i_am_leader = false;
     std::string snapshot;
     {
         std::lock_guard<std::mutex> lk(mu);
+        auto& e = entries[store];
         auto now = std::chrono::steady_clock::now();
-        bool expired = cache.empty() ||
-            std::chrono::duration_cast<std::chrono::seconds>(now - ts).count() > 60;
-        if (expired && !in_flight) {
-            in_flight = true;
+        bool expired = e.cache.empty() ||
+            std::chrono::duration_cast<std::chrono::seconds>(now - e.ts).count() > 60;
+        if (expired && !e.in_flight) {
+            e.in_flight = true;
             i_am_leader = true;
         }
-        snapshot = cache;
+        snapshot = e.cache;
     }
 
     if (i_am_leader) {
         std::string fresh;
         try { fresh = store->spectral_stats_by_realm(); } catch (...) {}
         std::lock_guard<std::mutex> lk(mu);
+        auto& e = entries[store];
         if (!fresh.empty()) {
-            cache = std::move(fresh);
-            ts = std::chrono::steady_clock::now();
+            e.cache = std::move(fresh);
+            e.ts = std::chrono::steady_clock::now();
         }
-        in_flight = false;
-        return cache;
+        e.in_flight = false;
+        return e.cache;
     }
     return snapshot;
 }
@@ -260,7 +270,7 @@ ToolResult FieldRpcHandler::tool_cleanup(const json& params) {
     for (const auto& hit : candidates) {
         if (hit.confidence < threshold) {
             field_store_->forget(hit.memory_id);
-            ++removed;
+            if (field_store_->get_content(hit.memory_id).empty()) ++removed;
         }
     }
 
@@ -297,8 +307,17 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
     }
     float avg_conf = stats_j.value("avg_confidence", 0.0f);
 
-    auto corrections = field_store_->recall_by_kind("correction", 100);
-    auto preferences = field_store_->recall_by_kind("preference", 100);
+    size_t corrections_total = 0;
+    size_t preferences_total = 0;
+    if (stats_j.contains("count_by_kind") && stats_j["count_by_kind"].is_object()) {
+        const auto& cbk = stats_j["count_by_kind"];
+        corrections_total = cbk.value("correction", size_t(0));
+        preferences_total = cbk.value("preference", size_t(0));
+    }
+    // Keep preview bounded to avoid large O(N) reads on hot path.
+    size_t preview_limit = 100;
+    auto corrections = field_store_->recall_by_kind("correction", preview_limit);
+    auto preferences = field_store_->recall_by_kind("preference", preview_limit);
 
     std::ostringstream ss;
     ss << "Soul State Overview\n"
@@ -306,8 +325,8 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
        << "  wisdom nodes   : " << wisdom_nodes    << "\n"
        << "  beliefs        : " << beliefs         << "\n"
        << "  episodes       : " << episodes        << "\n"
-       << "  corrections    : " << corrections.size() << "\n"
-       << "  preferences    : " << preferences.size() << "\n"
+       << "  corrections    : " << corrections_total << "\n"
+       << "  preferences    : " << preferences_total << "\n"
        << "  avg confidence : " << std::fixed << std::setprecision(3) << avg_conf << "\n";
 
     if (!corrections.empty()) {
@@ -334,8 +353,8 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
         {"wisdom_nodes",   wisdom_nodes},
         {"beliefs",        beliefs},
         {"episodes",       episodes},
-        {"corrections",    corrections.size()},
-        {"preferences",    preferences.size()},
+        {"corrections",    corrections_total},
+        {"preferences",    preferences_total},
         {"avg_confidence", avg_conf},
     };
     if (stats_j.contains("count_by_kind"))
@@ -536,7 +555,7 @@ ToolResult FieldRpcHandler::tool_hygiene_run(const json& params) {
     for (const auto& hit : candidates) {
         if (hit.confidence < threshold) {
             field_store_->forget(hit.memory_id);
-            ++removed;
+            if (field_store_->get_content(hit.memory_id).empty()) ++removed;
         }
     }
 

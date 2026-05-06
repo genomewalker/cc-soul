@@ -28,6 +28,11 @@ def get_socket_dir() -> str:
         socket_dir = os.path.join(xdg_runtime, "chitta")
         os.makedirs(socket_dir, mode=0o700, exist_ok=True)
         return socket_dir
+    run_user = f"/run/user/{os.getuid()}"
+    if os.access(run_user, os.W_OK):
+        socket_dir = os.path.join(run_user, "chitta")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+        return socket_dir
     home = os.environ.get("HOME")
     if home:
         cache_dir = os.path.join(home, ".cache")

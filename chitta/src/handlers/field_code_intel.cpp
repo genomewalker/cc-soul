@@ -181,6 +181,7 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
 
     // Clean up stale entries: files in the index but gone from disk
     size_t stale_removed = 0;
+    std::string stale_cleanup_warning;
     try {
         auto code_files_json = field_store_->list_code_files(project);
         auto arr = json::parse(code_files_json, nullptr, false);
@@ -204,7 +205,11 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
                 }
             }
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        stale_cleanup_warning = std::string("stale cleanup skipped: ") + e.what();
+    } catch (...) {
+        stale_cleanup_warning = "stale cleanup skipped: unknown error";
+    }
 
     CodeIntel intel;
 
@@ -301,6 +306,7 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
     ss << "  Callsites: " << callsites_stored << "\n";
     ss << "  Files changed: " << changed_files.size() << "/" << seen_files.size() << "\n";
     if (stale_removed > 0) ss << "  Stale symbols removed: " << stale_removed << "\n";
+    if (!stale_cleanup_warning.empty()) ss << "  Warning: " << stale_cleanup_warning << "\n";
 
     std::unordered_map<std::string, size_t> by_kind;
     for (const auto& sym : result.symbols) {
@@ -321,7 +327,8 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
         {"callsites_stored", callsites_stored},
         {"files_changed", changed_files.size()},
         {"files_total", seen_files.size()},
-        {"stale_removed", stale_removed}
+        {"stale_removed", stale_removed},
+        {"warning", stale_cleanup_warning}
     });
 }
 

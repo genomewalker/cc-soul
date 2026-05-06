@@ -24,6 +24,15 @@ json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
+_strict_mode_enabled() {
+    case "${CC_SOUL_STRICT_MODE:-}" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    local mind="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+    [[ -f "${mind}/.strict_claude_style" ]]
+}
+
 # ─── Code-intel shadow/enforcement ────────────────────────────────────────────
 # Phase 1 (initial): log what the hook WOULD do without changing behavior.
 # Phase 2 (auto):    once shadow log has ≥100 entries AND is ≥3 days old, the
@@ -264,6 +273,14 @@ case "$MATCHER" in
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
         is_indexed=0
         [[ "$dir_syms" -gt 0 ]] 2>/dev/null && is_indexed=1
+
+        # Strict mode: enforce symbol-level flow for indexed files.
+        # Escape hatch: CC_SOUL_ALLOW_READ=1.
+        if _strict_mode_enabled && [[ "$is_indexed" == "1" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "strict-indexed-read" 1
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[strict] Indexed file read blocked. Use mcp__chitta-bridge__read_symbol/search_symbols/soul_context first. Set CC_SOUL_ALLOW_READ=1 to override."}}'
+            exit 0
+        fi
 
         # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
         # Forces sqz_read_file which returns a 13-token §ref§ for cached content.
