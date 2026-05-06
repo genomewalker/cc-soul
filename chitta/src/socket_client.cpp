@@ -36,6 +36,12 @@ bool SocketClient::connect() {
 
     struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
+    if (socket_path_.size() >= sizeof(addr.sun_path)) {
+        last_error_ = "socket path too long: " + socket_path_;
+        close(fd_);
+        fd_ = -1;
+        return false;
+    }
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
     if (::connect(fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {

@@ -26,6 +26,9 @@ bool socket_is_active(const std::string& path) {
 
     struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(addr.sun_path)) {
+        return false;
+    }
     strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
 
     bool active = (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0);
@@ -163,6 +166,12 @@ bool SocketServer::create_socket() {
     // Bind to path
     struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
+    if (socket_path_.size() >= sizeof(addr.sun_path)) {
+        std::cerr << "[socket_server] socket path too long: " << socket_path_ << "\n";
+        close(server_fd_);
+        server_fd_ = -1;
+        return false;
+    }
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
     if (bind(server_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
