@@ -28,12 +28,23 @@ HOOK_SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
 # Clean stale per-session sentinels — but NOT on compact (same session continues)
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+STRICT_MODE_FILE="${MIND_PATH}/.strict_claude_style"
+STRICT_MODE_DEFAULT="${CC_SOUL_STRICT_MODE_DEFAULT:-1}"
 if [[ "$HOOK_SOURCE" != "compact" ]]; then
     rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
     rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
     rm -f "$MIND_PATH/.size_warned_"* 2>/dev/null || true
     # Reset subagent counter for new session
     [[ -n "$SESSION_ID" ]] && rm -f "$MIND_PATH/.subagent_count_${SESSION_ID}" 2>/dev/null || true
+fi
+
+# Strict Claude-style mode toggle persisted per session workspace.
+# Default ON; set CC_SOUL_STRICT_MODE_DEFAULT=0 to disable auto-enable.
+mkdir -p "$MIND_PATH" 2>/dev/null || true
+if [[ "$STRICT_MODE_DEFAULT" == "1" ]]; then
+    printf '%s\n' "enabled $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STRICT_MODE_FILE" 2>/dev/null || true
+elif [[ "$STRICT_MODE_DEFAULT" == "0" ]]; then
+    rm -f "$STRICT_MODE_FILE" 2>/dev/null || true
 fi
 
 # Initialize turn-discipline counter to current turn so the discipline nudge

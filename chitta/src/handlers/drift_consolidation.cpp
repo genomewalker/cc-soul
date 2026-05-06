@@ -72,7 +72,13 @@ ToolResult FieldRpcHandler::tool_consolidate_similar(const json& params) {
         };
 
         if (!dry_run) {
+            if (field_store_->get_content(kept_id).empty() || field_store_->get_content(weaker_id).empty()) {
+                continue;
+            }
             field_store_->forget(weaker_id);
+            if (!field_store_->get_content(weaker_id).empty()) {
+                continue;
+            }
             field_store_->strengthen(kept_id, 0.1f);
 
             // Record consolidation as triplet for audit

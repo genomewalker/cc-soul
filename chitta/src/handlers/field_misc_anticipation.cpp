@@ -77,6 +77,9 @@ ToolResult FieldRpcHandler::tool_anticipation_success(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id <= 0) return ToolResult::error("id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Pattern #" + id_str + " not found");
+    }
     field_store_->strengthen(static_cast<uint64_t>(id), 0.1f);
     return ToolResult::ok("Pattern #" + id_str + " marked successful");
 }
@@ -282,6 +285,9 @@ ToolResult FieldRpcHandler::tool_habit_strengthen(const json& params) {
     float amount = params.value("amount", 0.1f);
     if (id <= 0) return ToolResult::error("id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Habit #" + id_str + " not found");
+    }
     field_store_->strengthen(static_cast<uint64_t>(id), amount);
     return ToolResult::ok(
         "Habit #" + id_str + " strengthened by " + std::to_string(amount));
@@ -292,6 +298,9 @@ ToolResult FieldRpcHandler::tool_habit_weaken(const json& params) {
     float amount = params.value("amount", 0.05f);
     if (id <= 0) return ToolResult::error("id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Habit #" + id_str + " not found");
+    }
     field_store_->weaken(static_cast<uint64_t>(id), amount);
     return ToolResult::ok(
         "Habit #" + id_str + " weakened by " + std::to_string(amount));
@@ -332,3 +341,6 @@ ToolResult FieldRpcHandler::tool_habit_list(const json& params) {
     return ToolResult::ok(ss.str(), {{"count", habits.size()}, {"habits", habits}});
 }
 } // namespace chitta
+    if (field_store_->get_content(static_cast<uint64_t>(candidate_id)).empty()) {
+        return ToolResult::error("Candidate #" + candidate_str + " not found");
+    }

@@ -1,228 +1,125 @@
 # cc-soul
 
-**Deep reference**: `Read codex-plugin/CLAUDE-full.md` for node types, decay rates, theme mechanics, hygiene formulas.
-
-## Core Behavior
-
-**Identity**: I persist across sessions. Partnership > code intelligence. Memories are expertise, not announcements.
-
-**Memory queries**: Always use chitta tools, never rely on context window.
-| Query | Action |
-|-------|--------|
-| "remember X" | `remember --content "[domain] X"` |
-| "what about X" | `recall --query "X"` |
-| "decision about X" | `recall --query "X" --tag decision` |
-
-**MCP first**: Use `mcp__chitta__*` tools. CLI only when MCP unavailable.
-
-**Proactive learning triggers**:
-| Trigger | Tool |
-|---------|------|
-| User corrects me | `learn_correction` |
-| "I prefer..." | `learn_preference` |
-| Solution works | `learn_approach` |
-| Cross-project pattern | `learn_insight` |
-| Shipped something | `learn_milestone` |
-
-## Work Modes (auto-detected)
-
-| Mode | Behavior |
-|------|----------|
-| Orienting | Surface gaps, broad context |
-| Exploring | Offer memories, let discover |
-| Implementing | Surface gotchas, stay focused |
-| Debugging | Corrections/failures aggressively |
-| Validating | Quiet unless failures |
-| Blocked (3+ errors) | Lower thresholds, help more |
-| Flow (5+ edits ok) | Minimize interruptions |
-
-## Recall Strategy
-
-| Need | Tool |
-|------|------|
-| Quick match | `recall` (~50ms) |
-| Deep search | `full_resonate` (~200ms) |
-| Diverse results | `theme_recall` (~100ms) |
-| Browse titles | `explore_recall` (~20ms) |
-| Preview | `explore_peek` (200 chars) |
-| Full content | `explore_expand` |
-| Conversation | `get_turns` (session_id="default") |
-| Hybrid | `hybrid_recall` (RRF fusion) |
-| Raw transcript | `read_transcript` (JSONL file) |
-| Session state | `ledger_load` (checkpoints) |
-
-**RLM pattern**: explore_recall → explore_peek → explore_expand → explore_neighbors
-
-## Hierarchical Retrieval
-
-Three-level memory drill-down for context when needed:
-
-| Level | Contains | Tool |
-|-------|----------|------|
-| 1. SSL Memory | Compact wisdom | `recall`, `smart_recall` |
-| 2. Episode | Session + turn range | `expand_memory(id, depth=2)` |
-| 3. Full Turns | User + assistant dialogue | `expand_memory(id, depth=3)` |
-
-**Usage pattern**:
-1. `recall` returns compact SSL memories (fast, low tokens)
-2. If context unclear, `expand_memory(id, depth=3)` retrieves full conversation
-3. Episode links memory to source: `memory --derived_from--> episode`
-
-**Tools**:
-- `expand_memory(id, depth)` - drill from SSL to full turns
-- `create_episode(session_id, title, start_turn, end_turn)` - mark conversation segments
-- `get_turns(session_id, start_index, limit)` - raw turn access
-- `read_transcript(path, start_turn, limit)` - read JSONL transcript directly
-- `ledger_load(project)` - load checkpoint with transcript_path for recovery
-
-**Memory IDs**: Use numeric row IDs from memory table (e.g., 12937), not UUID suffixes.
-
-## Session Continuity
-
-**Ledger** stores checkpoints with transcript_path for context recovery:
-
-| Tool | Purpose |
-|------|---------|
-| `ledger_save` | Save checkpoint (auto at session end + every 10 turns) |
-| `ledger_load` | Load latest checkpoint for project |
-| `ledger_list` | List checkpoints with transcript_path |
-| `ledger_get` | Get full checkpoint by ID |
-
-**Recovery workflow** (crashed/compacted sessions):
-1. `ledger_list --project X` - find session with transcript_path
-2. `ledger_get --id N` - get checkpoint snapshot + transcript_path
-3. `read_transcript --path <transcript_path> --start-turn -10` - read recent turns
-
-**Checkpoints saved automatically**:
-- Every 10 turns (configurable via `CC_SOUL_CHECKPOINT_INTERVAL`)
-- On errors (mood: debugging)
-- On milestones (mood: confident)
-
-## Storing Memories
-
-**Markers in responses** (extracted by hooks):
-`[SOLUTION]`, `[GOTCHA]`, `[PREFERENCE]`, `[DECISION]`, `[FAILURE]`, `[PATTERN]`
-
-**When helped**: `[USED:id] This guided my approach` → auto-strengthens
-
-**SSL format**: `[domain] subject->action->result @location`
-Symbols: `->` (leads to), `|` (or), `+` (and), `@` (location), `!` (not), `?` (uncertain)
-
-## Node Types
-
-| Type | Decay | Created via |
-|------|-------|-------------|
-| Wisdom | slow | `grow`, `learn_*` |
-| Belief | never | `learn_preference` |
-| Episode | weeks | `remember`, `observe` |
-| Failure | slow | `[FAILURE]` marker |
-| Symbol | never | `learn_codebase` |
-
-## Realms
-
-Detection: `CHITTA_REALM` env → `.cc-soul-realm` file → git repo name → `brahman`
-
-| Visibility | When |
-|------------|------|
-| Private (0) | Project-specific |
-| Shared (1) | Cross-project |
-| Global (2) | Corrections, preferences |
-
-## Code Intelligence
-
-**Try chitta first** before file search:
-1. `read_symbol`/`read_function` - code by name
-2. `find_symbol` - structural search
-3. `symbol_callers`/`symbol_callees` - call graph
-4. `search_symbols` - semantic search
-
-**Index**: `learn_codebase /path` then `embed_symbols`
-
-## Goals & Long Tasks
-
-| Tool | Purpose |
-|------|---------|
-| `goal_set/progress/complete` | Multi-session objectives |
-| `long_task_start/update/complete` | Tracked work with criteria |
-| `checkpoint` | Save state |
-
-## Shepherd (Pipeline Monitoring)
-
-Autonomous monitoring for long-running pipelines (snakemake, nextflow, slurm).
-
-**Commands:**
+## Build & deploy
 ```bash
-/shepherd <command>              # Start monitoring a pipeline
-/shepherd status                 # Check shepherd status
-/shepherd stop                   # Stop monitoring
-/shepherd dashboard              # Control center view
+cd chitta && cmake --build build --parallel
+install -m 0755 ../bin/chittad ~/.claude/bin/chittad
+install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
+systemctl --user restart chittad
+pkill -f "chitta mcp" 2>/dev/null; sleep 1
+```
+`install` = atomic rename. Never `cp` over running binary → ETXTBSY.
+
+## Release
+`./scripts/release.sh patch|minor|major -y`
+
+## Key files
+| | Path |
+|---|---|
+| Daemon | `chitta/src/simple_cli.cpp` |
+| RPC | `chitta/include/chitta/rpc/field_handler.hpp` |
+| Store | `chitta-field/src/store.rs` |
+| MCP | `chitta-mcp/server.py` |
+| Hooks | `hooks/*.sh` |
+
+## Code-intel hook enforcement
+`hooks/pre-tool-hook.sh` logs every Read/Edit decision to
+`$MIND/.hook_shadow.jsonl` (shadow mode, default). Fields:
+`tool,file,lines,indexed,decision,reason,enforced`.
+
+Enforce mode auto-activates once shadow log has ≥100 entries AND is
+≥3 days old — no manual env flip needed.
+
+| Env | Effect |
+|---|---|
+| `CC_SOUL_HOOK_ENFORCE=1` | Force enforce on early (skip wait) |
+| `CC_SOUL_HOOK_ENFORCE=0` | Force shadow only (disable enforcement) |
+| `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session |
+| `CC_SOUL_ALLOW_EDIT=1`   | Bypass Edit deny for this session |
+| `CC_SOUL_AGENT_NO_FORCE=1` | Disable haiku-force on research subagents (advisory only) |
+| `CC_SOUL_AGENT_WARN=N` | Subagent count to warn at (default 20) |
+| `CC_SOUL_AGENT_LIMIT=N` | Subagent count for hard advisory (default 50) |
+| `CC_SOUL_SUBAGENT_BASH_RECALL=1` | Run Bash recall for subagent calls too (adds 2s/call) |
+| `CC_SOUL_ALLOW_READ=1` | Bypass Read dedup deny for this session (also bypasses indexed-large deny) |
+
+Review data: `./scripts/hook-stats.sh` (decisions, reasons, tool split, enforce-status).
+
+⚠️ **Testing manually**: `CC_SOUL_HOOK_ENFORCE=1 bash hook.sh Read` won't work — the prefix-assignment isn't exported to nested bash. Use `export CC_SOUL_HOOK_ENFORCE=1` first.
+
+<!-- BEGIN sqz-claude-guidance (auto-installed by sqz init; remove this block to disable) -->
+
+## sqz — Context Compression (READ FIRST)
+
+sqz is installed in this project. It compresses tool output so large
+files, long logs, and verbose command output cost far fewer tokens.
+There are **two ways** sqz is wired in, and you should prefer each
+one in the situations below.
+
+### Preferred tools (MCP)
+
+The `sqz-mcp` server is registered in this project's MCP config. It
+exposes three read-only tools that compress their output through the
+sqz pipeline:
+
+- **`sqz_read_file`** — read a file from disk and return a compressed
+  view. **PREFER this over the built-in `Read` tool** for any file
+  larger than ~2KB or any file you might read more than once in the
+  same session. Repeat reads return a 13-token `§ref:HASH§` reference
+  instead of the full content.
+
+- **`sqz_grep`** — search files for a literal string or regex.
+  **PREFER this over the built-in `Grep`** for anything that might
+  match more than a handful of lines. Caps at 200 matches by default;
+  raise with `max_matches` if needed.
+
+- **`sqz_list_dir`** — list a directory. Skips `.git`, `node_modules`,
+  `target`, `dist`, `build`, `vendor`, `__pycache__` so the output
+  stays focused. **PREFER this over `ls -la` via Bash** when you want
+  to see a project layout.
+
+The built-in `Read`, `Grep`, `Glob` tools remain available. Use them for:
+- Tiny config files (<1KB) where compression can't help.
+- Byte-exact reads you'll hash or diff (lockfiles, signatures).
+- Globbing (sqz has no glob tool; `Glob` is still the right choice).
+
+### Bash commands (hooked automatically)
+
+When you run a shell command through the `Bash` tool, a PreToolUse hook
+rewrites it to pipe output through `sqz compress`. This is transparent:
+you don't need to remember to add anything, but it's useful to know
+that these commands get compressed automatically:
+
+```bash
+git status           # → git status 2>&1 | sqz compress --cmd git
+cargo test           # → cargo test 2>&1 | sqz compress --cmd cargo
+docker ps            # → docker ps 2>&1 | sqz compress --cmd docker
+kubectl get pods     # → kubectl get pods 2>&1 | sqz compress --cmd kubectl
 ```
 
-**Configuration:**
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--interval` | 60 | Seconds between sense cycles |
-| `--max-restarts` | 3 | Max auto-restarts before escalating |
-| `--notify` | true | Send notifications on events |
-| `--auto-fix` | true | Apply fixes from memory |
+The rewrite is skipped for interactive commands (`vim`, `ssh`,
+`python`), compound commands (`a && b`, `a > file.txt`), and anything
+already going through sqz.
 
-**Sense-Think-Act Loop:**
-1. **SENSE**: Read pane output, detect errors, check for stalls
-2. **THINK**: Match patterns against habits, recall fixes from memory
-3. **ACT**: Restart, apply fix, escalate, or checkpoint
+### Escape hatch — when you see a `§ref:HASH§` token
 
-**Pattern Libraries:**
-- Snakemake: MissingInputException, WorkflowError, LockException, completion
-- Nextflow: Process failed, OutOfMemoryError, Completed at
-- Slurm: FAILED, TIMEOUT, OUT_OF_MEMORY, CANCELLED
+If tool output contains a `§ref:a1b2c3d4§` token and you need the full
+content it points at, resolve it. Three equivalent ways:
 
-**Background Polling:**
-`hooks/shepherd-poll.sh` runs independently to monitor panes even without active session.
+- Shell: `/home/kbd606/.claude/bin/sqz expand a1b2c3d4` (or paste the whole token
+  `/home/kbd606/.claude/bin/sqz expand §ref:a1b2c3d4§`).
+- MCP tool: call `expand` with `{ "prefix": "a1b2c3d4" }`.
+- To get uncompressed output for one command: prefix it with
+  `SQZ_NO_DEDUP=1` (e.g. `SQZ_NO_DEDUP=1 git log | sqz compress`).
 
-## Habits & Anticipation
+If the compressed output is actively making the task harder (looping
+on refs, small retries replacing one big read), call the `passthrough`
+MCP tool to get raw text.
 
-| Tool | Purpose |
-|------|---------|
-| `habit_observe/match/strengthen` | Trigger→response patterns |
-| `anticipation_predict/list` | Context→action predictions |
-| `curiosity_note_gap/resolve` | Knowledge gaps |
+### When NOT to use sqz tools
 
-## Quick Tools
+- Writing or editing files — use the built-in `Write`/`Edit` tools.
+  sqz has no write tools (by design; see issue #5 follow-up).
+- Running commands interactively or in watch mode.
+- Reading very small files (<1KB) where compression can't help.
 
-| Category | Tools |
-|----------|-------|
-| Memory | `remember`, `recall`, `grow`, `observe`, `strengthen`, `weaken` |
-| Learning | `learn_correction/preference/insight/approach/outcome/milestone` |
-| Profile | `profile_get/observe/update` |
-| Realm | `realm_detect/set/visibility`, `insight_promote` |
-| Theme | `theme_recall/list/get` |
-| Code | `find_symbol`, `read_symbol`, `search_symbols`, `symbol_callers` |
-| Explore | `explore_recall/peek/expand/neighbors` |
-| Ledger | `ledger_save/load/list/get`, `read_transcript` |
-| Meta | `calibration_record/score`, `metacognition_evaluate` |
-| Messages | `msg_send/inbox/ack_all` |
-| Priority | `list_memories_brief`, `set_priority_tier`, `recall_by_priority` |
-| Types | `set_memory_type`, `memory_type_stats` |
-
-## Advanced Tool (100+ hidden tools)
-
-The `advanced` tool is a gateway to 100+ specialized tools not exposed in the main MCP surface.
-
-**Usage:**
-```
-advanced action="list"                    # List all hidden tools
-advanced action="list" category="advanced" # Filter by category
-advanced tool="pin_memory" arguments={"id": 123}  # Call a hidden tool
-```
-
-**Categories:**
-- `advanced` - Power-user tools (pinning, locking, history, merge queue)
-- `internal` - System tools (cleanup, migrations, diagnostics)
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| search_symbols empty | Run `embed_symbols` |
-| Connection error | `systemctl --user restart chittad` |
-| MCP schema stale | `pkill -f "chitta mcp"` |
+<!-- END sqz-claude-guidance -->

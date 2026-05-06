@@ -5,6 +5,12 @@
 
 namespace chitta {
 
+namespace {
+constexpr size_t kMaxPreviewChars = 500;
+constexpr size_t kMaxTranscriptPageSize = 100;
+constexpr size_t kMaxTranscriptCharsPerTurn = 2000;
+}
+
 ToolResult FieldRpcHandler::tool_transcript_register(const json& params) {
     std::string session_id      = params.value("session_id", "");
     std::string transcript_path = params.value("transcript_path", "");
@@ -38,11 +44,14 @@ ToolResult FieldRpcHandler::tool_transcript_get(const json& params) {
     auto hits = field_store_->recall_keyword(session_id, 5);
     for (const auto& h : hits) {
         if (h.kind == "transcript" || h.content.find(session_id) != std::string::npos) {
+            std::string preview = h.content.size() > kMaxPreviewChars
+                ? h.content.substr(0, kMaxPreviewChars) + "..."
+                : h.content;
             return ToolResult::ok("Found transcript event", {
                 {"found",      true},
                 {"session_id", session_id},
                 {"memory_id",  h.memory_id},
-                {"content",    h.content},
+                {"content_preview", preview},
                 {"note",       "session state tracked via events"}
             });
         }
@@ -191,7 +200,7 @@ ToolResult FieldRpcHandler::tool_transcript_parse(const json& params) {
 ToolResult FieldRpcHandler::tool_transcript_search(const json& params) {
     std::string query      = params.value("query", "");
     std::string session_id = params.value("session_id", "");
-    size_t limit           = static_cast<size_t>(params.value("limit", 10));
+    size_t limit           = std::min(static_cast<size_t>(params.value("limit", 10)), kMaxTranscriptPageSize);
 
     if (query.empty()) return ToolResult::error("query is required");
 
@@ -206,7 +215,7 @@ ToolResult FieldRpcHandler::tool_transcript_search(const json& params) {
             results_json.push_back({
                 {"memory_id",  h.memory_id},
                 {"score",      h.score},
-                {"content",    h.content.size() > 500 ? h.content.substr(0, 500) + "..." : h.content},
+                {"content",    h.content.size() > kMaxPreviewChars ? h.content.substr(0, kMaxPreviewChars) + "..." : h.content},
                 {"kind",       h.kind},
                 {"realm",      h.realm}
             });
@@ -227,7 +236,7 @@ ToolResult FieldRpcHandler::tool_transcript_search(const json& params) {
             results_json.push_back({
                 {"memory_id",  h.memory_id},
                 {"score",      h.score},
-                {"content",    h.content.size() > 500 ? h.content.substr(0, 500) + "..." : h.content},
+                {"content",    h.content.size() > kMaxPreviewChars ? h.content.substr(0, kMaxPreviewChars) + "..." : h.content},
                 {"kind",       h.kind},
                 {"realm",      h.realm}
             });
@@ -249,8 +258,9 @@ ToolResult FieldRpcHandler::tool_read_transcript(const json& params) {
     std::string path       = params.value("path", "");
     std::string session_id = params.value("session_id", "");
     int start_turn         = params.value("start_turn", 0);
-    size_t limit           = static_cast<size_t>(params.value("limit", 20));
-    size_t max_chars       = static_cast<size_t>(params.value("max_chars_per_turn", 500));
+    size_t limit           = std::min(static_cast<size_t>(params.value("limit", 20)), kMaxTranscriptPageSize);
+    size_t max_chars       = std::min(static_cast<size_t>(params.value("max_chars_per_turn", 500)),
+                                      kMaxTranscriptCharsPerTurn);
     std::string role_filter = params.value("role_filter", "");
     std::string keyword    = params.value("keyword", "");
     bool metadata_only     = params.value("metadata_only", false);

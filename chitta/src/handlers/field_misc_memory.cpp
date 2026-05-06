@@ -35,6 +35,9 @@ ToolResult FieldRpcHandler::tool_pin_memory(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id <= 0) return ToolResult::error("id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Memory #" + id_str + " not found");
+    }
     std::string reason = params.value("reason", "");
     field_store_->strengthen(static_cast<uint64_t>(id), 0.3f);
     field_store_->add_triplet(id_str, "pinned", "true");
@@ -49,6 +52,9 @@ ToolResult FieldRpcHandler::tool_unpin_memory(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id <= 0) return ToolResult::error("id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(id)).empty()) {
+        return ToolResult::error("Memory #" + id_str + " not found");
+    }
     field_store_->weaken(static_cast<uint64_t>(id), 0.1f);
     field_store_->add_triplet(id_str, "pinned", "false");
 
@@ -137,6 +143,9 @@ ToolResult FieldRpcHandler::tool_resolve_merge(const json& params) {
     auto [merge_id, merge_str] = parse_id(params, "merge_id");
     if (merge_id <= 0) return ToolResult::error("merge_id is required");
 
+    if (field_store_->get_content(static_cast<uint64_t>(merge_id)).empty()) {
+        return ToolResult::error("Proposal #" + merge_str + " not found");
+    }
     std::string status     = params.value("status", "");
     std::string resolution = params.value("resolution", "");
 

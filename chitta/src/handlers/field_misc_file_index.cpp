@@ -46,6 +46,9 @@ ToolResult FieldRpcHandler::tool_file_index_all(const json& params) {
 ToolResult FieldRpcHandler::tool_learn_outcome(const json& params) {
     auto [memory_id, memory_str] = parse_id(params, "memory_id");
     if (memory_id <= 0) return ToolResult::error("memory_id is required");
+    if (field_store_->get_content(static_cast<uint64_t>(memory_id)).empty()) {
+        return ToolResult::error("memory not found: " + memory_str);
+    }
 
     std::string outcome = params.value("outcome", "");
     std::string context = params.value("context", "");

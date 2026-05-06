@@ -5,6 +5,12 @@
 
 namespace chitta {
 
+namespace {
+constexpr size_t kMinSnapshotTokens = 64;
+constexpr size_t kMaxSnapshotTokens = 2000;
+constexpr size_t kFieldPreviewChars = 240;
+}
+
 ToolResult FieldRpcHandler::tool_long_task_start(const json& params) {
     std::string task_id = params.value("task_id", "");
     std::string goal = params.value("goal", "");
@@ -39,7 +45,9 @@ ToolResult FieldRpcHandler::tool_long_task_start(const json& params) {
     }
 
     // Start the task
-    field_store_->task_transition(task_id, "start", ts);
+    if (!field_store_->task_transition(task_id, "start", ts)) {
+        return ToolResult::error("Failed to start task: " + task_id);
+    }
     field_store_->emit_event("long_task", "start", task_id, payload.dump());
 
     std::ostringstream ss;
@@ -179,7 +187,9 @@ ToolResult FieldRpcHandler::tool_long_task_update(const json& params) {
     payload["iterations"] = payload.value("iterations", 0) + 1;
 
     int64_t ts = field_now_ms();
-    field_store_->task_update_payload(task_id, payload.dump(), ts);
+    if (!field_store_->task_update_payload(task_id, payload.dump(), ts)) {
+        return ToolResult::error("Failed to update task payload: " + task_id);
+    }
     field_store_->emit_event("long_task", "update", task_id, payload.dump());
 
     return ToolResult::ok("Updated task: " + task_id, {{"task_id", task_id}, {"updated", true}});
@@ -193,19 +203,23 @@ ToolResult FieldRpcHandler::tool_long_task_complete(const json& params) {
         return ToolResult::error("task_id and outcome are required");
     }
 
-    // Update payload with outcome
     std::string raw = field_store_->task_get(task_id);
-    if (!raw.empty()) {
-        json task = parse_json_obj(raw);
-        json payload = parse_json_obj(task.value("payload", ""));
-        payload["status"] = "completed";
-        payload["outcome"] = outcome;
-        int64_t ts = field_now_ms();
-        field_store_->task_update_payload(task_id, payload.dump(), ts);
+    if (raw.empty()) {
+        return ToolResult::error("Task not found: " + task_id);
     }
 
+    json task = parse_json_obj(raw);
+    json payload = parse_json_obj(task.value("payload", ""));
+    payload["status"] = "completed";
+    payload["outcome"] = outcome;
     int64_t ts = field_now_ms();
-    field_store_->task_transition(task_id, "complete", ts);
+    if (!field_store_->task_update_payload(task_id, payload.dump(), ts)) {
+        return ToolResult::error("Failed to update task payload: " + task_id);
+    }
+
+    if (!field_store_->task_transition(task_id, "complete", ts)) {
+        return ToolResult::error("Failed to transition task to complete: " + task_id);
+    }
     field_store_->emit_event("long_task", "complete", task_id, json({{"outcome", outcome}}).dump());
 
     return ToolResult::ok("Completed task: " + task_id, {
@@ -280,7 +294,9 @@ ToolResult FieldRpcHandler::tool_unified_checkpoint(const json& params) {
                 json task = parse_json_obj(raw);
                 json payload = parse_json_obj(task.value("payload", ""));
                 payload["completed_summary"] = summary;
-                field_store_->task_update_payload(active_task_id, payload.dump(), field_now_ms());
+                if (!field_store_->task_update_payload(active_task_id, payload.dump(), field_now_ms())) {
+                    return ToolResult::error("Failed to update active task checkpoint payload: " + active_task_id);
+                }
             }
         }
 
@@ -316,7 +332,8 @@ ToolResult FieldRpcHandler::tool_unified_checkpoint(const json& params) {
 ToolResult FieldRpcHandler::tool_long_task_snapshot(const json& params) {
     std::string task_id = params.value("task_id", "");
     std::string mode = params.value("mode", "inject");
-    size_t max_tokens = params.value("max_tokens", 2000);
+    size_t max_tokens = params.value("max_tokens", 1200);
+    max_tokens = std::clamp(max_tokens, kMinSnapshotTokens, kMaxSnapshotTokens);
     size_t max_chars = max_tokens * 4;
 
     if (task_id.empty()) {
@@ -354,7 +371,7 @@ ToolResult FieldRpcHandler::tool_long_task_snapshot(const json& params) {
     std::ostringstream ss;
 
     if (mode == "inject") {
-        ss << "[LONG_TASK:" << task_id << "] " << goal << "\n";
+        ss << "[LONG_TASK:" << task_id << "] " << goal.substr(0, kFieldPreviewChars) << "\n";
         ss << "Iteration: " << iterations << " | Status: " << status << "\n";
 
         std::string summary = payload.value("completed_summary", "");
@@ -374,7 +391,7 @@ ToolResult FieldRpcHandler::tool_long_task_snapshot(const json& params) {
         }
 
         if (!blockers.empty()) {
-            ss << "BLOCKED: " << blockers[0].get<std::string>() << "\n";
+            ss << "BLOCKED: " << blockers[0].get<std::string>().substr(0, kFieldPreviewChars) << "\n";
         }
 
         int event_count = 0;
@@ -386,21 +403,21 @@ ToolResult FieldRpcHandler::tool_long_task_snapshot(const json& params) {
         }
     } else {
         ss << "=== Task Snapshot: " << task_id << " ===\n\n";
-        ss << "Goal: " << goal << "\n";
+        ss << "Goal: " << goal.substr(0, kFieldPreviewChars) << "\n";
         ss << "Status: " << status << "\n";
         ss << "Realm: " << payload.value("realm", "") << "\n";
         ss << "Iterations: " << iterations << "\n\n";
 
-        ss << "Completed: " << payload.value("completed_summary", "") << "\n\n";
+        ss << "Completed: " << payload.value("completed_summary", "").substr(0, kFieldPreviewChars) << "\n\n";
 
         ss << "Work Items:\n";
         for (const auto& item : work_items) {
-            ss << "  - " << item.get<std::string>() << "\n";
+            ss << "  - " << item.get<std::string>().substr(0, kFieldPreviewChars) << "\n";
         }
 
         ss << "\nBlockers:\n";
         for (const auto& b : blockers) {
-            ss << "  ! " << b.get<std::string>() << "\n";
+            ss << "  ! " << b.get<std::string>().substr(0, kFieldPreviewChars) << "\n";
         }
 
         ss << "\nRecent Events (" << events.size() << "):\n";

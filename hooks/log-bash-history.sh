@@ -21,7 +21,15 @@
 #      chf() { grep -i "$1" ~/.claude_bash_history; }
 
 HISTORY_FILE="$HOME/.claude_bash_history"
-COMMAND="$1"
+
+# Codex PostToolUse sends JSON on stdin (no positional args). Older Claude
+# wiring can pass the command as $1. Support both and always drain stdin to
+# avoid upstream broken-pipe errors.
+INPUT="$(cat)"
+COMMAND="${1:-}"
+if [[ -z "$COMMAND" && -n "$INPUT" ]]; then
+    COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+fi
 
 # Skip empty commands
 [[ -z "$COMMAND" ]] && exit 0

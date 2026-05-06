@@ -5,6 +5,12 @@
 
 namespace chitta {
 
+namespace {
+std::string truncate_snapshot(const std::string& s, size_t limit = 2000) {
+    return s.size() > limit ? s.substr(0, limit) + "..." : s;
+}
+}
+
 ToolResult FieldRpcHandler::tool_ledger_save(const json& params) {
     std::string session_id = get_session_id(params);
     std::string project = params.value("project", "default");
@@ -64,6 +70,10 @@ ToolResult FieldRpcHandler::tool_ledger_load(const json& params) {
     }
 
     json entry = parse_json_safe(*payload_str);
+    const bool include_snapshot = params.value("include_snapshot", false);
+    const std::string snapshot = entry.value("snapshot", "");
+    const bool snapshot_truncated = snapshot.size() > 2000;
+    const std::string snapshot_preview = truncate_snapshot(snapshot);
 
     std::ostringstream ss;
     ss << "Checkpoint loaded:\n";
@@ -86,7 +96,8 @@ ToolResult FieldRpcHandler::tool_ledger_load(const json& params) {
         {"mood", entry.value("mood", "")},
         {"coherence", coherence},
         {"confidence", confidence},
-        {"snapshot", entry.value("snapshot", "")},
+        {"snapshot", include_snapshot ? snapshot_preview : ""},
+        {"snapshot_truncated", snapshot_truncated},
         {"todos", entry.value("todos", json::array())},
         {"active_files", entry.value("active_files", json::array())},
         {"decisions", entry.value("decisions", json::array())},
@@ -181,6 +192,10 @@ ToolResult FieldRpcHandler::tool_ledger_get(const json& params) {
     }
 
     json entry = parse_json_safe(*payload_str);
+    const bool include_snapshot = params.value("include_snapshot", false);
+    const std::string snapshot = entry.value("snapshot", "");
+    const bool snapshot_truncated = snapshot.size() > 2000;
+    const std::string snapshot_preview = truncate_snapshot(snapshot);
 
     std::ostringstream ss;
     ss << "Checkpoint " << key << ":\n";
@@ -194,8 +209,8 @@ ToolResult FieldRpcHandler::tool_ledger_get(const json& params) {
     float confidence = entry.value("confidence", 0.0f);
     if (coherence > 0) ss << "  Coherence: " << coherence << "\n";
     if (confidence > 0) ss << "  Confidence: " << confidence << "\n";
-    if (!entry.value("snapshot", "").empty()) {
-        ss << "\nSnapshot:\n" << entry.value("snapshot", "") << "\n";
+    if (include_snapshot && !snapshot_preview.empty()) {
+        ss << "\nSnapshot:\n" << snapshot_preview << "\n";
     }
 
     json result = {
@@ -206,7 +221,8 @@ ToolResult FieldRpcHandler::tool_ledger_get(const json& params) {
         {"mood", entry.value("mood", "")},
         {"coherence", coherence},
         {"confidence", confidence},
-        {"snapshot", entry.value("snapshot", "")},
+        {"snapshot", include_snapshot ? snapshot_preview : ""},
+        {"snapshot_truncated", snapshot_truncated},
         {"todos", entry.value("todos", json::array())},
         {"active_files", entry.value("active_files", json::array())},
         {"decisions", entry.value("decisions", json::array())},
