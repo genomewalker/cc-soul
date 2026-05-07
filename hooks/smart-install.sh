@@ -282,6 +282,7 @@ install_hooks() {
         subconscious.sh
         session-start-hook.sh
         prompt-hook.sh
+        prompt-core.sh
         stop-hook.sh
         stop-core.sh
         pre-compact-hook.sh
