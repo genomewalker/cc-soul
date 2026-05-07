@@ -638,6 +638,33 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         return sys.str();
     }
 
+    // Dream dedup sadhana: collapse duplicate [dream] memories after a dream cycle
+    if (sadhana.goal_dsl.is_object() &&
+        sadhana.goal_dsl.value("kind", "") == "dream_dedup") {
+        int64_t dream_id = sadhana.goal_dsl.value("dream_id", int64_t(0));
+        std::ostringstream sys;
+        sys << "You are a dream memory curator. A dream cycle just completed and you must\n"
+            << "deduplicate and consolidate the new [dream] memories before they accumulate.\n\n"
+            << "DREAM: #" << dream_id << "\n\n"
+            << "MISSION (single cycle, then status=achieved):\n"
+            << "1. Retrieve all recent dream memories:\n"
+            << "   chitta recall --query \"[dream]\" --limit 50\n\n"
+            << "2. Group by topic. For each group with 2+ similar entries:\n"
+            << "   a. Keep the most specific/informative one\n"
+            << "   b. Forget the rest: chitta forget <id>\n"
+            << "   c. If merging improves clarity, store a combined memory first:\n"
+            << "      chitta remember --content \"[dream] <merged insight>\" --tags dream\n"
+            << "      then forget the originals\n\n"
+            << "3. Record what you did:\n"
+            << "   chitta remember --content \"[dream-dedup] dream:#" << dream_id
+            << " — <N duplicates removed, M topics consolidated>\" --tags dream,dedup\n\n"
+            << "CONSTRAINTS:\n"
+            << "- Only forget memories that are genuine duplicates or strictly subsumed\n"
+            << "- Preserve unique insights even if loosely related\n"
+            << "- Single cycle — end with {\"status\": \"achieved\", \"summary\": \"<N removed, M kept>\"}\n";
+        return sys.str();
+    }
+
     // Impl sadhana: self-improvement actuator
     if (sadhana.goal_dsl.is_object() &&
         sadhana.goal_dsl.value("kind", "") == "impl") {
@@ -1145,6 +1172,23 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
                 } else {
                     std::cerr << "[dream-publish] No local endpoint — skipping publish\n";
                 }
+            }
+        }
+        // Auto-spawn dream_dedup to collapse duplicate [dream] memories
+        if (sadhana.goal_dsl.is_object() &&
+            sadhana.goal_dsl.value("kind", "") == "dream") {
+            json dedup_dsl = {{"kind", "dream_dedup"}, {"dream_id", sadhana.id}};
+            int64_t dedup_id = create(
+                "Deduplicate [dream] memories from dream #" + std::to_string(sadhana.id),
+                sadhana.brain_provider,
+                sadhana.brain_model,
+                0,
+                sadhana.realm,
+                dedup_dsl,
+                5);
+            if (dedup_id > 0) {
+                start(dedup_id);
+                std::cerr << "[dream] Spawned dream_dedup sadhana " << dedup_id << "\n";
             }
         }
         stop(sadhana.id, true, summary.empty() ? "Goal achieved" : summary);
