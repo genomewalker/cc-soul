@@ -38,6 +38,16 @@ jq \
   .hooks.UserPromptSubmit = (strip_ours(.hooks.UserPromptSubmit) + [
     {"matcher":".*","hooks":[{"type":"command","command":($root+"/hooks/codex-prompt-hook.sh"),"timeout":10}]}
   ]) |
+  .hooks.PreToolUse = (strip_ours(.hooks.PreToolUse) + [
+    {"matcher":"Bash","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Bash"),"timeout":10}]},
+    {"matcher":"Read","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Read"),"timeout":10}]},
+    {"matcher":"Grep","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Grep"),"timeout":10}]},
+    {"matcher":"Glob","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Glob"),"timeout":10}]},
+    {"matcher":"Edit","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Edit"),"timeout":10}]},
+    {"matcher":"Write","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Write"),"timeout":10}]},
+    {"matcher":"Agent","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh Agent"),"timeout":10}]},
+    {"matcher":"ScheduleWakeup","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh ScheduleWakeup"),"timeout":10}]}
+  ]) |
   .hooks.Stop = (strip_ours(.hooks.Stop) + [
     {"matcher":".*","hooks":[{"type":"command","command":($root+"/hooks/codex-stop-hook.sh")}]}
   ]) |

@@ -134,6 +134,21 @@ find_strategy() {
     echo "$cmd" | grep -qE '\-maxdepth\s+[0-3]\b' && return 1
     [[ "${CC_SOUL_DEEP_SEARCH:-0}" == "1" ]] && return 1
 
+    # In strict mode, hard-deny explicit root scans.
+    if [[ "${CC_SOUL_STRICT_MODE:-0}" == "1" ]] && echo "$cmd" | grep -qE '^[[:space:]]*find[[:space:]]+/([[:space:]]|$)'; then
+        local deny_msg
+        deny_msg=$(jq -Rn '"[strict] Root-wide find is blocked. Scope to project/cwd (e.g., find . -maxdepth 3 ...) or set CC_SOUL_DEEP_SEARCH=1 when intentional."')
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' "$deny_msg"
+        return 0
+    fi
+
+    # Rewriter for the first find path token; keeps the rest of the expression.
+    # This prevents unsafe broad scans like `find / ...` from passing through.
+    _rewrite_find_root() {
+        local src="$1" dst="$2"
+        echo "$src" | sed -E "s|^([[:space:]]*)find[[:space:]]+([^[:space:]]+)([[:space:]]+.*)?$|\1find ${dst} -maxdepth 3\3|"
+    }
+
     local term
     term=$(echo "$cmd" | sed -nE 's/.*-[i]?name[[:space:]]+([^[:space:]]+).*/\1/p' | tr -d '"'"'"'*?[]' || true)
 
@@ -152,7 +167,7 @@ find_strategy() {
             sym_dir=$(echo "$sym_json" | jq -r 'if .symbols[0].file then (.symbols[0].file | split("/")[:-1] | join("/")) else empty end' 2>/dev/null || true)
             if [[ -n "$sym_dir" && -d "$sym_dir" ]]; then
                 local new_cmd ctx new_cmd_json
-                new_cmd=$(echo "$cmd" | sed -E "s|find[[:space:]]+[./~][^[:space:]]*|find $sym_dir -maxdepth 3|")
+                new_cmd=$(_rewrite_find_root "$cmd" "$sym_dir")
                 ctx=$(jq -Rn --arg d "$sym_dir" '"[memory-first] No exact match but memory hints at \($d). Scoped find there (maxdepth 3). CC_SOUL_DEEP_SEARCH=1 to expand."')
                 new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
                 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s,"updatedInput":{"command":%s}}}\n' "$ctx" "$new_cmd_json"
@@ -162,9 +177,8 @@ find_strategy() {
     fi
 
     local new_cmd ctx new_cmd_json term_label
-    new_cmd=$(echo "$cmd" | sed -E 's|find[[:space:]]+[./~][^[:space:]]*|find . -maxdepth 3|')
-    echo "$new_cmd" | grep -qE '\-maxdepth' || \
-        new_cmd=$(echo "$cmd" | sed -E 's|^([[:space:]]*)find[[:space:]]|\1find . -maxdepth 3 |')
+    new_cmd=$(_rewrite_find_root "$cmd" ".")
+    echo "$new_cmd" | grep -qE '\-maxdepth' || new_cmd="find . -maxdepth 3"
     term_label="${term:-(pattern)}"
     ctx=$(jq -Rn --arg t "$term_label" '"[search-strategy] No memory hit for \($t). Scoped to cwd -maxdepth 3. CC_SOUL_DEEP_SEARCH=1 to expand."')
     new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')

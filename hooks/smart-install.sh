@@ -283,6 +283,7 @@ install_hooks() {
         session-start-hook.sh
         prompt-hook.sh
         stop-hook.sh
+        stop-core.sh
         pre-compact-hook.sh
         pre-tool-hook.sh
         log-bash-history.sh
