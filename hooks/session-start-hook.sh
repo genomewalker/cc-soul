@@ -276,6 +276,23 @@ if [[ "$IS_POST_COMPACT" == "true" ]]; then
     echo ""
 else
     # Normal session start - just show minimal info
+    # ── Task ledger: inbox + active tasks ─────────────────────────────────
+    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+    _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
+    _inbox_txt=$(timeout 4 python3 "$_MCP_DIR/task_ledger.py" render_inbox \
+        --realm "${REALM:-}" --limit 5 2>/dev/null || true)
+    if [[ -n "$_inbox_txt" ]]; then
+        echo ""
+        echo "$_inbox_txt"
+    fi
+    _threads_txt=$(timeout 4 python3 "$_MCP_DIR/task_ledger.py" render_threads \
+        --realm "${REALM:-}" --limit 3 2>/dev/null || true)
+    if [[ -n "$_threads_txt" ]]; then
+        echo ""
+        echo "$_threads_txt"
+    fi
+    # ── End task ledger ───────────────────────────────────────────────────────
+
     soul_output=$(timeout "$MAX_WAIT" "$CHITTA_BIN" soul_context 2>/dev/null || true)
     if [[ -n "$soul_output" ]]; then
         memories=$(echo "$soul_output" | grep -oE 'Memory: [0-9]+' | grep -oE '[0-9]+' || echo "0")

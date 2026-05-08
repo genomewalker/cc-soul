@@ -55,6 +55,18 @@ extract_job_paths() {
     echo "$paths"
 }
 
+# Detect analysis scripts worth tracking (python/R/shell/snakemake/nextflow/etc.)
+is_analysis_script() {
+    local cmd="$1"
+    echo "$cmd" | grep -qE \
+        '(^|\s)(python3?|Rscript|julia|perl|snakemake|nextflow)\s+\S+\.(py|R|jl|pl|nf|smk)' \
+        || echo "$cmd" | grep -qE '(^|\s)bash\s+\S+\.sh(\s|$)' \
+        || echo "$cmd" | grep -qE '(^|\s)\./\S+\.(sh|py|R)(\s|$)' \
+        || echo "$cmd" | grep -qE '(^|\s)(snakemake|nextflow)\s' \
+        || { echo "$cmd" | grep -qE "(^|\s)(python3?|Rscript)\s" \
+             && echo "$cmd" | grep -qvE '^\s*(pip|conda|which|python.*--version)'; }
+}
+
 if [[ "$exit_code" == "0" && -n "$command" ]]; then
     curr_cmd=$(normalize_cmd "$command")
 
@@ -74,6 +86,43 @@ if [[ "$exit_code" == "0" && -n "$command" ]]; then
         realm_json=$(printf '%s' "$realm" | jq -Rs .)
         queue_write "remember" "{\"content\":$content_json,\"kind\":\"signal\",\"realm\":$realm_json,\"tags\":[\"long-running-job\"],\"visibility\":1}" 2>/dev/null || true
     fi
+
+    # ── Task ledger: provenance extraction ──────────────────────────────────
+    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+    _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
+    if is_long_running_launch "$command" || is_analysis_script "$command"; then
+        _task_id=$(cat "$MIND_PATH/.pending_task_id" 2>/dev/null || echo "")
+        [[ -n "$_task_id" ]] && rm -f "$MIND_PATH/.pending_task_id"
+        _thread_id=$(cat "$MIND_PATH/.current_thread_id" 2>/dev/null || echo "")
+        _snap_flag=""
+        [[ -n "$_task_id" && -f "$MIND_PATH/.fs_snapshot_${_task_id}" ]] \
+            && _snap_flag="--before-snapshot $MIND_PATH/.fs_snapshot_${_task_id}"
+        _prov_json=$(echo "$STDIN_DATA" | timeout 3 python3 "$_MCP_DIR/provenance.py" extract \
+            --cmd "$command" --cwd "${cwd:-$(pwd)}" --stdout-from-stdin \
+            ${_snap_flag} 2>/dev/null || echo "{}")
+        if [[ -n "$_task_id" ]]; then
+            _prov_patch=$(echo "$_prov_json" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+keys='cmd cwd git_branch git_commit conda_env inputs outputs params config_files references job_id scheduler status_check_cmd completion_digest'.split()
+print(json.dumps({k:d[k] for k in keys if k in d}))" 2>/dev/null || echo "{}")
+            queue_write "long_task_update" "{\"task_id\":\"$_task_id\",\"payload_patch\":$_prov_patch}" 2>/dev/null || true
+            while IFS= read -r _path; do
+                [[ -z "$_path" ]] && continue
+                timeout 2 python3 "$_MCP_DIR/task_ledger.py" artifact_register \
+                    --task-id "$_task_id" --path "$_path" --thread-id "$_thread_id" 2>/dev/null || true
+            done < <(echo "$_prov_json" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+[print(p) for p in (d.get('outputs') or [])+(d.get('new_files') or [])]" 2>/dev/null)
+            rm -f "$MIND_PATH/.fs_snapshot_${_task_id}"
+        fi
+        if [[ "$exit_code" != "0" && -n "$_task_id" ]]; then
+            timeout 2 python3 "$_MCP_DIR/task_ledger.py" inbox_push \
+                --task-id "$_task_id" --event-type "failure" \
+                --digest "${command:0:60} — exit $exit_code" \
+                --target-realm "${realm:-}" --thread-id "$_thread_id" 2>/dev/null || true
+        fi
+    fi
+    # ── End task ledger ──────────────────────────────────────────────────────
 
     # Read previous command if exists
     if [[ -f "$LAST_CMD_FILE" ]]; then

@@ -410,6 +410,17 @@ if [[ "$EVENT_CHECKPOINT" == "true" ]]; then
         --arg mood "$EVENT_MOOD" \
         --arg snapshot "$EVENT_SNAPSHOT" \
         '{session_id: $session_id, project: $project, transcript_path: $transcript_path, mood: $mood, snapshot: $snapshot}')
+    # ── Task ledger: thread inference ───────────────────────────────────────
+    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+    _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
+    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+        _infer_out=$(timeout 5 python3 "$_MCP_DIR/thread_inference.py"             --transcript "$TRANSCRIPT_PATH" --realm "${REALM:-}" 2>/dev/null || echo "{}")
+        _thread_id=$(echo "$_infer_out" | python3 -c             "import sys,json; d=json.load(sys.stdin); print(d.get('thread_id',''))" 2>/dev/null || echo "")
+        if [[ -n "$_thread_id" ]]; then
+            echo "$_thread_id" > "$MIND_PATH/.current_thread_id" 2>/dev/null || true
+        fi
+    fi
+    # ── End task ledger ───────────────────────────────────────────────────────
     queue_write "ledger_save" "$EVENT_ARGS"
 fi
 
