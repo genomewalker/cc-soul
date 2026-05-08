@@ -204,6 +204,23 @@ case "$MATCHER" in
             exit 0
         fi
 
+        # ── Task ledger: pre-stage analysis/long-running commands ──────────────
+        _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+        _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
+        _MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+        _is_trackable=0
+        if echo "$command" | grep -qE             '(^|\s)(sbatch|srun|bsub|qsub|nohup|screen|tmux\s+new|snakemake|nextflow)\s'             || echo "$command" | grep -qE             '(^|\s)(python3?|Rscript|julia|perl)\s+\S+\.(py|R|jl|pl)'             || echo "$command" | grep -qE             '(^|\s)bash\s+\S+\.sh(\s|$)'             || echo "$command" | grep -qE             '(^|\s)\./\S+\.(sh|py|R)(\s|$)'; then
+            _is_trackable=1
+        fi
+        if [[ "$_is_trackable" == "1" ]]; then
+            _task_id=$(python3 -c "import uuid; print(str(uuid.uuid4()))" 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)
+            mkdir -p "$_MIND_PATH" 2>/dev/null
+            echo "$_task_id" > "$_MIND_PATH/.pending_task_id" 2>/dev/null || true
+            _cwd_pre=$(pwd 2>/dev/null || echo "")
+            timeout 3 python3 "$_MCP_DIR/provenance.py" snapshot                 --cwd "$_cwd_pre" --out "$_MIND_PATH/.fs_snapshot_${_task_id}" >/dev/null 2>&1 || true
+        fi
+        # ── End task ledger pre-stage ─────────────────────────────────────────
+
         # Stage 2: Soul memory — surface corrections/gotchas
         # Skip for subagent calls by default (saves 2s timeout per tool call).
         # Set CC_SOUL_SUBAGENT_BASH_RECALL=1 to enable Bash recall for subagents too.
