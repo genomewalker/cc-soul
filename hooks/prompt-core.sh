@@ -762,6 +762,11 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         if [[ -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"CORRECTION"* ]]; then
             SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${LEARNING_HINTS}"
         fi
+        # Promote matched [correction] memories to systemMessage so model cannot ignore them
+        if [[ -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
+            _corr_sys=$(printf '%s' "$_corr_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
+            [[ -n "$_corr_sys" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
+        fi
 
         JSON_OUT=$(jq -n \
             --arg ctx "$FINAL_OUTPUT" \
