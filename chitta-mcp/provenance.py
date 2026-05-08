@@ -375,7 +375,7 @@ def _cli() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("extract")
-    s.add_argument("--cmd", required=True)
+    s.add_argument("--cmd", required=True, dest="command")
     s.add_argument("--cwd", default=os.getcwd())
     s.add_argument("--stdout-from-stdin", action="store_true", dest="stdout_from_stdin")
     s.add_argument("--before-snapshot", dest="before_snapshot")
@@ -410,7 +410,7 @@ def _cli() -> None:
             before = json.loads(Path(args.before_snapshot).read_text())
         if args.after_snapshot and Path(args.after_snapshot).exists():
             after = json.loads(Path(args.after_snapshot).read_text())
-        result = extract(args.cmd, args.cwd, stdout=raw_stdout,
+        result = extract(args.command, args.cwd, stdout=raw_stdout,
                          before_snapshot=before, after_snapshot=after)
 
     elif args.cmd == "snapshot":

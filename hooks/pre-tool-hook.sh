@@ -307,9 +307,17 @@ case "$MATCHER" in
 
         # Strict mode: enforce symbol-level flow for indexed files.
         # Escape hatch: CC_SOUL_ALLOW_READ=1.
-        if _strict_mode_enabled && [[ "$is_indexed" == "1" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+        # Safety valve: never block reads for system/external paths where no chitta
+        # alternative exists — blocking those forces dangerous workarounds
+        # (e.g. patching site-packages via raw Python instead of Read+Edit).
+        _is_system_path=0
+        case "$file_path" in
+            */site-packages/*|*/dist-packages/*|*/conda/envs/*/lib/*|/usr/lib/*|/opt/*/lib/*)
+                _is_system_path=1 ;;
+        esac
+        if _strict_mode_enabled && [[ "$is_indexed" == "1" && "${CC_SOUL_ALLOW_READ:-0}" != "1" && "$_is_system_path" == "0" ]]; then
             _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "strict-indexed-read" 1
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[strict] Indexed file read blocked. Use mcp__chitta-bridge__read_symbol/search_symbols/soul_context first. Set CC_SOUL_ALLOW_READ=1 to override."}}'
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[strict] Indexed file read blocked. Use mcp__chitta-bridge__read_symbol/search_symbols/soul_context first. To edit: use mcp__chitta-bridge__file_patch(file,old_str,new_str) — no Read required. Set CC_SOUL_ALLOW_READ=1 to override."}}'
             exit 0
         fi
 
