@@ -225,7 +225,9 @@ else
     _kw_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
               --limit 3 --toon --realm "$REALM" --include-global true 2>/dev/null || true) &
     _kw_pid=$!
-    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" 2>/dev/null || true
+    _corr_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true 2>/dev/null || true) &
+    _corr_pid=$!
+    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" "$_corr_pid" 2>/dev/null || true
 
     # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
     # Extract text field and reformat as [hyb][50%] [type] text
@@ -237,7 +239,8 @@ else
     # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
     memories=$(printf '%s\n' "$_sem_out"; \
                printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | sed 's/^\[/[hyb]/'; \
-               printf '%s\n' "$_kw_fmt")
+               printf '%s\n' "$_kw_fmt"; \
+               printf '%s\n' "$_corr_out" | grep -v '\[thought\]' | sed 's/^\[/[corr]/')
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
@@ -737,6 +740,7 @@ fi
 
 # 8. Anticipations (lowest priority)
 [[ -n "$ANTICIPATIONS" ]] && _append "$ANTICIPATIONS"
+
 
 # ===========================================
 # EMIT: Structured JSON hookSpecificOutput
