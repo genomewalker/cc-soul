@@ -200,6 +200,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"limit", "Max sessions to return", false, "10"},
       {"realm", "Filter by realm", false, nullptr}}},
 
+    {"recall_spreading", "Retrieve memories via entity graph spreading activation",
+     {{"query", "Query; capitalized words/@refs/quoted strings used as entity seeds", true, nullptr},
+      {"limit", "Max results", false, "10"},
+      {"realm", "Memory realm", false, nullptr}}},
+
     {"smart_recall", "Intelligent recall with automatic query intent classification",
      {{"query", "Natural language query (e.g., 'last week', 'show preferences')", true, nullptr},
       {"limit", "Max results", false, "20"},

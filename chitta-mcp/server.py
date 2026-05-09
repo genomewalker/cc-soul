@@ -1724,6 +1724,106 @@ Persistent sessions (variables survive across calls):
 # Consolidated gateway handlers — reduce tool count for token efficiency
 # ============================================================================
 
+def _rrf_merge(lists: list, k: int = 60, limit: int = 10) -> list:
+    """Reciprocal Rank Fusion across multiple result lists."""
+    scores: dict = {}
+    for lst in lists:
+        for rank, item in enumerate(lst):
+            key = item.get("memory_id") or item.get("text", "")[:80]
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+            if key not in scores:
+                scores[key] = {"score": 0.0, "item": item}
+    # Rebuild: collect best item per key
+    key_items: dict = {}
+    for lst in lists:
+        for rank, item in enumerate(lst):
+            key = item.get("memory_id") or item.get("text", "")[:80]
+            rrf = 1.0 / (k + rank + 1)
+            if key not in key_items:
+                key_items[key] = {"rrf": rrf, "item": item}
+            else:
+                key_items[key]["rrf"] += rrf
+    ranked = sorted(key_items.values(), key=lambda x: x["rrf"], reverse=True)
+    return [r["item"] for r in ranked[:limit]]
+
+
+def handle_recall_smart(arguments: dict) -> str:
+    """Multi-lane retrieval: query planner → semantic + typed + spreading + session lanes → RRF merge."""
+    query = arguments.get("query", "")
+    limit = int(arguments.get("limit", 10))
+    realm = arguments.get("realm", "")
+    skip_llm = arguments.get("skip_llm_plan", False)
+
+    plan = {"entities": [], "speech_act": None, "answer_type": "fact"}
+
+    if not skip_llm:
+        try:
+            import anthropic as _ant
+            client = _ant.Anthropic()
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{"role": "user", "content": (
+                    f"Extract retrieval metadata from this query. Return JSON only, no prose.\n"
+                    f"Fields: entities (array of key noun phrases), speech_act "
+                    f"(one of: decision/correction/preference/task/result/failure/question/hypothesis/null), "
+                    f"answer_type (one of: fact/decision/preference/code/temporal).\n"
+                    f"Query: {query}"
+                )}],
+            )
+            plan = json.loads(resp.content[0].text.strip())
+        except Exception:
+            pass  # fall through with empty plan
+
+    realm_arg = {"realm": realm} if realm else {}
+
+    # Lane 1: semantic recall (always)
+    sem_raw = daemon_call("recall", {"query": query, "limit": limit * 2, **realm_arg})
+    try:
+        sem_hits = json.loads(sem_raw).get("results", [])
+    except Exception:
+        sem_hits = []
+
+    lanes = [sem_hits]
+
+    # Lane 2: typed recall (if speech_act detected)
+    if plan.get("speech_act"):
+        typed_raw = daemon_call("recall", {
+            "query": query, "tag": plan["speech_act"], "limit": limit, **realm_arg
+        })
+        try:
+            lanes.append(json.loads(typed_raw).get("results", []))
+        except Exception:
+            pass
+
+    # Lane 3: spreading activation (if entities found)
+    entities = plan.get("entities", [])
+    if entities:
+        seed_query = " ".join(entities[:5])
+        spread_raw = daemon_call("recall_spreading", {
+            "query": seed_query, "limit": limit, **realm_arg
+        })
+        try:
+            lanes.append(json.loads(spread_raw).get("results", []))
+        except Exception:
+            pass
+
+    # Lane 4: session-level recall
+    sess_raw = daemon_call("recall_session", {"query": query, "limit": limit, **realm_arg})
+    try:
+        sess_data = json.loads(sess_raw).get("results", [])
+        # Normalize session hits to same shape as memory hits
+        for s in sess_data:
+            s.setdefault("memory_id", s.get("session_id", ""))
+            s.setdefault("text", s.get("best_evidence", ""))
+        lanes.append(sess_data)
+    except Exception:
+        pass
+
+    merged = _rrf_merge(lanes, k=60, limit=limit)
+    return json.dumps({"results": merged, "plan": plan})
+
+
 def handle_recall_gateway(arguments: dict) -> str:
     """Unified recall with strategy routing.
 
@@ -1837,6 +1937,8 @@ COMPOSITE_HANDLERS = {
     "lookup": handle_lookup,
     # Consolidated gateways (replace individual tools)
     "recall": handle_recall_gateway,
+    "recall_smart": handle_recall_smart,
+    "recall_spreading": lambda a: daemon_call("recall_spreading", a),
     "sadhana": handle_sadhana_gateway,
     "learn": handle_learn_gateway,
     "research": handle_research_gateway,
