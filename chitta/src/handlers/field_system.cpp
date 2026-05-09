@@ -601,6 +601,7 @@ ToolResult FieldRpcHandler::tool_import_soul(const json& params) {
     }
 
     std::string realm = params.value("realm", "brahman");
+    std::string source_session = params.value("source_session", "");
 
     size_t imported = 0;
     std::istringstream iss(content);
@@ -626,7 +627,9 @@ ToolResult FieldRpcHandler::tool_import_soul(const json& params) {
         if (!full.empty()) {
             float conf = params.value("confidence", 0.8f);
             auto emb   = embed_text(full);
-            field_store_->remember("wisdom", realm, full, emb, conf, 0.001f);
+            uint64_t id = field_store_->remember("wisdom", realm, full, emb, conf, 0.001f);
+            if (id > 0 && !source_session.empty())
+                field_store_->set_source_session(id, source_session);
             ++imported;
         }
         current_tag.clear();
