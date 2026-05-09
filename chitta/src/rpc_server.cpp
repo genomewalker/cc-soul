@@ -194,6 +194,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"realm", "Filter by realm", false, nullptr},
       {"include_global", "Include global memories", false, "true"}}},
 
+    {"recall_session", "Session-level recall: groups chunk evidence by source session using noisy-OR aggregation",
+     {{"query", "Natural language query", true, nullptr},
+      {"limit", "Max sessions to return", false, "10"},
+      {"realm", "Filter by realm", false, nullptr}}},
+
     {"smart_recall", "Intelligent recall with automatic query intent classification",
      {{"query", "Natural language query (e.g., 'last week', 'show preferences')", true, nullptr},
       {"limit", "Max results", false, "20"},

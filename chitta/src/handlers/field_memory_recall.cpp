@@ -38,6 +38,12 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
 
     uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
 
+    // Tag with source_session if provided (used by recall_session grouping)
+    if (id > 0 && params.contains("source_session")) {
+        std::string ss = params.value("source_session", "");
+        if (!ss.empty()) field_store_->set_source_session(id, ss);
+    }
+
     // Create triplets from tags if provided (array or comma-separated string)
     if (params.contains("tags")) {
         if (params["tags"].is_array()) {
@@ -427,6 +433,38 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     auto result = ToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
     fire_recall_callback(results, 1);
     return result;
+}
+
+ToolResult FieldRpcHandler::tool_recall_session(const json& params) {
+    std::string query = params.value("query", "");
+    if (query.empty()) return ToolResult::error("query is required");
+
+    size_t k          = static_cast<size_t>(params.value("limit", 10));
+    std::string realm = params.value("realm", "");
+
+    auto embedding = embed_query(query);
+    auto hits = field_store_->recall_session(embedding, query, k, realm);
+
+    json results = json::array();
+    for (const auto& h : hits) {
+        results.push_back({
+            {"session_id",      h.session_id},
+            {"score",           h.score},
+            {"chunk_count",     h.chunk_count},
+            {"max_chunk_score", h.max_chunk_score},
+            {"best_evidence",   h.best_evidence},
+        });
+    }
+
+    std::ostringstream ss;
+    ss << "Session recall: " << hits.size() << " sessions for '" << query << "'\n";
+    for (const auto& res : results) {
+        int pct = static_cast<int>(res.value("score", 0.0f) * 100);
+        ss << "[" << pct << "%] [" << res.value("chunk_count", 0) << " chunks] "
+           << res.value("session_id", "?") << "\n"
+           << "  " << res.value("best_evidence", std::string{}).substr(0, 200) << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"results", results}, {"realm", realm}});
 }
 
 ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
