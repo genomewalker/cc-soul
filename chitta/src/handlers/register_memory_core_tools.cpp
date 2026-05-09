@@ -337,6 +337,15 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["recall_session"] = [this](const json& p) { return tool_recall_session(p); };
 
+    tools_.push_back({{"name","recall_spreading"},{"description","Retrieve memories via entity graph spreading activation"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"},{"description","Query; entity seeds extracted automatically"}}},
+            {"limit",{{"type","integer"},{"description","Max results (default 10)"}}},
+            {"realm",{{"type","string"},{"description","Realm filter (optional)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["recall_spreading"] = [this](const json& p) { return tool_recall_spreading(p); };
+
     tools_.push_back({{"name","structured_recall"},{"description","Three-lens recall: facts, context, and temporal agents merged for high-fidelity retrieval"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},

@@ -467,6 +467,27 @@ ToolResult FieldRpcHandler::tool_recall_session(const json& params) {
     return ToolResult::ok(ss.str(), {{"results", results}, {"realm", realm}});
 }
 
+ToolResult FieldRpcHandler::tool_recall_spreading(const json& params) {
+    if (!params.contains("query"))
+        return ToolResult::error("query required");
+    std::string query = params.value("query", "");
+    size_t      limit = static_cast<size_t>(params.value("limit", 10));
+    std::string realm = params.value("realm", "");
+
+    auto hits = field_store_->recall_spreading(query, limit, realm);
+    json results = json::array();
+    for (auto& h : hits) {
+        results.push_back({
+            {"memory_id", h.memory_id},
+            {"score",     h.score},
+            {"text",      h.text},
+            {"kind",      h.kind},
+            {"realm",     h.realm},
+        });
+    }
+    return ToolResult::ok(json{{"results", results}}.dump());
+}
+
 ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");

@@ -4788,4 +4788,34 @@ COMPOSITE_TOOLS = [
             "required": ["agent_id"],
         }
     ),
-]
+    Tool(
+        name="recall_spreading",
+        description="Retrieve memories via entity graph spreading activation. "
+                    "Extracts capitalized words, @refs, and quoted strings from the query as entity seeds, "
+                    "then traverses the triplet graph (BFS depth 2, decay 0.6) to find related memories.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query":  {"type": "string", "description": "Query; entity seeds extracted automatically"},
+                "limit":  {"type": "integer", "description": "Max results", "default": 10},
+                "realm":  {"type": "string",  "description": "Memory realm"},
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="recall_smart",
+        description="Multi-lane retrieval planner: uses a fast LLM call to extract entities and speech-act "
+                    "type, then fans out to semantic, typed, spreading-activation, and session-level lanes, "
+                    "merging results with Reciprocal Rank Fusion. Best for complex queries.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query":          {"type": "string", "description": "Natural language query"},
+                "limit":          {"type": "integer", "description": "Max results", "default": 10},
+                "realm":          {"type": "string",  "description": "Memory realm"},
+                "skip_llm_plan":  {"type": "boolean", "description": "Skip LLM planning step (faster)", "default": False},
+            },
+            "required": ["query"],
+        },
+    )]

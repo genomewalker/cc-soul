@@ -60,6 +60,7 @@ int cf_recall_session(struct CfHandle* h,
     const char* query_text, const char* realm, size_t k,
     CfSessionHit* hits_buf, size_t hits_cap, size_t* hits_written,
     char** session_ids_json_out);
+int cf_recall_spreading(struct CfHandle* h, const char* query, size_t k, const char* realm, char* out_json, size_t out_json_len);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -604,6 +605,38 @@ public:
             });
         }
         return results;
+    }
+
+    struct SpreadingHit {
+        uint64_t    memory_id;
+        float       score;
+        std::string text;
+        std::string kind;
+        std::string realm;
+    };
+
+    std::vector<SpreadingHit> recall_spreading(
+        const std::string& query, size_t k, const std::string& realm = "") const
+    {
+        char buf[1 << 20];
+        int n = cf_recall_spreading(handle_, query.c_str(), k,
+                                    realm.empty() ? nullptr : realm.c_str(),
+                                    buf, sizeof(buf));
+        if (n <= 0) return {};
+        std::vector<SpreadingHit> out;
+        try {
+            auto j = nlohmann::json::parse(buf);
+            for (auto& r : j.at("results")) {
+                SpreadingHit sh;
+                sh.memory_id = r.value("memory_id", uint64_t(0));
+                sh.score     = r.value("score", 0.0f);
+                sh.text      = r.value("text", std::string{});
+                sh.kind      = r.value("kind", std::string{});
+                sh.realm     = r.value("realm", std::string{});
+                out.push_back(std::move(sh));
+            }
+        } catch (...) {}
+        return out;
     }
 
     /// Add an SPO triplet fact.
