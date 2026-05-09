@@ -178,7 +178,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"type", "Node type: wisdom|belief|episode", false, "episode"},
       {"tags", "Comma-separated tags", false, nullptr},
       {"realm", "Primary realm (default: brahman)", false, nullptr},
-      {"visibility", "0=Private, 1=Shared, 2=Global", false, "0"}}},
+      {"visibility", "0=Private, 1=Shared, 2=Global", false, "0"},
+      {"source_session", "Session ID for grouping (used by recall_session)", false, nullptr}}},
 
     {"recall", "Search memory by semantic similarity",
      {{"query", "Search query", true, nullptr},
