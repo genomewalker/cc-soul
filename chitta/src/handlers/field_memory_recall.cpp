@@ -1,5 +1,6 @@
 // field_memory_recall RPC handlers — bodies for declarations in
 // chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
+#include "chitta/speech_act.hpp"
 
 #include "../../include/chitta/rpc/field_handler.hpp"
 
@@ -27,6 +28,11 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         "symbol", "projectessence", "modulestate", "patternstate"
     };
     if (code_kinds.count(kind)) decay_rate = 0.0f;
+
+    // Auto speech-act classification for episode memories
+    if (kind == "episode") {
+        if (auto act = classify_speech_act(content)) kind = *act;
+    }
 
     auto embedding = embed_text(content);
 

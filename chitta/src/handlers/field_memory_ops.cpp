@@ -2,6 +2,7 @@
 // chitta/include/chitta/rpc/handlers/field_memory_ops.hpp.
 
 #include "../../include/chitta/rpc/field_handler.hpp"
+#include "../../include/chitta/speech_act.hpp"
 
 namespace chitta {
 
@@ -73,6 +74,11 @@ ToolResult FieldRpcHandler::tool_observe(const json& params) {
     float confidence = params.contains("confidence")
         ? params["confidence"].get<float>()
         : category_to_confidence(category);
+
+    // Auto speech-act classification for episode memories
+    if (category == "episode") {
+        if (auto act = classify_speech_act(content)) category = *act;
+    }
 
     std::string ssl_content = to_ssl_format(content, category);
 
