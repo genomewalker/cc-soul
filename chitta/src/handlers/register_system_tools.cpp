@@ -112,9 +112,12 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
 
-    tools_.push_back({{"name","import_soul"},{"description","Import .soul file (SSL format)"},
+    tools_.push_back({{"name","import_soul"},{"description","Import .soul file (SSL format). Supports --realm and --source_session for targeted ingestion."},
         {"inputSchema",{{"type","object"},{"properties",{
-            {"file",{{"type","string"}}},{"content",{{"type","string"}}}
+            {"file",{{"type","string"}}},{"content",{{"type","string"}}},
+            {"realm",{{"type","string"},{"description","Target realm (default: brahman)"}}},
+            {"source_session",{{"type","string"},{"description","Tag all imported memories with this session ID"}}},
+            {"confidence",{{"type","number"},{"description","Confidence for imported memories (default: 0.8)"}}}
         }}}}
     });
     handlers_["import_soul"] = [this](const json& p) { return tool_import_soul(p); };
