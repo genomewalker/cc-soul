@@ -98,5 +98,6 @@
     ToolResult tool_recall_keyword(const json& params);
     ToolResult tool_hybrid_recall(const json& params);
     ToolResult tool_smart_recall(const json& params);
+    ToolResult tool_recall_session(const json& params);
     ToolResult tool_full_resonate(const json& params);
     ToolResult tool_route_stats(const json&);

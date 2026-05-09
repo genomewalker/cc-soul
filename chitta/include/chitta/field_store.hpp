@@ -12,6 +12,13 @@
 #include <nlohmann/json.hpp>
 #include "chitta_field.h"
 
+// Session-level recall hit (from cf_recall_session)
+struct CfSessionHit {
+    float score;
+    uint32_t chunk_count;
+    float max_chunk_score;
+};
+
 // Explicit forward declarations for functions added in a later chitta-field version.
 // These ensure the symbols are visible even if chitta_field.h was included earlier
 // from a different path that predates these additions.
@@ -47,6 +54,12 @@ char* cf_hopfield_stats(const struct CfHandle* h);
 int cf_adapt_vigilance(struct CfHandle* h, float avg_error);
 int cf_chain_head(const struct CfHandle* h, uint8_t* out);
 void cf_free_string(char* s);
+int cf_set_source_session(struct CfHandle* h, uint64_t memory_id, const char* session_id);
+int cf_recall_session(struct CfHandle* h,
+    const float* query_embedding, size_t embedding_len,
+    const char* query_text, const char* realm, size_t k,
+    CfSessionHit* hits_buf, size_t hits_cap, size_t* hits_written,
+    char** session_ids_json_out);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -534,6 +547,63 @@ public:
         int r = cf_recall_keyword(handle_, query.c_str(), k, buf, MAX_HITS, &written);
         if (r != 0) throw std::runtime_error(last_error());
         return hits_to_results(buf, written);
+    }
+
+    struct SessionHit {
+        std::string session_id;
+        float score;
+        uint32_t chunk_count;
+        float max_chunk_score;
+        std::string best_evidence;
+    };
+
+    void set_source_session(uint64_t memory_id, const std::string& session_id) {
+        cf_set_source_session(handle_, memory_id, session_id.c_str());
+    }
+
+    std::vector<SessionHit> recall_session(
+            const std::vector<float>& embedding,
+            const std::string& query,
+            size_t k,
+            const std::string& realm = "") {
+        constexpr size_t MAX_SESS = 64;
+        CfSessionHit buf[MAX_SESS];
+        size_t written = 0;
+        char* combined_json = nullptr;
+        const float* emb_ptr = embedding.empty() ? nullptr : embedding.data();
+        size_t emb_len = embedding.size();
+        int r = cf_recall_session(
+            handle_,
+            emb_ptr, emb_len,
+            query.empty() ? nullptr : query.c_str(),
+            realm.empty() ? nullptr : realm.c_str(),
+            k, buf, MAX_SESS, &written, &combined_json);
+        if (r != 0) {
+            if (combined_json) cf_free_string(combined_json);
+            throw std::runtime_error(last_error());
+        }
+        // Parse session IDs and evidence from returned JSON
+        std::vector<std::string> ids, evidence;
+        if (combined_json) {
+            try {
+                auto parsed = nlohmann::json::parse(combined_json);
+                for (auto& s : parsed.value("session_ids", nlohmann::json::array()))
+                    ids.push_back(s.get<std::string>());
+                for (auto& s : parsed.value("evidence", nlohmann::json::array()))
+                    evidence.push_back(s.get<std::string>());
+            } catch (...) {}
+            cf_free_string(combined_json);
+        }
+        std::vector<SessionHit> results;
+        results.reserve(written);
+        for (size_t i = 0; i < written; ++i) {
+            results.push_back({
+                i < ids.size() ? ids[i] : "",
+                buf[i].score, buf[i].chunk_count, buf[i].max_chunk_score,
+                i < evidence.size() ? evidence[i] : ""
+            });
+        }
+        return results;
     }
 
     /// Add an SPO triplet fact.

@@ -328,6 +328,15 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
 
+    tools_.push_back({{"name","recall_session"},{"description","Session-level recall: groups chunk evidence by source session using noisy-OR aggregation. Returns ranked sessions with best evidence."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",{{"type","string"},{"description","Natural language query"}}},
+            {"limit",{{"type","integer"},{"description","Max sessions to return (default 10)"}}},
+            {"realm",{{"type","string"},{"description","Realm filter (optional)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["recall_session"] = [this](const json& p) { return tool_recall_session(p); };
+
     tools_.push_back({{"name","structured_recall"},{"description","Three-lens recall: facts, context, and temporal agents merged for high-fidelity retrieval"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
