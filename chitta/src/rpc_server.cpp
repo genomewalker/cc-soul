@@ -739,6 +739,31 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"realm", "Filter by realm", false, nullptr},
       {"mode", "Search mode: auto|fast|deep", false, "auto"},
       {"explain", "Include intent classification and score breakdown", false, "false"}}},
+
+    // Contradiction detection
+    {"detect_contradictions", "Detect contradictions for a stored memory against realm peers",
+     {{"memory_id", "Memory ID to check", true, nullptr},
+      {"realm", "Realm to scan", false, nullptr}}},
+
+    {"scan_contradictions", "Background scan: find contradiction candidates across all memories in a realm",
+     {{"realm", "Realm to scan", false, nullptr},
+      {"limit", "Max candidates to return", false, "50"}}},
+
+    {"resolve_contradiction", "Resolve a contradiction: declare winner supersedes loser",
+     {{"winner_id", "Memory ID that is correct", true, nullptr},
+      {"loser_id", "Memory ID to demote", true, nullptr},
+      {"reason", "Explanation for the resolution", false, "manual resolution"}}},
+
+    {"why_active", "Explain why a memory is active: status, epistemic source, confirmations, contradictions",
+     {{"id", "Memory ID", true, nullptr}}},
+
+    {"what_superseded", "Show the full supersession chain for a memory",
+     {{"id", "Memory ID", true, nullptr}}},
+
+    {"show_conflicts", "Semantic search + show contradiction pairs for matching memories",
+     {{"query", "Search query", true, nullptr},
+      {"limit", "Max results", false, "20"},
+      {"realm", "Filter by realm", false, nullptr}}},
 };
 
 // Build set of known tools from specs

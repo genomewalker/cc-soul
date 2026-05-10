@@ -150,4 +150,106 @@ ToolResult FieldRpcHandler::tool_show_conflicts(const json& params) {
     return ToolResult::ok(ss.str(), {{"groups", groups}, {"conflict_count", conflict_count}});
 }
 
+ToolResult FieldRpcHandler::tool_detect_contradictions(const json& params) {
+    // memory_id can arrive as string (CLI) or integer (MCP)
+    uint64_t memory_id = 0;
+    if (params.contains("memory_id")) {
+        auto& v = params["memory_id"];
+        if (v.is_string()) {
+            try { memory_id = std::stoull(v.get<std::string>()); } catch (...) {}
+        } else if (v.is_number_unsigned()) {
+            memory_id = v.get<uint64_t>();
+        } else if (v.is_number_integer()) {
+            memory_id = static_cast<uint64_t>(v.get<int64_t>());
+        }
+    }
+    if (memory_id == 0) return ToolResult::error("memory_id is required");
+    std::string realm = params.value("realm", "");
+
+    std::string candidates_json = field_store_->detect_contradictions(memory_id, realm);
+    auto candidates = json::parse(candidates_json, nullptr, false);
+    if (candidates.is_discarded() || !candidates.is_array() || candidates.empty()) {
+        return ToolResult::ok("No contradictions detected.", {{"candidates", json::array()}});
+    }
+
+    std::ostringstream ss;
+    ss << "Detected " << candidates.size() << " contradiction(s) for memory #" << memory_id << ":\n";
+    for (auto& c : candidates) {
+        ss << "  score=" << c.value("score", 0.0f)
+           << "  #" << c.value("memory_a", 0UL)
+           << " vs #" << c.value("memory_b", 0UL)
+           << "  reason: " << c.value("reason", "") << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"candidates", candidates}});
+}
+
+ToolResult FieldRpcHandler::tool_scan_contradictions(const json& params) {
+    std::string realm = params.value("realm", "");
+    uint32_t limit = static_cast<uint32_t>(params.value("limit", 50));
+
+    std::string candidates_json = field_store_->scan_contradictions(realm, limit);
+    auto candidates = json::parse(candidates_json, nullptr, false);
+    if (candidates.is_discarded()) candidates = json::array();
+
+    std::ostringstream ss;
+    ss << "Scanned realm '" << realm << "': found " << candidates.size() << " contradiction candidate(s).\n";
+    for (auto& c : candidates) {
+        ss << "  [" << c.value("score", 0.0f) << "] #" << c.value("memory_a", 0UL)
+           << " vs #" << c.value("memory_b", 0UL)
+           << " — " << c.value("reason", "") << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"candidates", candidates}, {"count", candidates.size()}});
+}
+
+ToolResult FieldRpcHandler::tool_resolve_contradiction(const json& params) {
+    std::string winner_str = params.value("winner_id", "");
+    std::string loser_str  = params.value("loser_id", "");
+    if (winner_str.empty() || loser_str.empty())
+        return ToolResult::error("winner_id and loser_id are required");
+
+    uint64_t winner_id = std::stoull(winner_str);
+    uint64_t loser_id  = std::stoull(loser_str);
+    std::string reason = params.value("reason", "manual resolution");
+
+    std::string ops_json = field_store_->resolve_contradiction(winner_id, loser_id, reason);
+    auto ops = json::parse(ops_json, nullptr, false);
+    if (ops.is_discarded() || ops.empty()) return ToolResult::error("resolve failed");
+
+    // Apply triplets
+    if (ops.contains("add_triplets") && ops["add_triplets"].is_array()) {
+        for (auto& t : ops["add_triplets"]) {
+            std::string subj = t[0].get<std::string>();
+            std::string pred = t[1].get<std::string>();
+            std::string obj  = t[2].get<std::string>();
+            field_store_->add_triplet(subj, pred, obj);
+        }
+    }
+
+    // Demote loser confidence (delta toward ~0.05)
+    if (ops.contains("demote_memory_id")) {
+        uint64_t demote_id = ops["demote_memory_id"].get<uint64_t>();
+        field_store_->update_confidence(demote_id, -0.90f);
+    }
+
+    // Store CORRECTION memory
+    if (ops.contains("correction_content")) {
+        std::string correction = ops["correction_content"].get<std::string>();
+        // Get realm from winner metadata
+        std::string realm;
+        std::string meta_json = field_store_->get_memory_metadata(winner_id);
+        if (!meta_json.empty()) {
+            auto meta = json::parse(meta_json, nullptr, false);
+            if (!meta.is_discarded()) realm = meta.value("realm", "");
+        }
+        auto emb = embed_query(correction);
+        if (!emb.empty()) {
+            field_store_->remember("correction", realm, correction, emb, 0.95f, 0.01f);
+        }
+    }
+
+    std::ostringstream ss;
+    ss << "Resolved: #" << winner_id << " supersedes #" << loser_id << ". Reason: " << reason;
+    return ToolResult::ok(ss.str(), {{"ops", ops}});
+}
+
 } // namespace chitta

@@ -190,6 +190,12 @@ int cf_add_triplet_with_source(struct CfHandle* h,
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
 int64_t cf_trim_realm_names(struct CfHandle* h);
+
+// Contradiction detection FFI
+char* cf_detect_contradictions(const struct CfHandle* h, uint64_t memory_id, const char* realm);
+char* cf_scan_contradictions(const struct CfHandle* h, const char* realm, uint32_t limit);
+char* cf_resolve_contradiction(const struct CfHandle* h, uint64_t winner_id, uint64_t loser_id, const char* reason);
+
 int cf_save_spectral_snapshot(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
 int cf_spectral_drift(struct CfHandle* h,
@@ -792,6 +798,37 @@ public:
         int r = cf_upsert_code_file(handle_, path.c_str(), project.c_str(), mtime, &id);
         if (r != 0) throw std::runtime_error(last_error());
         return id;
+    }
+
+    // ── Contradiction detection wrappers ─────────────────────────────────────
+
+    /// Detect contradictions for a just-stored memory against realm peers.
+    /// Returns raw JSON string (caller must free with cf_free_string) or "" on error.
+    std::string detect_contradictions(uint64_t memory_id, const std::string& realm) {
+        char* raw = cf_detect_contradictions(handle_, memory_id, realm.c_str());
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    /// Background scan of entire realm for contradictions.
+    std::string scan_contradictions(const std::string& realm, uint32_t limit = 100) {
+        char* raw = cf_scan_contradictions(handle_, realm.c_str(), limit);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    /// Resolve a contradiction pair. Returns ResolutionOps JSON for caller to apply.
+    std::string resolve_contradiction(uint64_t winner_id, uint64_t loser_id,
+                                      const std::string& reason = "manual") {
+        char* raw = cf_resolve_contradiction(handle_, winner_id, loser_id, reason.c_str());
+        if (!raw) return "{}";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
     }
 
     /// Upsert a code file with content hash and git provenance.

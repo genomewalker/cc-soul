@@ -427,6 +427,31 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["show_conflicts"] = [this](const json& p) { return tool_show_conflicts(p); };
 
+    tools_.push_back({{"name","detect_contradictions"},{"description","Detect contradictions for a stored memory against realm peers"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"memory_id",{{"type","string"},{"description","Memory ID to check"}}},
+            {"realm",{{"type","string"},{"description","Realm to scan (default global)"}}}
+        }},{"required",{"memory_id"}}}}
+    });
+    handlers_["detect_contradictions"] = [this](const json& p) { return tool_detect_contradictions(p); };
+
+    tools_.push_back({{"name","scan_contradictions"},{"description","Background scan: find contradiction candidates across all memories in a realm"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"realm",{{"type","string"},{"description","Realm to scan"}}},
+            {"limit",{{"type","integer"},{"description","Max candidates to return (default 50)"}}}
+        }}}}
+    });
+    handlers_["scan_contradictions"] = [this](const json& p) { return tool_scan_contradictions(p); };
+
+    tools_.push_back({{"name","resolve_contradiction"},{"description","Resolve a contradiction: declare winner supersedes loser, store CORRECTION memory"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"winner_id",{{"type","string"},{"description","Memory ID that is correct"}}},
+            {"loser_id",{{"type","string"},{"description","Memory ID to demote"}}},
+            {"reason",{{"type","string"},{"description","Explanation for the resolution"}}}
+        }},{"required",{"winner_id","loser_id"}}}}
+    });
+    handlers_["resolve_contradiction"] = [this](const json& p) { return tool_resolve_contradiction(p); };
+
     // Operator controls
     tools_.push_back({{"name","approve_memory"},{"description","Approve a Proposed memory, promoting it to Active"},
         {"inputSchema",{{"type","object"},{"properties",{
