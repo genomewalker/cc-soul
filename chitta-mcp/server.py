@@ -193,6 +193,8 @@ ADVANCED_TOOLS = {
     "enroll_wisdom_lineage", "transition_wisdom_lineage", "close_rederive",
     "query_wisdom_lineages", "get_wisdom_lineage", "wisdom_lineage_stats",
     "tick_lineage_staleness", "lineage_expiry_check",
+    # Contradiction detection (legacy query tools)
+    "why_active", "what_superseded", "show_conflicts",
 }
 
 # Combined set of tools to hide from listing (but still callable)

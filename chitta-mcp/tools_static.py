@@ -4057,6 +4057,46 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    # ── Contradiction detection ───────────────────────────────────────────────
+    Tool(
+        name="detect_contradictions",
+        description="Detect contradictions for a stored memory against other memories in its realm. "
+                    "Returns candidates with score >= 0.65 scored on subject/predicate overlap and polarity conflict.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "ID of the memory to check"},
+                "realm":     {"type": "string", "description": "Realm to scan (defaults to memory's own realm)"},
+            },
+            "required": ["memory_id"],
+        },
+    ),
+    Tool(
+        name="scan_contradictions",
+        description="Background scan: find all contradiction candidates across all memories in a realm. "
+                    "Useful for auditing; groups by claim-key and scores polarity conflicts.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "realm": {"type": "string", "description": "Realm to scan"},
+                "limit": {"type": "integer", "description": "Max candidates to return (default 50)"},
+            },
+        },
+    ),
+    Tool(
+        name="resolve_contradiction",
+        description="Resolve a contradiction: declare one memory the winner, demote the loser, "
+                    "add supersedes triplet, and store a CORRECTION memory.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "winner_id": {"type": "string", "description": "ID of the correct memory"},
+                "loser_id":  {"type": "string", "description": "ID of the memory to supersede"},
+                "reason":    {"type": "string", "description": "Explanation for the resolution"},
+            },
+            "required": ["winner_id", "loser_id"],
+        },
+    ),
 ]
 
 COMPOSITE_TOOLS = [

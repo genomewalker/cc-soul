@@ -74,10 +74,22 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         } catch (...) {}
     }
 
+    // Post-store contradiction detection (fast path: no embedding needed)
+    json contradiction_hits = json::array();
+    if (id > 0) {
+        try {
+            std::string cjson = field_store_->detect_contradictions(id, realm);
+            auto parsed = json::parse(cjson, nullptr, false);
+            if (!parsed.is_discarded() && parsed.is_array() && !parsed.empty())
+                contradiction_hits = std::move(parsed);
+        } catch (...) {}
+    }
+
     std::string id_str = std::to_string(id);
-    return ToolResult::ok("Stored memory #" + id_str, {
-        {"id", id_str}, {"type", kind}, {"realm", realm}
-    });
+    json result_data = {{"id", id_str}, {"type", kind}, {"realm", realm}};
+    if (!contradiction_hits.empty())
+        result_data["contradictions"] = contradiction_hits;
+    return ToolResult::ok("Stored memory #" + id_str, result_data);
 }
 
 ToolResult FieldRpcHandler::tool_recall(const json& params) {
