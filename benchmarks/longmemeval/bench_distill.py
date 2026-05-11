@@ -94,8 +94,8 @@ def _format_turns(session_id: str, turns: list) -> str:
         if not content:
             continue
         # Truncate very long turns to keep within context
-        if len(content) > 3000:
-            content = content[:3000] + "…"
+        if len(content) > 1500:
+            content = content[:1500] + "…"
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
@@ -121,7 +121,7 @@ def distil_session(endpoint: str, model: str, session_id: str, turns: list) -> s
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urlopen(req, timeout=120) as r:
+    with urlopen(req, timeout=300) as r:
         resp = json.loads(r.read())
     return resp["choices"][0]["message"]["content"]
 
@@ -163,7 +163,7 @@ def ingest_session(session_id: str, turns: list, realm: str,
     if not lines:
         return 0
 
-    content = "\n".join(lines)
+    content = f"{SESSION_PREFIX}{session_id}\n" + "\n".join(lines)
     chitta_run([
         "import_soul",
         "--content", content,

@@ -626,7 +626,7 @@ ToolResult FieldRpcHandler::tool_import_soul(const json& params) {
         }
         if (!full.empty()) {
             float conf = params.value("confidence", 0.8f);
-            auto emb   = embed_text(full);
+            auto emb   = embed_ssl_aware(full);
             uint64_t id = field_store_->remember("wisdom", realm, full, emb, conf, 0.001f);
             if (id > 0 && !source_session.empty())
                 field_store_->set_source_session(id, source_session);
