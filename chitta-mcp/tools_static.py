@@ -91,6 +91,10 @@ TOOLS = [
                         "include_global": {
                                 "description": "Include global memories (default: True)",
                                 "type": "boolean"
+                        },
+                        "expand": {
+                                "description": "Enable SSL query expansion with NL variants for better recall of SSL-format memories (default: true)",
+                                "type": "boolean"
                         }
                 },
                 "required": [
