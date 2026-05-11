@@ -1,4 +1,5 @@
 #include "../include/chitta/native_distiller.hpp"
+#include "../include/chitta/ssl_gloss.hpp"
 #include "../include/chitta/ssl_prompt.hpp"
 #include <sstream>
 #include <cmath>
@@ -87,7 +88,11 @@ void NativeDistiller::precompute_dedup(PreparedDistillation& prep) {
     for (const auto& learning : prep.ssl_result.learnings) {
         LearningPrep lp;
         std::string full_text = learning.title + "\n" + learning.content;
-        if (embedder_) lp.embedding = embedder_(full_text);
+        if (embedder_) {
+            auto gloss = chitta::ssl::gloss_ssl_content(full_text);
+            auto retrieval_text = gloss.empty() ? full_text : full_text + "\n" + gloss;
+            lp.embedding = embedder_(retrieval_text);
+        }
         if (!lp.embedding.empty() && config_.dedup_threshold > 0.0f) {
             auto hits = field_store_->recall(lp.embedding, 5, prep.realm);
             for (const auto& hit : hits) {

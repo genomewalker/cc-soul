@@ -1,4 +1,5 @@
 #include "../include/chitta/ingester.hpp"
+#include "../include/chitta/ssl_gloss.hpp"
 #include <array>
 #include <cstdio>
 #include <sstream>
@@ -269,7 +270,11 @@ void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& 
         std::string full_text = learning.title + "\n" + learning.content;
 
         std::vector<float> embedding;
-        if (embedder_) embedding = embedder_(full_text);
+        if (embedder_) {
+            auto gloss = chitta::ssl::gloss_ssl_content(full_text);
+            auto retrieval_text = gloss.empty() ? full_text : full_text + "\n" + gloss;
+            embedding = embedder_(retrieval_text);
+        }
 
         // Dedup check
         bool deduped = false;

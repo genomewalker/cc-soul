@@ -1,6 +1,7 @@
 #pragma once
 // FieldRpcHandler: RPC handler backed by FieldStore + VakYantra.
 
+#include "../ssl_gloss.hpp"
 #include "../field_store.hpp"
 #include "../vak.hpp"
 #include "../code_intel.hpp"
@@ -341,6 +342,40 @@ private:
             arr.push_back(std::move(entry));
         }
         return arr;
+    }
+
+    // True when query likely contains entity tokens (caps, hyphens, domain keywords, length>15).
+    // Used to gate SSL query expansion — short/generic queries don't benefit.
+    static bool query_has_entities(const std::string& q) {
+        if (q.size() < 8) return false;
+        static const std::vector<std::string> domain_kw = {
+            "cluster", "node", "ssh", "kerberos", "slurm", "cmake", "build",
+            "compile", "chaos", "kerberos", "bge", "embed", "chitta",
+        };
+        std::string ql = q;
+        std::transform(ql.begin(), ql.end(), ql.begin(), ::tolower);
+        for (auto& kw : domain_kw)
+            if (ql.find(kw) != std::string::npos) return true;
+        // contains uppercase letter (entity name) or hyphen (SSL token)
+        for (char c : q)
+            if (std::isupper(c) || c == '-') return true;
+        return q.size() > 15;
+    }
+
+    // Embed content with NL gloss baked in (for SSL memories).
+    // Keeps canonical content unchanged; gloss only affects the embedding vector.
+    std::vector<float> embed_ssl_aware(const std::string& content) {
+        static const std::string arrow = "\xe2\x86\x92"; // UTF-8 →
+        bool is_ssl = content.find(arrow) != std::string::npos
+                   || content.find("[SOLUTION]")    != std::string::npos
+                   || content.find("[OPERATIONAL]") != std::string::npos
+                   || content.find("[DECISION]")    != std::string::npos
+                   || content.find("[PREFERENCE]")  != std::string::npos
+                   || content.find("[GOTCHA]")      != std::string::npos
+                   || content.find("[PATTERN]")     != std::string::npos;
+        if (!is_ssl) return embed_text(content);
+        auto gloss = chitta::ssl::gloss_ssl_content(content);
+        return embed_text(gloss.empty() ? content : content + "\n" + gloss);
     }
 
     // Reciprocal Rank Fusion — scale-invariant across semantic (cosine) and BM25 scores.

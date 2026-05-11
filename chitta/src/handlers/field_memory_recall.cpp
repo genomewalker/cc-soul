@@ -34,7 +34,7 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         if (auto act = classify_speech_act(content)) kind = *act;
     }
 
-    auto embedding = embed_text(content);
+    auto embedding = embed_ssl_aware(content);
 
     uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
 
@@ -99,13 +99,60 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     size_t limit      = static_cast<size_t>(params.value("limit", 10));
     std::string realm = params.value("realm", "");
     std::string tag   = params.value("tag", "");
-
-    auto embedding = embed_query(query);
-    if (embedding.empty()) return ToolResult::error("Failed to embed query");
+    bool expand       = params.value("expand", true);
 
     // Fetch more than needed so tag filtering has candidates to work with
     size_t fetch_limit = tag.empty() ? limit : limit * 8;
-    auto hits = field_store_->recall(embedding, fetch_limit, realm);
+
+    // Multi-lane RRF: original query (2×, weighted) + SSL-shaped variants + BM25
+    // Works directly on FieldRecallHit to preserve Hebbian/temporal scoring metadata.
+    std::vector<FieldRecallHit> hits;
+    if (expand && query_has_entities(query)) {
+        std::vector<std::string> forms = {query, query}; // original 2× = boosted weight
+        for (auto& v : chitta::ssl::ssl_query_variants(query)) forms.push_back(v);
+
+        // RRF over FieldRecallHit lanes — preserves full scoring metadata
+        std::unordered_map<uint64_t, float>         rrf_scores;
+        std::unordered_map<uint64_t, FieldRecallHit> best_hit;
+        const float kRRF = 60.0f;
+
+        auto rrf_lane = [&](const std::vector<FieldRecallHit>& lane) {
+            int rank = 1;
+            for (const auto& h : lane) {
+                rrf_scores[h.memory_id] += 1.0f / (kRRF + rank);
+                if (best_hit.find(h.memory_id) == best_hit.end())
+                    best_hit[h.memory_id] = h;
+                ++rank;
+            }
+        };
+
+        for (const auto& f : forms) {
+            auto emb = embed_query(f);
+            if (emb.empty()) continue;
+            rrf_lane(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm));
+        }
+        // BM25 lane
+        rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20)));
+
+        // Collect sorted by RRF score, keep original hit metadata
+        std::vector<std::pair<float, uint64_t>> ranked;
+        ranked.reserve(rrf_scores.size());
+        for (auto& [id, score] : rrf_scores) ranked.emplace_back(score, id);
+        std::sort(ranked.begin(), ranked.end(), std::greater<>());
+
+        for (auto& [score, id] : ranked) {
+            if (hits.size() >= fetch_limit) break;
+            auto& h = best_hit[id];
+            if (!h.content.empty()) {
+                h.score = score; // overwrite with RRF rank score for downstream sort
+                hits.push_back(std::move(h));
+            }
+        }
+    } else {
+        auto embedding = embed_query(query);
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
+        hits = field_store_->recall(embedding, fetch_limit, realm);
+    }
 
     // Filter orphaned HNSW entries (deleted payloads with lingering vectors)
     hits.erase(
