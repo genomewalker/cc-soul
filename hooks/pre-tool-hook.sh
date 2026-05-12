@@ -191,6 +191,17 @@ case "$MATCHER" in
         command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
         [[ -z "$command" ]] && exit 0
 
+        # Block running temp Python/shell patch scripts.
+        if echo "$command" | grep -qE '(python3?|bash)\s+(/tmp/|/maps/[^[:space:]]*/scratch/)[^[:space:]]+\.(py|sh)'; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Running a temp patch script is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) directly — no script needed."}}'
+            exit 0
+        fi
+        if echo "$command" | grep -qE "python3?\s+-c\s+['\"]" && \
+           echo "$command" | grep -qE "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\()"; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Inline Python file-write is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) directly."}}'
+            exit 0
+        fi
+
         # Stage 1a: Safety blocks
         safety_result=$(safety_check "$command")
         safety_rc=$?
@@ -434,6 +445,21 @@ case "$MATCHER" in
 
     Write)
         FP_BIN="${HOME}/.claude/bin/fp"
+        # Block Python/shell patch scripts written to temp/scratch locations.
+        _wp_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+        _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)
+        if [[ "$_wp_path" =~ \.(py|sh)$ ]]; then
+            _is_temp=0
+            case "$_wp_path" in
+                /tmp/*|*/scratch/*|*/tmp/*) _is_temp=1 ;;
+                *patch*|*fix_*|*edit_*|*_patch.*|*_fix.*|*_edit.*) _is_temp=1 ;;
+            esac
+            if [[ "$_is_temp" == "1" ]] && echo "$_wp_content" | grep -qE \
+                "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\(|\.write\()"; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Writing a patch script to disk is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) or symbol_patch directly — one call, no temp file needed."}}'
+                exit 0
+            fi
+        fi
         [[ ! -x "$FP_BIN" ]] && exit 0
         # Block Write on existing files ≥50 lines — suggest file_patch instead.
         echo "$STDIN_DATA" | "$FP_BIN" --write-hook
