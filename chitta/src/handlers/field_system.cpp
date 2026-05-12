@@ -113,15 +113,26 @@ ToolResult FieldRpcHandler::tool_health_check(const json& params) {
        << "  yantra   : " << (yantra_ ? "loaded" : "unavailable") << "\n"
        << "  backend  : chitta-field\n";
 
+    if (!details) {
+        // Fast path: zero field_store calls — memory_count()/symbol_count() hold
+        // states.read()/payloads.read() for O(N) iterations that contend with
+        // encode_memory's states.write(), causing 96-266s health_check delays.
+        json out = {
+            {"status",           "ok"},
+            {"backend",          "chitta-field"},
+            {"yantra",           yantra_ ? "loaded" : "unavailable"},
+            {"software_version", CHITTA_VERSION},
+            {"protocol_major",   CHITTA_PROTOCOL_VERSION_MAJOR},
+            {"protocol_minor",   CHITTA_PROTOCOL_VERSION_MINOR},
+            {"pid",              static_cast<int>(getpid())},
+        };
+        ss << "  (use details=true for counts)\n";
+        return ToolResult::ok(ss.str(), out);
+    }
+
+    // Details path: O(N) scans — only when explicitly requested.
     size_t mem_count = field_store_->memory_count();
     size_t sym_count = field_store_->symbol_count();
-
-    json stats_j;
-    try {
-        stats_j = json::parse(get_memory_stats_cached(field_store_));
-    } catch (...) {
-        stats_j = json::object();
-    }
 
     ss << "  memories : " << mem_count << "\n"
        << "  symbols  : " << sym_count << "\n";
@@ -137,13 +148,16 @@ ToolResult FieldRpcHandler::tool_health_check(const json& params) {
         {"memory_count",     mem_count},
         {"symbol_count",     sym_count},
     };
+
+    json stats_j;
+    try {
+        stats_j = json::parse(get_memory_stats_cached(field_store_));
+    } catch (...) {
+        stats_j = json::object();
+    }
     if (!stats_j.is_null() && stats_j.contains("count_by_kind")) {
         out["count_by_kind"]  = stats_j["count_by_kind"];
         out["avg_confidence"] = stats_j.value("avg_confidence", 0.0f);
-    }
-
-    if (!details) {
-        return ToolResult::ok(ss.str(), out);
     }
 
     std::string chain = field_store_->chain_head();
