@@ -699,10 +699,7 @@ bool Subconscious::time_for_sleep_consolidation() const {
 void Subconscious::run_demotion_pass() {
     stats_.last_demotion_at = now_ms();
     try {
-        auto [demoted, deleted] = [&] {
-            auto lk = write_lock();
-            return field_store_->run_demotion(now_ms());
-        }();
+        auto [demoted, deleted] = field_store_->run_demotion(now_ms());
 
         stats_.demotion_runs++;
         stats_.field_demoted += demoted;
@@ -746,7 +743,7 @@ void Subconscious::run_learning_cycle() {
         // Move 3: Auto-resolve epistemic debts with sufficient evidence
         {
             char* raw;
-            { auto lk = write_lock(); raw = cf_auto_resolve_debts(field_store_->handle(), 0.70f); }
+            raw = cf_auto_resolve_debts(field_store_->handle(), 0.70f);
             if (raw) {
                 auto result = nlohmann::json::parse(raw, nullptr, false);
                 cf_free_string(raw);
@@ -785,7 +782,7 @@ void Subconscious::run_learning_cycle() {
         // Layer 7: Auto-close stale open interventions (> 30 min)
         {
             int closed;
-            { auto lk = write_lock(); closed = cf_close_stale_interventions(field_store_->handle(), 1800000LL); }
+            closed = cf_close_stale_interventions(field_store_->handle(), 1800000LL);
             if (closed > 0) {
                 stats_.interventions_auto_closed += static_cast<size_t>(closed);
             }
@@ -794,7 +791,7 @@ void Subconscious::run_learning_cycle() {
         // Move: Auto-complete tasks whose all criteria are met
         {
             char* raw;
-            { auto lk = write_lock(); raw = cf_auto_complete_tasks(field_store_->handle()); }
+            raw = cf_auto_complete_tasks(field_store_->handle());
             if (raw) {
                 auto result = nlohmann::json::parse(raw, nullptr, false);
                 cf_free_string(raw);
@@ -808,7 +805,7 @@ void Subconscious::run_learning_cycle() {
         // Layer 9: Wisdom Homeostasis — staleness tick + TTL expiry demotions
         {
             char* tick_raw;
-            { auto lk = write_lock(); tick_raw = cf_tick_lineage_staleness(field_store_->handle()); }
+            tick_raw = cf_tick_lineage_staleness(field_store_->handle());
             if (tick_raw) {
                 auto result = nlohmann::json::parse(tick_raw, nullptr, false);
                 cf_free_string(tick_raw);
@@ -821,7 +818,7 @@ void Subconscious::run_learning_cycle() {
             }
 
             char* expiry_raw;
-            { auto lk = write_lock(); expiry_raw = cf_lineage_expiry_check(field_store_->handle()); }
+            expiry_raw = cf_lineage_expiry_check(field_store_->handle());
             if (expiry_raw) {
                 auto result = nlohmann::json::parse(expiry_raw, nullptr, false);
                 cf_free_string(expiry_raw);
@@ -829,9 +826,9 @@ void Subconscious::run_learning_cycle() {
                     if (result.contains("expired_ids") && result["expired_ids"].is_array()) {
                         for (auto& id_val : result["expired_ids"]) {
                             auto lid = id_val.get<uint64_t>();
-                            { auto lk = write_lock(); cf_transition_wisdom_lineage(
+                            cf_transition_wisdom_lineage(
                                 field_store_->handle(), lid, 3 /*Demoted*/,
-                                "rederive_ttl_expired", 0); }
+                                "rederive_ttl_expired", 0);
                             stats_.lineages_demoted_ttl++;
                         }
                     }
@@ -863,7 +860,7 @@ void Subconscious::run_code_intel_staleness() {
                 if (h.confidence < config_.code_intel_min_confidence) {
                     float delta = config_.code_intel_target_confidence - h.confidence;
                     if (delta > 0.0f) {
-                        { auto lk = write_lock(); field_store_->strengthen(h.memory_id, delta); }
+                        field_store_->strengthen(h.memory_id, delta);
                         restored++;
                     }
                 }
@@ -924,7 +921,7 @@ void Subconscious::run_correction_promotion() {
             // Promote the first entry: move it to brahman
             auto it = realm_map.begin();
             bool promoted_now;
-            { auto lk = write_lock(); promoted_now = field_store_->set_realm(it->second, "brahman"); }
+            promoted_now = field_store_->set_realm(it->second, "brahman");
             if (promoted_now) {
                 promoted++;
                 std::cerr << "[subconscious] Correction promoted to brahman (id="
