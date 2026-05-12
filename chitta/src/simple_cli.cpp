@@ -74,19 +74,13 @@ void daemon_signal_handler(int sig) {
 }
 
 int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
-               const std::string& socket_path, const std::string& mind_path,
+               SocketServer& server, const std::string& socket_path, const std::string& mind_path,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
                int http_port, const std::string& http_static_dir) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
-
-    // Clean up stale files from crashed daemon
-    if (!cleanup_stale_daemon(mind_path)) {
-        std::cerr << "[daemon] Another daemon is running (PID alive)\n";
-        return 1;
-    }
 
     DaemonLock lock;
     if (!acquire_lock(mind_path, lock)) {
@@ -117,12 +111,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         if (pf) pf << getpid() << "\n";
     }
 
-    SocketServer server(socket_path);
-    if (!server.start()) {
-        std::cerr << "[daemon] Failed to start socket server\n";
-        release_lock(lock);
-        return 1;
-    }
+    // server already bound and started (early socket in main)
 
     FieldRpcHandler handler(&field_store, yantra);
     handler.set_distill_model(distill_config.model);
@@ -941,12 +930,54 @@ int main(int argc, char* argv[]) {
     // Open chitta-field store — the sole storage backend
     std::string field_path = mind_path + "/chitta-field";
     std::unique_ptr<FieldStore> field_store_ptr;
-    try {
-        field_store_ptr = std::make_unique<FieldStore>(field_path, field_path);
-    } catch (const std::exception& e) {
-        std::cerr << "[daemon] Failed to open chitta-field store at " << field_path << ": " << e.what() << "\n";
+
+    // For daemon: clean up stale files then bind socket early so clients get
+    // "warming_up" instead of "connection refused" during the 3+ minute snapshot load.
+    if (command == "daemon") {
+        if (!cleanup_stale_daemon(mind_path)) {
+            std::cerr << "[daemon] Another daemon is running\n";
+            return 1;
+        }
+    }
+    std::unique_ptr<SocketServer> early_server;
+    if (command == "daemon") {
+        early_server = std::make_unique<SocketServer>(sock_path);
+        if (!early_server->start()) {
+            std::cerr << "[daemon] Another daemon is running (socket in use)\n";
+            return 1;
+        }
+        std::cerr << "[socket_server] Listening (warming up) on " << sock_path << "\n";
+    }
+
+    static const std::string warming_resp =
+        "{\"id\":null,\"result\":{\"text\":\"daemon loading, please retry\",\"structured\":{\"status\":\"warming_up\"}},\"error\":null}\n";
+    std::atomic<bool> load_done{false};
+    std::exception_ptr load_ex;
+    std::thread loader([&]() {
+        try {
+            field_store_ptr = std::make_unique<FieldStore>(field_path, field_path);
+        } catch (...) {
+            load_ex = std::current_exception();
+        }
+        load_done.store(true, std::memory_order_release);
+    });
+    while (!load_done.load(std::memory_order_acquire)) {
+        if (early_server) {
+            auto reqs = early_server->poll(100);
+            for (auto& r : reqs) early_server->respond(r.client_fd, warming_resp);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    loader.join();
+    if (load_ex) {
+        try { std::rethrow_exception(load_ex); }
+        catch (const std::exception& e) {
+            std::cerr << "[daemon] Failed to open chitta-field store at " << field_path << ": " << e.what() << "\n";
+        }
         return 1;
     }
+
     FieldStore& field_store = *field_store_ptr;
     VakYantra* yantra_raw = nullptr;
 #ifdef CHITTA_WITH_ONNX
@@ -956,7 +987,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
+        result = cmd_daemon(field_store, yantra_raw, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {

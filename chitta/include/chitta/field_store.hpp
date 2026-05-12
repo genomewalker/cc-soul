@@ -524,6 +524,12 @@ public:
     size_t memory_count() const {
         return cf_memory_count(handle_);
     }
+    size_t raw_memory_count() const {
+        return cf_raw_memory_count(handle_);
+    }
+    size_t raw_pending_count() const {
+        return cf_pending_count(handle_);
+    }
 
     /// Flush manifest to disk.
     void flush() {

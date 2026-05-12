@@ -147,6 +147,7 @@ struct SubconsciousStats {
     std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> last_cls_replay_at{0};
     std::atomic<int64_t> last_sleep_consolidation_at{0};
+    std::atomic<int64_t> last_compact_wal_at{0};
     std::atomic<int64_t> last_demotion_at{0};
     std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
@@ -292,6 +293,7 @@ private:
     void run_theme_maintenance();
     bool time_for_theme_maintenance() const;
     void run_sleep_consolidation();
+    bool time_for_wal_compact() const;
     bool time_for_sleep_consolidation() const;
     void run_demotion_pass();
     bool time_for_demotion() const;

@@ -662,6 +662,15 @@ void Subconscious::run_sleep_consolidation() {
         size_t encoded = field_store_->encode_all();
         bool snapped      = field_store_->save_snapshot();
         bool full_snapped = field_store_->save_full_snapshot();
+        if (full_snapped && time_for_wal_compact()) {
+            try {
+                size_t deleted = field_store_->compact_wal();
+                stats_.last_compact_wal_at = now_ms();
+                std::cerr << "[subconscious] WAL compact: deleted " << deleted << " segments\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[subconscious] WAL compact failed: " << e.what() << "\n";
+            }
+        }
 
         stats_.sleep_consolidation_runs++;
 
@@ -683,6 +692,12 @@ void Subconscious::run_sleep_consolidation() {
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Sleep consolidation failed: " << e.what() << "\n";
     }
+}
+
+bool Subconscious::time_for_wal_compact() const {
+    auto last = stats_.last_compact_wal_at.load();
+    if (last == 0) return true;
+    return (now_ms() - last) >= 24LL * 3600 * 1000;
 }
 
 bool Subconscious::time_for_sleep_consolidation() const {

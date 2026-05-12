@@ -114,9 +114,13 @@ ToolResult FieldRpcHandler::tool_health_check(const json& params) {
        << "  backend  : chitta-field\n";
 
     if (!details) {
-        // Fast path: zero field_store calls — memory_count()/symbol_count() hold
-        // states.read()/payloads.read() for O(N) iterations that contend with
-        // encode_memory's states.write(), causing 96-266s health_check delays.
+        // Fast path: O(1) only — raw_memory_count() returns payloads.len() (HashMap.len()),
+        // avoiding O(N) states.read() that contends with encode_memory's write locks.
+        size_t raw_count = field_store_->raw_memory_count();
+        size_t pending   = field_store_->raw_pending_count();
+        ss << "  memories : ~" << raw_count << "\n";
+        if (pending > 0)
+            ss << "  pending  : " << pending << " (awaiting embed)\n";
         json out = {
             {"status",           "ok"},
             {"backend",          "chitta-field"},
@@ -125,8 +129,9 @@ ToolResult FieldRpcHandler::tool_health_check(const json& params) {
             {"protocol_major",   CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor",   CHITTA_PROTOCOL_VERSION_MINOR},
             {"pid",              static_cast<int>(getpid())},
+            {"memory_count",     raw_count},
+            {"pending_count",    pending},
         };
-        ss << "  (use details=true for counts)\n";
         return ToolResult::ok(ss.str(), out);
     }
 
