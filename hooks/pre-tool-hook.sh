@@ -191,15 +191,12 @@ case "$MATCHER" in
         command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
         [[ -z "$command" ]] && exit 0
 
-        # Block running temp Python/shell patch scripts.
+        # Advisory: nudge away from temp patch scripts toward file_patch.
         if echo "$command" | grep -qE '(python3?|bash)\s+(/tmp/|/maps/[^[:space:]]*/scratch/)[^[:space:]]+\.(py|sh)'; then
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Running a temp patch script is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) directly — no script needed."}}'
-            exit 0
-        fi
-        if echo "$command" | grep -qE "python3?\s+-c\s+['\"]" && \
-           echo "$command" | grep -qE "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\()"; then
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Inline Python file-write is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) directly."}}'
-            exit 0
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str) — no script needed."}}\n'
+        elif echo "$command" | grep -qE "python3?\s+-c\s+['\"]" && \
+             echo "$command" | grep -qE "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\()"; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Inline Python file-write detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str)."}}\n'
         fi
 
         # Stage 1a: Safety blocks
@@ -327,9 +324,8 @@ case "$MATCHER" in
                 _is_system_path=1 ;;
         esac
         if _strict_mode_enabled && [[ "$is_indexed" == "1" && "${CC_SOUL_ALLOW_READ:-0}" != "1" && "$_is_system_path" == "0" ]]; then
-            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "strict-indexed-read" 1
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[strict] Indexed file read blocked. Use mcp__chitta-bridge__read_symbol/search_symbols/soul_context first. To edit: use mcp__chitta-bridge__file_patch(file,old_str,new_str) — no Read required. Set CC_SOUL_ALLOW_READ=1 to override."}}'
-            exit 0
+            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "strict-indexed-read" 0
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Indexed file. Prefer mcp__chitta-bridge__read_symbol/smart_context over Read. To edit: file_patch(file,old_str,new_str) — no Read required."}}\n'
         fi
 
         # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
@@ -340,10 +336,9 @@ case "$MATCHER" in
             _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
             _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
             if grep -qF "$_file_hash" "$_read_cache" 2>/dev/null; then
-                _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "read-dedup" 0
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[read-dedup] %s already read this session (mtime unchanged, %d lines). Use sqz_read_file (13-token §ref§) or read_symbol for targeted extraction. CC_SOUL_ALLOW_READ=1 to force re-read."}}\n' \
+                _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (mtime unchanged, %d lines). sqz_read_file returns a 13-token §ref§ for cached content."}}\n' \
                     "$(basename "$file_path")" "$line_count"
-                exit 0
             fi
             printf '%s\n' "$_file_hash" >> "$_read_cache" 2>/dev/null || true
         fi
@@ -360,12 +355,10 @@ case "$MATCHER" in
 
         # Use updatedInput to limit Read to 150 lines + advisory context.
         offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
-        # Phase 2: hard-deny on indexed-file large Read at offset=0 (unless escape hatch)
-        if _should_enforce && [[ "$is_indexed" == "1" && "$offset" == "0" \
-              && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
-            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "indexed-large-offset0" 1
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file (%d lines). Use mcp__chitta-bridge__read_symbol or smart_context instead of Read. Set CC_SOUL_ALLOW_READ=1 to override."}}' "$line_count"
-            exit 0
+        # Advisory: large indexed file — nudge toward read_symbol/smart_context.
+        if [[ "$is_indexed" == "1" && "$offset" == "0" ]]; then
+            _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "indexed-large-offset0" 0
+            advisory="[code-intel] Large indexed file ($line_count lines). Prefer read_symbol or smart_context for targeted extraction."
         fi
         _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "truncate" "large-file" 0
         escaped_path=$(echo -n "$file_path" | jq -Rs '.')
@@ -458,8 +451,7 @@ case "$MATCHER" in
                 _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)
                 if echo "$_wp_content" | grep -qE \
                     "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\(|\.write\()"; then
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Writing a patch script to disk is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) or symbol_patch directly — one call, no temp file needed."}}'
-                    exit 0
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str) — no script needed, fewer tokens."}}\n'
                 fi
             fi
         fi
