@@ -408,12 +408,11 @@ case "$MATCHER" in
             [[ "$dir_syms" -gt 0 ]] && is_indexed=1
         fi
 
-        # Phase 2: hard-deny on indexed + large old_str (whole-function territory)
-        if _should_enforce && [[ "$is_indexed" == "1" && "$old_str_len" -gt 500 \
-              && "${CC_SOUL_ALLOW_EDIT:-0}" != "1" ]]; then
-            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "deny" "indexed-large-old_str" 1
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Indexed source file with large Edit (old_string=%d chars). Use mcp__chitta-bridge__symbol_patch or file_patch. Set CC_SOUL_ALLOW_EDIT=1 to override."}}' "$old_str_len"
-            exit 0
+        # Advisory only for large edits on indexed files — hard deny removed.
+        # Python patch scripts (the real anti-pattern) are blocked in Write+Bash hooks instead.
+        if [[ "$is_indexed" == "1" && "$old_str_len" -gt 500 ]]; then
+            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "advisory" "indexed-large-old_str" 0
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Large Edit on indexed file (%d chars). Prefer mcp__chitta-bridge__symbol_patch or file_patch — no Read required, fewer tokens."}}\n' "$old_str_len"
         fi
 
         if [[ "$is_indexed" == "1" ]]; then
