@@ -445,18 +445,22 @@ case "$MATCHER" in
     Write)
         FP_BIN="${HOME}/.claude/bin/fp"
         # Block Python/shell patch scripts written to temp/scratch locations.
+        # Check path first (cheap); only extract content if path matches — avoids
+        # jq + grep on large payloads which hangs the hook for sizeable writes.
         _wp_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
-        _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)
         if [[ "$_wp_path" =~ \.(py|sh)$ ]]; then
             _is_temp=0
             case "$_wp_path" in
                 /tmp/*|*/scratch/*|*/tmp/*) _is_temp=1 ;;
                 *patch*|*fix_*|*edit_*|*_patch.*|*_fix.*|*_edit.*) _is_temp=1 ;;
             esac
-            if [[ "$_is_temp" == "1" ]] && echo "$_wp_content" | grep -qE \
-                "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\(|\.write\()"; then
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Writing a patch script to disk is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) or symbol_patch directly — one call, no temp file needed."}}'
-                exit 0
+            if [[ "$_is_temp" == "1" ]]; then
+                _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)
+                if echo "$_wp_content" | grep -qE \
+                    "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\(|\.write\()"; then
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Writing a patch script to disk is blocked. Use mcp__chitta-bridge__file_patch(file,old_str,new_str) or symbol_patch directly — one call, no temp file needed."}}'
+                    exit 0
+                fi
             fi
         fi
         [[ ! -x "$FP_BIN" ]] && exit 0
