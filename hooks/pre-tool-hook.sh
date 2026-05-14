@@ -39,6 +39,8 @@ _strict_mode_enabled() {
 #                    hook flips to enforce mode automatically. No env var needed.
 #                    Explicit CC_SOUL_HOOK_ENFORCE=0 disables; =1 forces on early.
 # Escape hatch:      CC_SOUL_ALLOW_EDIT=1 or CC_SOUL_ALLOW_READ=1 bypass per env.
+#                    Also honoured if ~/.claude/mind/.allow_read_<session_id> exists
+#                    (use when env var can't persist across hook invocations).
 _should_enforce() {
     # Explicit override wins
     case "${CC_SOUL_HOOK_ENFORCE:-}" in
@@ -319,8 +321,13 @@ case "$MATCHER" in
         is_indexed=0
         [[ "$dir_syms" -gt 0 ]] 2>/dev/null && is_indexed=1
 
+        # Resolve CC_SOUL_ALLOW_READ from env or persistent flag file.
+        # Flag file survives across hook invocations (each is a separate shell).
+        _allow_read="${CC_SOUL_ALLOW_READ:-0}"
+        _allow_read_flag="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.allow_read_${_session_id}"
+        [[ "$_allow_read" != "1" && -f "$_allow_read_flag" ]] && _allow_read=1
+
         # Strict mode: enforce symbol-level flow for indexed files.
-        # Escape hatch: CC_SOUL_ALLOW_READ=1.
         # Safety valve: never block reads for system/external paths where no chitta
         # alternative exists — blocking those forces dangerous workarounds
         # (e.g. patching site-packages via raw Python instead of Read+Edit).
@@ -329,7 +336,7 @@ case "$MATCHER" in
             */site-packages/*|*/dist-packages/*|*/conda/envs/*/lib/*|/usr/lib/*|/opt/*/lib/*)
                 _is_system_path=1 ;;
         esac
-        if _strict_mode_enabled && [[ "$is_indexed" == "1" && "${CC_SOUL_ALLOW_READ:-0}" != "1" && "$_is_system_path" == "0" ]]; then
+        if _strict_mode_enabled && [[ "$is_indexed" == "1" && "$_allow_read" != "1" && "$_is_system_path" == "0" ]]; then
             _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "strict-indexed-read" 0
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Indexed file. Prefer mcp__chitta-bridge__read_symbol/smart_context over Read. To edit: file_patch(file,old_str,new_str) — no Read required."}}\n'
         fi
@@ -337,7 +344,7 @@ case "$MATCHER" in
         # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
         # Forces sqz_read_file which returns a 13-token §ref§ for cached content.
         _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null || true)
-        if [[ "$line_count" -gt 200 && -n "$_session_id" && "${CC_SOUL_ALLOW_READ:-0}" != "1" ]]; then
+        if [[ "$line_count" -gt 200 && -n "$_session_id" && "$_allow_read" != "1" ]]; then
             _file_mtime=$(stat -c %Y "$file_path" 2>/dev/null || echo 0)
             _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
             _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
