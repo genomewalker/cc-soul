@@ -24,6 +24,12 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 # Clear 65% compact sentinel so the next session (same or new id) can block again
 [[ -n "$REAL_SESSION_ID" ]] && rm -f "${MIND_PATH}/.compact_advised_${REAL_SESSION_ID}" 2>/dev/null || true
+# Clear read-dedup cache and soul-injection sentinels — compaction evicts context,
+# so previously-read file content is gone and re-reads must be allowed.
+[[ -n "$REAL_SESSION_ID" ]] && rm -f \
+    "${MIND_PATH}/.read_cache_${REAL_SESSION_ID}" \
+    "${MIND_PATH}/.soul_injected_${REAL_SESSION_ID}_"* \
+    2>/dev/null || true
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
