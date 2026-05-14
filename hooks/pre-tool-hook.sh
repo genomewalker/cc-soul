@@ -133,6 +133,12 @@ find_strategy() {
     echo "$cmd" | grep -qE '\bfind\b' || return 1
     echo "$cmd" | grep -qE '\-maxdepth\s+[0-3]\b' && return 1
     [[ "${CC_SOUL_DEEP_SEARCH:-0}" == "1" ]] && return 1
+    # Inline env var: CC_SOUL_DEEP_SEARCH=1 find ... — not exported to hook env.
+    echo "$cmd" | grep -qE '(^|\s)CC_SOUL_DEEP_SEARCH=1(\s|$)' && return 1
+    # Explicit non-root absolute path: find /maps/... or find /home/... — let through.
+    local _target
+    _target=$(echo "$cmd" | sed -nE 's/.*\bfind\s+([^[:space:]]+).*/\1/p' | head -1)
+    [[ "$_target" == /* && "$_target" != "/" ]] && return 1
 
     # In strict mode, hard-deny explicit root scans.
     if [[ "${CC_SOUL_STRICT_MODE:-0}" == "1" ]] && echo "$cmd" | grep -qE '^[[:space:]]*find[[:space:]]+/([[:space:]]|$)'; then
