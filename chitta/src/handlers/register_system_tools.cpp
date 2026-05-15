@@ -85,6 +85,31 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["subconscious_stats"] = [this](const json& p) { return tool_subconscious_stats(p); };
 
+    tools_.push_back({{"name","pending_embed_ids"},{"description","Return IDs of memories awaiting embedding (stuck embed queue)"},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["pending_embed_ids"] = [this](const json& p) {
+        bool purge = p.value("purge", false);
+        bool force = p.value("force", false);
+        size_t cleared = 0;
+        if (purge) {
+            cleared = field_store_->purge_orphan_embed_pending();
+            if (cleared == 0 && force) {
+                // Fallback: force-clear all currently pending IDs
+                auto stuck = field_store_->pending_embeddings(200);
+                if (!stuck.empty()) cleared = field_store_->force_clear_embed_pending(stuck);
+            }
+        }
+        auto ids = field_store_->pending_embeddings(200);
+        json arr = json::array();
+        for (auto id : ids) arr.push_back(id);
+        std::string msg = "Pending embed IDs (" + std::to_string(ids.size()) + ")";
+        if (purge) msg += " — cleared " + std::to_string(cleared);
+        msg += ":\n";
+        for (auto id : ids) msg += "  " + std::to_string(id) + "\n";
+        return ToolResult::ok(msg, {{"ids", arr}, {"count", ids.size()}, {"cleared", cleared}});
+    };
+
     tools_.push_back({{"name","reembed_memories"},{"description","Re-embed memories with proper embeddings"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"all",{{"type","boolean"}}},{"kind",{{"type","string"}}},
