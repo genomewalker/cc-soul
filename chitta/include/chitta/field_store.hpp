@@ -27,6 +27,8 @@ int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
     const float* embedding_ptr, size_t embedding_len);
 int cf_pending_embeddings(struct CfHandle* h,
     uint64_t* out_ids, size_t max_ids, size_t* out_count);
+int cf_purge_orphan_embed_pending(struct CfHandle* h, size_t* out_cleared);
+int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
 int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
 int cf_select_route(struct CfHandle* h, const char* query,
@@ -527,6 +529,18 @@ public:
     size_t raw_memory_count() const {
         return cf_raw_memory_count(handle_);
     }
+    size_t purge_orphan_embed_pending() {
+        size_t n = 0;
+        cf_purge_orphan_embed_pending(handle_, &n);
+        return n;
+    }
+
+    size_t force_clear_embed_pending(const std::vector<uint64_t>& ids) {
+        size_t n = 0;
+        cf_force_clear_embed_pending(handle_, ids.data(), ids.size(), &n);
+        return n;
+    }
+
     size_t raw_pending_count() const {
         return cf_pending_count(handle_);
     }
