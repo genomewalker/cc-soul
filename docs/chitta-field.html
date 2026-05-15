@@ -527,6 +527,37 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
 </section>
 
 
+<section class="cf-page-section alt-bg" id="ann-sidecars">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Semantic ANN sidecars</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Dense semantic search is handled by HNSW graphs and binary codes stored in flat binary sidecars alongside the snapshot. This separates fast-path ANN data from the main bincode payload, shrinking checkpoint I/O and opening the door to mmap-based loading at 1M-memory scale.</p>
+
+    <div class="cf-table-wrap reveal reveal-delay-2">
+      <table class="cf-table">
+        <thead><tr><th>Sidecar</th><th>Format</th><th>Size at 1M</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>.emb</code></td><td>magic(8) + count(8) + {id:u64, f32×256}×N</td><td>~1 GB</td><td>Raw dense embeddings for ANN + rescore</td></tr>
+          <tr><td><code>.bin</code></td><td>magic(8) + count(8) + {id:u64, u64×4}×N</td><td>~40 MB</td><td>Binary sparse codes for Hamming pre-filter</td></tr>
+          <tr><td><code>.hnsw</code></td><td>bincode-serialized HnswGraph</td><td>~200 MB</td><td>Base HNSW graph (up to HNSW_TIER2_THRESHOLD)</td></tr>
+          <tr><td><code>.delta.hnsw</code></td><td>bincode-serialized HnswGraph</td><td>&lt;20 MB</td><td>Delta tier — new inserts above 100K, merged at checkpoint</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cf-subsections reveal reveal-delay-3">
+      <div class="cf-subsection">
+        <h3>Two-tier HNSW</h3>
+        <p>Below 100&thinsp;K memories, all inserts go to the single base graph. Above that threshold (<code>HNSW_TIER2_THRESHOLD</code>), new inserts route to a small <em>delta graph</em> — O(log N<sub>delta</sub>) insert cost instead of O(log N<sub>total</sub>). At checkpoint, when the delta exceeds 10% of base size (<code>HNSW_DELTA_MERGE_RATIO</code>), it is merged back into the base. Search queries both tiers and merges results via reciprocal rank fusion.</p>
+      </div>
+      <div class="cf-subsection">
+        <h3>Hamming pre-filter</h3>
+        <p>Every memory's embedding is binarized (sign bit per dimension) into 4 × u64 words. A Hamming scan over the full <code>.bin</code> sidecar selects the top 400 candidates; only those candidates are rescored with full float cosine. At 54K memories this is a 0.74% scan — strong recall at minimal CPU cost.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
 <!-- ═══ CORTICAL INDEX ═══ -->
 <section class="cf-page-section alt-bg" id="cortical">
   <div class="container">

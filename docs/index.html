@@ -86,18 +86,12 @@
       </div>
       <p class="whats-new-title">HNSW, PoE reliability, chitta_thinking, and chitta-research</p>
       <p class="whats-new-desc">
+        <strong>Two-tier HNSW</strong> &mdash; above 100&thinsp;K memories, new inserts route to a small delta graph (O(log N<sub>delta</sub>)) instead of the large base; merged at checkpoint. Persisted as a <code>.delta.hnsw</code> sidecar.
+        <strong>v10 snapshot format</strong> &mdash; embeddings and binary sparse codes live in flat <code>.emb</code> / <code>.bin</code> sidecars, shrinking the main bincode snapshot and enabling future mmap access.
+        <strong>SSL NL gloss</strong> &mdash; SSL triplet memories re-embedded with natural-language sentences via <code>gloss_ssl_content()</code>, closing the representation gap between compact SSL format and BGE queries.
+        <strong>Alias memories</strong> &mdash; every SSL memory auto-creates a linked <code>kind=alias</code> NL counterpart connected by an <code>alias-of</code> triplet, keeping both representations synchronized.
+        <strong>Embed worker fix</strong> &mdash; idle gate removed; background embedding now runs every 30&thinsp;s during active sessions, clearing the pending queue without waiting for inactivity.
         <strong>HNSW semantic index</strong> activates above 2,000 memories for dense recall at scale.
-        <strong>PoE domain reliability</strong> lowers realm recall scores automatically when corrections arrive.
-        <strong>chitta_thinking</strong> mines Claude&rsquo;s <code>thinking</code> blocks for perception-change moments every 10 turns.
-        <strong>chitta_migrate</strong> auto-detects <code>soul.db</code> or <code>chitta.duckdb</code> and handles either.
-        <strong>recall_with_fallback</strong> chain (semantic &rarr; BM25 &rarr; recency) means recall never returns empty.
-        Pre-tool hook intercepts large files and destructive commands: exits with code 2 to block the original call, runs a compact alternative itself, and returns the output directly &mdash; real token savings, not just an advisory.
-        Output-type-aware recall routes TestResults, BuildOutput, and LogOutput to separate memory categories.
-        <strong>Turn discipline</strong> warns after 15 turns without a memory store, preventing context drift.
-        <strong>MacOS portability</strong> &mdash; all Linux-only APIs guarded; daemon builds and runs on macOS.
-        <strong>FilterLevel on BM25 code ingestion</strong> &mdash; Signatures-only or MinimalContext modes for leaner code indexing.
-        <strong>memory-intercept.sh</strong> captures Write operations asynchronously, learning what you build.
-        And <strong>chitta-research</strong> &mdash; a new autonomous research OS built on chitta-field.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
