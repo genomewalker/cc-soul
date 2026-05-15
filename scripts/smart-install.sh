@@ -651,6 +651,17 @@ install_python_packages() {
             fi
         fi
     fi
+
+    # Install model-export tools (optimum + onnxruntime) for embedding model management.
+    # Required for: nomic-embed export, model swap, re-embedding after dim change.
+    if ! $python_cmd -c "import optimum.onnxruntime" 2>/dev/null; then
+        echo "[cc-soul] Installing optimum[onnxruntime] for model management..."
+        if $python_cmd -m pip install -q "optimum[onnxruntime]>=1.20.0" --user 2>/dev/null; then
+            echo "[cc-soul] Installed optimum[onnxruntime]"
+        else
+            echo "[cc-soul] Warning: optimum install failed — model export unavailable"
+        fi
+    fi
 }
 
 # Configure hooks in settings.json

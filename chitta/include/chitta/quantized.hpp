@@ -142,11 +142,11 @@ struct QuantizedVector {
 // QuantizedVector: 768 (data) + 4 (scale) + 4 (offset) + 4 (cached_norm) + 1 (bool) + padding
 static_assert(sizeof(QuantizedVector) <= EMBED_DIM + 20, "QuantizedVector size check");
 
-// Binary quantized vector: 96 bytes for 768 dims (32x compression vs float32)
+// Binary quantized vector: EMBED_DIM/8 bytes (32x compression vs float32)
 // Uses sign bit: positive → 1, negative → 0
 // Similarity via Hamming distance (popcount)
 struct BinaryVector {
-    static constexpr size_t BYTES = (EMBED_DIM + 7) / 8;  // 48 bytes
+    static constexpr size_t BYTES = (EMBED_DIM + 7) / 8;
     uint8_t bits[BYTES];
 
     BinaryVector() { std::memset(bits, 0, BYTES); }
@@ -188,12 +188,12 @@ struct BinaryVector {
         return 1.0f - static_cast<float>(hamming(other)) / EMBED_DIM;
     }
 
-    // For uint64 optimization (6 x 64-bit words)
-    static_assert(BYTES == 96, "Binary vector should be 96 bytes");
+    static constexpr size_t WORDS = BYTES / 8;
+    static_assert(EMBED_DIM % 64 == 0, "EMBED_DIM must be a multiple of 64 for hamming_fast");
 
     uint32_t hamming_fast(const BinaryVector& other) const {
         uint32_t dist = 0;
-        for (size_t i = 0; i < 12; ++i) {
+        for (size_t i = 0; i < WORDS; ++i) {
             uint64_t a, b;
             std::memcpy(&a, bits + i * 8, sizeof(uint64_t));
             std::memcpy(&b, other.bits + i * 8, sizeof(uint64_t));
@@ -203,7 +203,7 @@ struct BinaryVector {
     }
 };
 
-static_assert(sizeof(BinaryVector) == 96, "BinaryVector should be 96 bytes");
+static_assert(sizeof(BinaryVector) == (EMBED_DIM + 7) / 8, "BinaryVector size mismatch");
 
 // Storage tier for nodes
 enum class StorageTier : uint8_t {

@@ -19,8 +19,8 @@
 
 namespace chitta {
 
-// Embedding dimension (bge-base-en-v1.5)
-constexpr size_t EMBED_DIM = 768;
+// Embedding dimension (nomic-embed-text-v1 MRL-256)
+constexpr size_t EMBED_DIM = 256;
 
 // Timestamp as Unix millis
 using Timestamp = int64_t;
