@@ -28,6 +28,7 @@
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #include <chitta/vak_timeout.hpp>
+#include <chitta/ssl_gloss.hpp>
 #endif
 #include <iostream>
 #include <string>
@@ -365,8 +366,12 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             size_t end = std::min(b + SUB_BATCH, pending.size());
                             std::vector<std::string> batch_texts;
                             batch_texts.reserve(end - b);
-                            for (size_t i = b; i < end; ++i)
-                                batch_texts.push_back(contents[i].empty() ? "" : prefix + contents[i]);
+                            for (size_t i = b; i < end; ++i) {
+                                if (contents[i].empty()) { batch_texts.push_back(""); continue; }
+                                auto gloss = chitta::ssl::gloss_ssl_content(contents[i]);
+                                auto text  = gloss.empty() ? contents[i] : contents[i] + "\n" + gloss;
+                                batch_texts.push_back(prefix + text);
+                            }
                             auto arthas = yantra->transform_batch(batch_texts);
                             for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
                                 if (contents[b + i].empty()) continue;
