@@ -109,6 +109,9 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
+# Ensure all hook scripts are executable (git on some filesystems strips the bit)
+chmod +x hooks/*.sh 2>/dev/null || true
+
 # Verify submodule commits exist on remote
 echo "Verifying submodules are pushed..."
 git submodule foreach --quiet '
