@@ -215,6 +215,7 @@ private:
 
     // Threading
     std::thread process_thread_;
+    std::thread embed_thread_;
     std::atomic<bool> running_{false};
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
@@ -320,6 +321,7 @@ private:
 
     // Background embedding: embed pending memories using VakYantra
     void run_background_embedding();
+    void embed_loop();
     bool time_for_background_embedding() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
