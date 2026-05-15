@@ -226,9 +226,6 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto embedding_flush_interval = std::chrono::seconds(5);   // Flush queued embeddings every 5s
         auto foreign_sync_interval   = std::chrono::seconds(5);   // Ingest peer segment files every 5s
         auto binary_check_interval   = std::chrono::seconds(60);  // Check for updated binary every 60s
-        auto pending_embed_interval  = std::chrono::seconds(30);  // Backfill embed_pending memories
-        auto last_pending_embed = std::chrono::steady_clock::now();
-        const std::string doc_embed_prefix = "search_document: ";
 
 #ifdef __linux__
         // inotify watcher on segments/ dir for same-host peer writes
@@ -257,46 +254,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 }
             }
 
-            // Backfill embeddings for memories stored while yantra was unavailable.
-            // Batched: collect content, embed sub-batches of 16 in one ONNX call,
-            // then store. Lock acquired briefly per memory, never around ONNX.
-            if (yantra && (now_time - last_pending_embed >= pending_embed_interval)) {
-                last_pending_embed = now_time;
-                try {
-                    std::vector<uint64_t> pending;
-                    std::vector<std::string> contents;
-                    {
-                        auto _lk = handler.acquire_lock();
-                        pending = field_store.pending_embeddings(100);
-                        contents.reserve(pending.size());
-                        for (uint64_t id : pending)
-                            contents.push_back(field_store.get_content(id));
-                    }
-                    if (!pending.empty()) {
-                        std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
-                        // Batch-embed in sub-batches of 8; one lock acquisition per insertion
-                        constexpr size_t SUB_BATCH = 8;
-                        for (size_t b = 0; b < pending.size(); b += SUB_BATCH) {
-                            size_t end = std::min(b + SUB_BATCH, pending.size());
-                            std::vector<std::string> batch_texts;
-                            batch_texts.reserve(end - b);
-                            for (size_t i = b; i < end; ++i)
-                                batch_texts.push_back(contents[i].empty() ? "" : doc_embed_prefix + contents[i]);
-                            auto arthas = yantra->transform_batch(batch_texts);
-                            for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
-                                if (contents[b + i].empty()) continue;
-                                const auto& emb = arthas[i].nu.data;
-                                if (emb.size() != EMBED_DIM) continue;
-                                auto _lk = handler.acquire_lock();
-                                field_store.backfill_embedding(pending[b + i], emb);
-                            }
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    if (verbose_mode)
-                        std::cerr << "[maint] Backfill error: " << e.what() << "\n";
-                }
-            }
+            // Backfill runs in a dedicated thread (backfill_thread below).
 
             // Tick sadhana manager for autonomous agents (runs every 100ms loop)
             try {
@@ -378,6 +336,56 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 #ifdef __linux__
         if (inotify_fd >= 0) close(inotify_fd);
 #endif
+    });
+
+    // Backfill thread — re-embeds memories stored while yantra was unavailable.
+    // Runs independently so ONNX calls never block the maintenance thread or RPCs.
+    std::thread backfill_thread([&]() {
+        const std::string prefix = "search_document: ";
+        // Initial delay: let WAL replay and HNSW load finish before hammering ONNX.
+        for (int i = 0; i < 150 && daemon_running; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        while (daemon_running) {
+            if (yantra) {
+                try {
+                    std::vector<uint64_t> pending;
+                    std::vector<std::string> contents;
+                    {
+                        auto _lk = handler.acquire_lock();
+                        pending = field_store.pending_embeddings(100);
+                        contents.reserve(pending.size());
+                        for (uint64_t id : pending)
+                            contents.push_back(field_store.get_content(id));
+                    }
+                    if (!pending.empty()) {
+                        std::cerr << "[backfill] Processing " << pending.size() << " memories\n";
+                        constexpr size_t SUB_BATCH = 8;
+                        for (size_t b = 0; b < pending.size() && daemon_running; b += SUB_BATCH) {
+                            size_t end = std::min(b + SUB_BATCH, pending.size());
+                            std::vector<std::string> batch_texts;
+                            batch_texts.reserve(end - b);
+                            for (size_t i = b; i < end; ++i)
+                                batch_texts.push_back(contents[i].empty() ? "" : prefix + contents[i]);
+                            auto arthas = yantra->transform_batch(batch_texts);
+                            for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
+                                if (contents[b + i].empty()) continue;
+                                const auto& emb = arthas[i].nu.data;
+                                if (emb.size() != EMBED_DIM) continue;
+                                auto _lk = handler.acquire_lock();
+                                field_store.backfill_embedding(pending[b + i], emb);
+                            }
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    if (verbose_mode)
+                        std::cerr << "[backfill] Error: " << e.what() << "\n";
+                }
+            }
+            // 30s sleep in small increments to stay responsive to shutdown
+            for (int i = 0; i < 300 && daemon_running; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     });
 
     // Distillation thread - process transcripts periodically
@@ -667,6 +675,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     alarm(15);
 
     maintenance.join();
+    if (backfill_thread.joinable()) backfill_thread.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
     queue_proc.stop();
