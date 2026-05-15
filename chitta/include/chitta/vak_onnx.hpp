@@ -346,8 +346,9 @@ public:
         size_t batch_size = 32;       // Max batch for efficiency
         bool normalize_embeddings = true;
         int num_threads = 4;          // Default to 4 threads (not auto)
-        // BGE instruction prefix for query embeddings
-        std::string query_prefix = "Represent this sentence for searching relevant passages: ";
+        // nomic-embed-text-v1 prefixes (empty = no prefix, e.g. for BGE)
+        std::string query_prefix = "";
+        std::string doc_prefix   = "";
     };
 
     AntahkaranaYantra() : env_(ORT_LOGGING_LEVEL_WARNING, "chitta") {}
@@ -422,12 +423,12 @@ public:
     }
 
     Artha transform(const std::string& vak, EmbedMode mode) override {
-        // For query mode, prepend instruction prefix
-        if (mode == EmbedMode::Query && !config_.query_prefix.empty()) {
-            std::string prefixed = config_.query_prefix + vak;
-            auto results = run_inference({prefixed});
+        const std::string& prefix = (mode == EmbedMode::Query)
+            ? config_.query_prefix : config_.doc_prefix;
+        if (!prefix.empty()) {
+            auto results = run_inference({prefix + vak});
             if (results.empty()) return Artha(Vector::zeros(), 0.0f, vak);
-            results[0].source = vak;  // Store original text, not prefixed
+            results[0].source = vak;
             return results[0];
         }
         return transform(vak);

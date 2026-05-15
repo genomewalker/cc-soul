@@ -59,6 +59,9 @@ inline std::string default_mind_path() {
 inline std::string default_model_path() {
     const char* home = std::getenv("HOME");
     std::string home_str = home ? home : ".";
+    // nomic-embed-text-v1 MRL-256 (preferred)
+    std::string nomic = home_str + "/.claude/mind/chitta/models/nomic-256/model.onnx";
+    if (std::ifstream(nomic).good()) return nomic;
     if (const char* pr = std::getenv("CLAUDE_PLUGIN_ROOT")) {
         std::string p = std::string(pr) + "/chitta/models/model.onnx";
         if (std::ifstream(p).good()) return p;
@@ -71,6 +74,9 @@ inline std::string default_model_path() {
 inline std::string default_vocab_path() {
     const char* home = std::getenv("HOME");
     std::string home_str = home ? home : ".";
+    // nomic vocab (same 30522-line BERT uncased vocab as BGE)
+    std::string nomic = home_str + "/.claude/mind/chitta/models/nomic-256/vocab.txt";
+    if (std::ifstream(nomic).good()) return nomic;
     if (const char* pr = std::getenv("CLAUDE_PLUGIN_ROOT")) {
         std::string p = std::string(pr) + "/chitta/models/vocab.txt";
         if (std::ifstream(p).good()) return p;

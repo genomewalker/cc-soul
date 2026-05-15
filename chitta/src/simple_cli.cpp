@@ -266,7 +266,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     std::vector<uint64_t> pending;
                     {
                         auto _lk = handler.acquire_lock();
-                        pending = field_store.pending_embeddings(50);
+                        pending = field_store.pending_embeddings(500);
                     }
                     if (!pending.empty()) {
                         std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
@@ -277,8 +277,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                 mem = field_store.get_content(id);
                             }
                             if (mem.empty()) continue;
-                            auto emb = yantra->transform(mem).nu.data;
-                            if (emb.size() != 768) continue;
+                            auto emb = yantra->transform(mem, EmbedMode::Document).nu.data;
+                            if (emb.size() != EMBED_DIM) continue;
                             auto _lk = handler.acquire_lock();
                             field_store.backfill_embedding(id, emb);
                         }
@@ -915,6 +915,8 @@ int main(int argc, char* argv[]) {
     yantra_config.pooling = PoolingStrategy::Mean;
     yantra_config.normalize_embeddings = true;
     yantra_config.num_threads = max_onnx_threads;
+    yantra_config.query_prefix = "search_query: ";
+    yantra_config.doc_prefix   = "search_document: ";
     auto inner_yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
     std::shared_ptr<VakYantra> yantra;
     if (inner_yantra->awaken(model_path, vocab_path)) {
