@@ -280,9 +280,15 @@ case "$MATCHER" in
 
         if [[ -n "$query" ]]; then
             escaped_query=$(json_escape "$query")
+            # Scope recall to current project realm to prevent cross-session memory bleed.
+            _recall_realm=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null || echo "")
             memories=""
             for tag in ${tags//,/ }; do
-                result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
+                if [[ -n "$_recall_realm" ]]; then
+                    result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --realm "$_recall_realm" --limit 1 --text-only 2>/dev/null | head -c 400)
+                else
+                    result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
+                fi
                 [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
             done
             # No fallback unfiltered recall — avoids cross-domain memory bleed
