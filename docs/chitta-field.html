@@ -443,6 +443,8 @@
         <p>Each memory is encoded as a <strong>sparse code</strong>: exactly 64 of 16,384 feature dimensions activate. The rest are zero. This is the same principle behind sparse distributed representations in biological cortex — high capacity, collision-resistant, and inherently associative.</p>
         <p>Sparse codes are derived from the dense 768-dim BGE embedding by projecting through a learned sparse encoder. The result: two memories about the same concept share many active features. Two unrelated memories share almost none.</p>
         <p>This makes retrieval geometric: <em>find memories whose active features overlap most with the query's active features</em>. No distance function. No HNSW graph traversal. Just intersection and counting.</p>
+        <p><strong>SSL NL gloss</strong>: SSL-encoded memories (compact triplet form) are passed through <code>gloss_ssl_content()</code> &mdash; a translation layer in <code>chitta/include/chitta/ssl_gloss.hpp</code> that converts triplets into readable English sentences <em>before</em> embedding. This closes the representation gap between compact SSL storage and natural-language BGE queries, so structured memories surface from prose questions.</p>
+        <p><strong>Alias memories</strong>: every new SSL memory auto-creates a linked <code>kind=alias</code> NL counterpart, connected by an <code>alias-of</code> triplet. NL and SSL representations stay synchronised without content duplication: the alias carries the glossed sentence, the SSL row carries the canonical triplet.</p>
       </div>
       <div class="reveal reveal-delay-2">
         <div class="cf-code">
