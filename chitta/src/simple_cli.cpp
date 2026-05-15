@@ -372,7 +372,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                 if (contents[b + i].empty()) continue;
                                 const auto& emb = arthas[i].nu.data;
                                 if (emb.size() != EMBED_DIM) continue;
-                                auto _lk = handler.acquire_lock();
+                                // No C++ lock: Rust store uses internal RwLocks.
+                                // WAL append is NFS-backed; holding rpc_mutex_ here would block all RPCs.
                                 field_store.backfill_embedding(pending[b + i], emb);
                             }
                         }
