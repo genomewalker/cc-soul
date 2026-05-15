@@ -1,6 +1,7 @@
 // field_memory_recall RPC handlers — bodies for declarations in
 // chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
 #include "chitta/speech_act.hpp"
+#include "chitta/ssl_gloss.hpp"
 
 #include "../../include/chitta/rpc/field_handler.hpp"
 
@@ -37,6 +38,25 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
     auto embedding = embed_ssl_aware(content);
 
     uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
+
+    // Phase 3: for SSL memories, create a pure-NL alias memory so the gloss
+    // gets its own embedding in NL space (higher cosine vs natural-language queries).
+    // Alias kind is excluded from default recall results but is searchable.
+    static const std::string ssl_arrow = "\xe2\x86\x92";
+    if (id > 0 && kind != "alias" && content.find(ssl_arrow) != std::string::npos) {
+        auto gloss = chitta::ssl::gloss_ssl_content(content);
+        if (!gloss.empty() && gloss != content) {
+            auto alias_emb = embed_text("search_document: " + gloss);
+            if (!alias_emb.empty()) {
+                uint64_t alias_id = field_store_->remember(
+                    "alias", realm, gloss, alias_emb, confidence, decay_rate);
+                if (alias_id > 0) {
+                    field_store_->add_triplet(
+                        std::to_string(alias_id), "alias-of", std::to_string(id));
+                }
+            }
+        }
+    }
 
     // Tag with source_session if provided (used by recall_session grouping)
     if (id > 0 && params.contains("source_session")) {
