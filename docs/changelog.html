@@ -456,12 +456,60 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.21.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.21.0&ndash;5.21.46</span>
+        <span class="version-date">May 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>v10 snapshot format</strong> &mdash; embeddings stored in a <code>.emb</code> sidecar (magic header + count + flat <code>{id, f32&times;256}</code> records); binary sparse codes stored in a <code>.bin</code> sidecar (<code>{id, u64&times;4}</code>). Reduces main bincode snapshot size and structures both sidecars for future <code>mmap</code>-based loading at 1M-memory scale.</li>
+          <li><strong>Two-tier HNSW</strong> (chitta-field) &mdash; <code>delta_hnsw</code> activates above 100&thinsp;K memories (<code>HNSW_TIER2_THRESHOLD</code>). New inserts route to a small delta graph (O(log N<sub>delta</sub>)) instead of the large base. Delta is merged into the base at checkpoint when it exceeds 10% of base size (<code>HNSW_DELTA_MERGE_RATIO</code>). Persisted as a <code>.delta.hnsw</code> sidecar alongside the base <code>.hnsw</code>. Search queries both tiers and fuses results via reciprocal rank fusion.</li>
+          <li><strong>SSL NL gloss</strong> &mdash; <code>gloss_ssl_content()</code> in <code>chitta/include/chitta/ssl_gloss.hpp</code> translates SSL triplets (subject/predicate/object) into readable English sentences before embedding. Closes the representation gap between compact SSL format and BGE queries; SSL memories re-embedded via a one-time migration.</li>
+          <li><strong>Alias memories</strong> &mdash; when a new SSL memory is stored, a linked <code>kind=alias</code> NL counterpart is auto-created and connected via an <code>alias-of</code> triplet. Keeps NL and SSL representations synchronised without duplicating content.</li>
+          <li><strong>Embed worker fix</strong> &mdash; idle gate removed; the background embed worker now runs every 30&thinsp;s during active sessions instead of waiting for an explicit activity signal. Pending queue clears even when the user is actively typing.</li>
+          <li><strong><code>pending_embed_ids</code> MCP tool</strong> &mdash; new maintenance RPC to inspect or purge the stuck embed queue. Supports <code>purge_orphans</code> (drop entries whose memory no longer exists) and <code>force_clear</code> (forcibly clear a given set of IDs).</li>
+          <li><strong><code>force_clear_embed_pending</code> / <code>purge_orphan_embed_pending</code></strong> &mdash; new Rust store methods (FFI: <code>cf_force_clear_embed_pending</code>, <code>cf_purge_orphan_embed_pending</code>) backing the maintenance tool.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li><code>provenance --cmd</code> destination collision (v5.21.24).</li>
+          <li>Pre-tool-hook exec bit restored after release tarball.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.20.6 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.20.6</span>
+        <span class="version-date">April 16, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Fixed</h4>
+        <ul>
+          <li><strong>Queue JSONL corruption</strong> &mdash; hooks now enqueue via native <code>chitta queue_write</code> (single-syscall atomic append, JSON compaction); removes the ~40K/day <code>[queue] FAILED: json parse error</code> burst caused by multi-line <code>jq</code> output.</li>
+          <li><strong>Chain continuity warning spam</strong> &mdash; <code>OpLog::replay()</code> now resets <code>chain_head = ZERO_HASH</code> at instance-id prefix boundaries so independent per-instance segment chains no longer trigger header-level warnings (previously ~120K/day on startup).</li>
+          <li><strong>Dead-letter interleaving</strong> &mdash; <code>sandbox::append_line_atomic()</code> uses a single POSIX <code>write()</code> with <code>O_APPEND | O_CLOEXEC</code> and an EINTR/short-write loop.</li>
+          <li><strong><code>queue_write</code> CLI arg parsing</strong> &mdash; flags interleaved after the subcommand no longer shift the tool/args slots.</li>
+          <li><strong><code>lib.sh</code> fallback</strong> &mdash; when the <code>chitta</code> binary is absent, the bash fallback now compacts the JSON via <code>python3</code> and fails loudly instead of silently injecting a malformed line.</li>
+          <li><strong>Safer deploy</strong> &mdash; <code>CLAUDE.md</code> documents atomic <code>install</code> (temp+rename) before <code>systemctl restart</code>, preserving daemon uptime across the binary swap.</li>
+        </ul>
+        <h4>Added</h4>
+        <ul>
+          <li>Regression test <code>replay_across_independent_instance_chains</code> in <code>chitta-field/src/log.rs</code> covering the instance-boundary chain-reset invariant.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.17.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.17.0</span>
         <span class="version-date">April 12, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
