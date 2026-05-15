@@ -393,6 +393,12 @@ public:
 
             opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
+            // Disable ORT's memory arena allocator: arena never shrinks after peak allocation,
+            // causing bloat during backfill (20k batch calls → 30GB+). Without arena, each
+            // inference call allocates and frees cleanly at the cost of ~5% per-call overhead.
+            opts.DisableMemPattern();
+            opts.DisableCpuMemArena();
+
             // CPU execution - CoreML tested but no speedup for single-sentence embeddings
             // (tokenization is the bottleneck, not inference)
             exec_provider_ = ExecutionProvider::CPU;
