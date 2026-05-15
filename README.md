@@ -14,6 +14,14 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
+## What's New in v5.21.x
+
+- **v10 snapshot sidecar format** — embeddings and binary codes are now stored outside the main bincode snapshot in flat binary sidecar files. The `.emb` sidecar holds a magic header + count + `{id:u64, f32×256}` records; the `.bin` sidecar holds `{id:u64, u64×4}` binary codes. This shrinks the bincode payload, keeps load times fast, and the sidecars are designed to be directly mmap-able in a future release.
+- **Two-tier HNSW** — above 100 K memories, new inserts go to a small `delta_hnsw` graph instead of the large base graph. Queries merge results from both tiers transparently. Checkpoint merges delta into base when delta exceeds 10 % of base size. Reduces per-insert cost from O(log N_total) to O(log N_delta) at million-memory scale.
+- **SSL triplet NL gloss** — SSL memories whose content contains the `→` arrow syntax are re-embedded with a natural-language prefix so that ordinary English queries can find them. A one-time startup migration glosses existing triplets; new triplets are glossed on ingest via `gloss_ssl_content()`.
+- **Alias memories (Phase 3)** — on ingest, content that matches SSL arrow syntax also produces a companion `kind=alias` memory. The alias is embedded as pure natural language, linked to its parent via an `alias-of` triplet, and participates in normal recall ranking.
+- **Embed worker reliability fix** — the background embedding worker no longer waits for an idle state before running. It fires every 30 s unconditionally, so pending embeds are cleared during active sessions rather than only between them.
+
 ## What's New in v5.17.0
 
 - **Agent Protocol Memory (Layer 8)** — WAL-backed organ tracking task ownership across agent loops. Agents lose ownership and causality because they have no record of what they delegated, what evidence they produced, or what questions remain open. Layer 8 fixes this.
@@ -330,7 +338,8 @@ CC-soul's memory lives in chitta-field — a pure Rust cognitive substrate that 
 - **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions. Recall is driven by pattern overlap, not keyword search. Related memories cluster naturally.
 - **Self-orthogonalizing encoder** — FEP-derived learning rule with complexity penalty and Gram-Schmidt decorrelation. Representations naturally become orthogonal, maximizing mutual information and resisting catastrophic forgetting.
 - **Asymmetric Hopfield network** — directed couplings from co-retrieval order enable energy-based pattern completion over the association graph.
-- **HNSW semantic index** — activates above 2,000 memories for dense vector recall; falls back to IVF+LSH below that threshold. No manual tuning.
+- **HNSW semantic index** — activates above 2,000 memories for dense vector recall; falls back to IVF+LSH below that threshold. No manual tuning. Above 100 K memories a two-tier design routes new inserts to a small `delta_hnsw` graph, keeping insert cost at O(log N_delta) regardless of total scale; checkpoint merges delta into base automatically.
+- **Sidecar snapshot format (v10)** — embeddings and binary codes live outside the bincode snapshot in flat binary `.emb`/`.bin` sidecars. Faster loads, smaller bincode payload, and mmap-ready for future zero-copy access.
 - **Write-ahead log** — every operation is durable before it applies in-memory. Restart the daemon; it replays the log and picks up exactly where it left off.
 - **Multi-instance writes** — multiple Claude windows share the same memory field simultaneously. Each writer owns its own segment file; no locking, no contention.
 - **Statically linked** — compiled into `libchitta_field.a`, then linked into the daemon. No database server, no IPC sockets, no NFS file handles to hang on.

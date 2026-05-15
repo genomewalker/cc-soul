@@ -2,6 +2,15 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.21.45] - 2026-05-16
+
+### Added
+- **v10 snapshot format** — embeddings stored in a `.emb` sidecar (magic header + count + flat `{id, f32×256}` records); binary sparse codes in a `.bin` sidecar. Reduces main bincode snapshot size. Both sidecars are structured for future `mmap` access.
+- **Two-tier HNSW** (chitta-field) — `delta_hnsw` activates above 100K memories (`HNSW_TIER2_THRESHOLD`). New inserts go to the small delta graph O(log N_delta) instead of the large base graph O(log N_total). Delta is merged into the base at checkpoint when it exceeds 10% of base size. Persisted as a `.delta.hnsw` sidecar alongside the base graph.
+- **SSL NL gloss** — SSL memories are re-embedded with a natural-language prefix via a one-time migration. `gloss_ssl_content()` translates SSL triplets (subject/predicate/object) into readable English sentences before embedding, improving semantic recall of structured memories.
+- **Alias memories** — when a new SSL memory is stored, a linked `kind=alias` NL memory is automatically created and connected via an `alias-of` triplet. Keeps NL and SSL representations synchronized without duplicating content.
+- **Embed worker** — idle gate removed; the background embed worker now runs every 30 s during active sessions instead of waiting for an explicit activity signal.
+
 ## [5.20.6] - 2026-04-16
 
 ### Fixed

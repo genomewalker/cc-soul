@@ -170,8 +170,10 @@ void Subconscious::process_loop() {
             run_correction_promotion();
         }
 
-        // Background embedding: embed pending wisdom memories in small batches (idle only)
-        if (config_.enable_background_embedding && embedder_ && field_store_ && is_idle() && time_for_background_embedding()) {
+        // Background embedding: embed pending memories in small batches.
+        // Rate-limited by embedding_interval (30s); idle check removed so embeds
+        // clear even during active sessions.
+        if (config_.enable_background_embedding && embedder_ && field_store_ && time_for_background_embedding()) {
             run_background_embedding();
         }
 
