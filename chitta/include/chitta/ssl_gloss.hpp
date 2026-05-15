@@ -291,22 +291,27 @@ inline std::vector<std::string> ssl_query_variants(const std::string& query) {
     };
 
     std::string ql = detail::to_lower(query);
+    std::string intent_noun; // noun phrase extracted from intent pattern
 
     // --- Intent synonym expansion ---
-    // "what is X" / "define X" → add "definition X"
+    // "what is X" / "define X" → add hyphen variants of noun phrase
     if (ql.find("what is") != std::string::npos ||
+        ql.find("what are") != std::string::npos ||
         ql.find("define ")  != std::string::npos ||
         ql.find("meaning of") != std::string::npos) {
-        // extract the noun phrase after the intent words
         static const std::regex intent_re(
             R"((?:what is|what are|define|definition of|meaning of)\s+(?:a\s+)?(.+))",
             std::regex::icase);
         std::smatch m;
         if (std::regex_search(query, m, intent_re)) {
-            std::string noun = m[1].str();
-            // strip trailing '?'
-            while (!noun.empty() && (noun.back() == '?' || noun.back() == ' ')) noun.pop_back();
-            for (auto& v : detail::hyphen_variants(noun)) add(v);
+            intent_noun = m[1].str();
+            while (!intent_noun.empty() && (intent_noun.back() == '?' || intent_noun.back() == ' '))
+                intent_noun.pop_back();
+            for (auto& v : detail::hyphen_variants(intent_noun)) add(v);
+            // also add plural (SSL tokens often end in 's': chaos-nodes, login-nodes)
+            for (auto& v : detail::hyphen_variants(intent_noun)) {
+                if (!v.empty() && v.back() != 's') add(v + "s");
+            }
         }
     }
 
@@ -346,16 +351,17 @@ inline std::vector<std::string> ssl_query_variants(const std::string& query) {
         }
     }
 
-    // --- [domain] prefix + first entity ---
-    if (!inferred_tag.empty() && !entities.empty()) {
-        add(inferred_tag + " " + entities[0]);
-        // also hyphenated entity under tag
-        if (entities[0].find(' ') == std::string::npos) {
-            std::string hyph = entities[0];
-            // ensure it ends in 's' or not — keep both
-            add(inferred_tag + " " + detail::hyphen_variants(entities[0])[0]);
-            if (detail::hyphen_variants(entities[0]).size() > 1)
-                add(inferred_tag + " " + detail::hyphen_variants(entities[0])[1]);
+    // --- [domain] prefix + first entity (or intent noun fallback) ---
+    if (!inferred_tag.empty()) {
+        // prefer entity from regex; fall back to intent_noun if no entities found
+        std::string first_entity = !entities.empty() ? entities[0]
+                                 : !intent_noun.empty() ? intent_noun : "";
+        if (!first_entity.empty()) {
+            for (auto& v : detail::hyphen_variants(first_entity)) {
+                add(inferred_tag + " " + v);
+                // also plural under tag
+                if (!v.empty() && v.back() != 's') add(inferred_tag + " " + v + "s");
+            }
         }
     }
 
