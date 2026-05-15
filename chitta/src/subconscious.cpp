@@ -5,6 +5,7 @@
 
 #include <chitta/field_store.hpp>
 #include <chitta/mind/subconscious.hpp>
+#include <chitta/ssl_gloss.hpp>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -73,6 +74,12 @@ void Subconscious::start() {
         process_loop();
     });
 
+    if (config_.enable_background_embedding && embedder_ && field_store_) {
+        embed_thread_ = std::thread([this]() {
+            embed_loop();
+        });
+    }
+
     std::cerr << "[subconscious] Started background processor\n";
 }
 
@@ -84,6 +91,9 @@ void Subconscious::stop() {
 
     if (process_thread_.joinable()) {
         process_thread_.join();
+    }
+    if (embed_thread_.joinable()) {
+        embed_thread_.join();
     }
 
     std::cerr << "[subconscious] Stopped (processed=" << stats_.events_processed
@@ -170,12 +180,7 @@ void Subconscious::process_loop() {
             run_correction_promotion();
         }
 
-        // Background embedding: embed pending memories in small batches.
-        // Rate-limited by embedding_interval (30s); idle check removed so embeds
-        // clear even during active sessions.
-        if (config_.enable_background_embedding && embedder_ && field_store_ && time_for_background_embedding()) {
-            run_background_embedding();
-        }
+        // Background embedding runs in embed_thread_ (dedicated thread, no rpc_mutex).
 
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
@@ -964,41 +969,43 @@ bool Subconscious::time_for_background_embedding() const {
     return (now_ms() - last) >= interval_ms;
 }
 
+// Dedicated embedding thread — runs independently of process_loop, holds no RPC mutex.
+void Subconscious::embed_loop() {
+    const std::string prefix = "search_document: ";
+    // Initial delay: let WAL replay and HNSW load finish.
+    for (int i = 0; i < 150 && running_.load(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    while (running_.load()) {
+        auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
+        if (!pending.empty()) {
+            stats_.last_embedding_at = now_ms();
+            size_t embedded = 0;
+            for (uint64_t id : pending) {
+                if (!running_.load()) break;
+                auto content = field_store_->get_content(id);
+                if (content.empty()) continue;
+                auto gloss = chitta::ssl::gloss_ssl_content(content);
+                auto text  = gloss.empty() ? content : content + "\n" + gloss;
+                auto emb = embed(prefix + text);
+                if (emb.empty()) { stats_.embedding_skips++; continue; }
+                // No C++ lock: Rust store uses internal RwLocks.
+                field_store_->backfill_embedding(id, emb);
+                embedded++;
+            }
+            if (embedded > 0) {
+                stats_.symbols_embedded += embedded;
+                std::cerr << "[embed_loop] Embedded " << embedded << "/" << pending.size() << " pending\n";
+            }
+        }
+        // Sleep 30s in small increments so shutdown is responsive.
+        for (int i = 0; i < 300 && running_.load(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
 void Subconscious::run_background_embedding() {
-    stats_.last_embedding_at = now_ms();
-
-    std::vector<uint64_t> pending;
-    { auto lk = write_lock(); pending = field_store_->pending_embeddings(config_.embedding_batch_size); }
-    if (pending.empty()) return;
-
-    size_t embedded = 0;
-    for (uint64_t id : pending) {
-        if (!running_.load()) break;
-
-        std::string meta_json;
-        { auto lk = write_lock(); meta_json = field_store_->get_memory_metadata(id); }
-        if (meta_json.empty()) continue;
-
-        std::string text;
-        try {
-            auto meta = nlohmann::json::parse(meta_json, nullptr, false);
-            if (meta.is_discarded()) continue;
-            text = meta.value("content", std::string{});
-        } catch (...) { continue; }
-        if (text.empty()) continue;
-
-        auto emb = embed(text);  // no lock — expensive ONNX transform
-        if (emb.empty()) { stats_.embedding_skips++; continue; }
-
-        { auto lk = write_lock(); field_store_->backfill_embedding(id, emb); }
-        embedded++;
-    }
-
-    if (embedded > 0) {
-        stats_.symbols_embedded += embedded;
-        std::cerr << "[subconscious] Background embedded " << embedded
-                  << " memories (" << pending.size() << " were pending)\n";
-    }
+    // Kept for API compat; work moved to embed_loop() dedicated thread.
 }
 
 size_t Subconscious::flush_embedding_queue() {
