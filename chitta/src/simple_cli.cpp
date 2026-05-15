@@ -228,6 +228,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto binary_check_interval   = std::chrono::seconds(60);  // Check for updated binary every 60s
         auto pending_embed_interval  = std::chrono::seconds(30);  // Backfill embed_pending memories
         auto last_pending_embed = std::chrono::steady_clock::now();
+        const std::string doc_embed_prefix = "search_document: ";
 
 #ifdef __linux__
         // inotify watcher on segments/ dir for same-host peer writes
@@ -257,30 +258,38 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             }
 
             // Backfill embeddings for memories stored while yantra was unavailable.
-            // Acquire the rpc lock only briefly per memory (and never around the
-            // yantra transform, which is the slow part) so concurrent readers
-            // don't stall during the batch.
+            // Batched: collect content, embed sub-batches of 16 in one ONNX call,
+            // then store. Lock acquired briefly per memory, never around ONNX.
             if (yantra && (now_time - last_pending_embed >= pending_embed_interval)) {
                 last_pending_embed = now_time;
                 try {
                     std::vector<uint64_t> pending;
+                    std::vector<std::string> contents;
                     {
                         auto _lk = handler.acquire_lock();
-                        pending = field_store.pending_embeddings(500);
+                        pending = field_store.pending_embeddings(100);
+                        contents.reserve(pending.size());
+                        for (uint64_t id : pending)
+                            contents.push_back(field_store.get_content(id));
                     }
                     if (!pending.empty()) {
                         std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
-                        for (uint64_t id : pending) {
-                            std::string mem;
-                            {
+                        // Batch-embed in sub-batches of 8; one lock acquisition per insertion
+                        constexpr size_t SUB_BATCH = 8;
+                        for (size_t b = 0; b < pending.size(); b += SUB_BATCH) {
+                            size_t end = std::min(b + SUB_BATCH, pending.size());
+                            std::vector<std::string> batch_texts;
+                            batch_texts.reserve(end - b);
+                            for (size_t i = b; i < end; ++i)
+                                batch_texts.push_back(contents[i].empty() ? "" : doc_embed_prefix + contents[i]);
+                            auto arthas = yantra->transform_batch(batch_texts);
+                            for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
+                                if (contents[b + i].empty()) continue;
+                                const auto& emb = arthas[i].nu.data;
+                                if (emb.size() != EMBED_DIM) continue;
                                 auto _lk = handler.acquire_lock();
-                                mem = field_store.get_content(id);
+                                field_store.backfill_embedding(pending[b + i], emb);
                             }
-                            if (mem.empty()) continue;
-                            auto emb = yantra->transform(mem, EmbedMode::Document).nu.data;
-                            if (emb.size() != EMBED_DIM) continue;
-                            auto _lk = handler.acquire_lock();
-                            field_store.backfill_embedding(id, emb);
                         }
                     }
                 } catch (const std::exception& e) {
@@ -920,8 +929,8 @@ int main(int argc, char* argv[]) {
     auto inner_yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
     std::shared_ptr<VakYantra> yantra;
     if (inner_yantra->awaken(model_path, vocab_path)) {
-        // Wrap with timeout protection (5s default timeout)
-        yantra = std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(5000));
+        // Wrap with timeout protection (30s to accommodate batched backfill calls)
+        yantra = std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(30000));
         std::cerr << "[Yantra] Awakened (timeout-protected)\n";
     } else {
         std::cerr << "[Yantra] Failed: " << inner_yantra->error() << "\n";
