@@ -84,11 +84,11 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.52</span>
       </div>
-      <p class="whats-new-title">1M-scale roadmap complete — memory index correctness fixes</p>
+      <p class="whats-new-title">Memory index correctness — deleted set trimming</p>
       <p class="whats-new-desc">
-        <strong>binary_vec delete path</strong> (v5.21.51) &mdash; <code>remove()</code> now clears <code>emb_offsets</code> for deleted memories; mmap-sourced entries no longer leak into <code>total_embedding_count()</code> or <code>all_ids()</code> after deletion. <code>purge_wrong_dim()</code> explicitly clears <code>binary_vec</code>/<code>binary_vec_pos</code>.
-        <strong>Payload content sidecar</strong> (v5.21.50) &mdash; <code>MemoryPayload.content</code> moves to a flat <code>.pld</code> sidecar; ~400&thinsp;MB off the main snapshot at 1M&thinsp;memories. v10 snapshots load transparently.
-        <strong>Mmap embeddings + checkpoint fixes</strong> (v5.21.47&ndash;49) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code>; flat Hamming scan; auto WAL compaction; episode TTL pruning.
+        <strong>Deleted set trimming</strong> (v5.21.52) &mdash; <code>trim_deleted()</code> removes soft-deleted IDs no longer reachable in either HNSW graph; called every WAL replay with <code>shrink_to_fit()</code>. Prevents unbounded growth under high churn.
+        <strong>binary_vec + emb_offsets delete path</strong> (v5.21.51) &mdash; <code>remove()</code> clears <code>emb_offsets</code>; <code>purge_wrong_dim()</code> clears <code>binary_vec</code>/<code>binary_vec_pos</code>.
+        <strong>Payload sidecar + mmap fixes</strong> (v5.21.47&ndash;50) &mdash; <code>.pld</code> sidecar; <code>EmbLookup&lt;&apos;a&gt;</code>; flat Hamming scan; auto WAL compaction; episode TTL pruning.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
