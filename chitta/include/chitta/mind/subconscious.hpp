@@ -216,6 +216,7 @@ private:
     // Threading
     std::thread process_thread_;
     std::thread embed_thread_;
+    size_t embed_cycle_count_ = 0;
     std::atomic<bool> running_{false};
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;

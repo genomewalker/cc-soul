@@ -124,6 +124,20 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["rebuild_fts_index"] = [this](const json& p) { return tool_rebuild_fts_index(p); };
 
+    tools_.push_back({{"name","prune_episodes"},{"description","Prune old/excess episode memories. Deletes episodes older than max_age_days (strength<0.3) and caps total count at max_count."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"max_age_days",{{"type","integer"},{"description","Delete episodes older than this (default 90)"}}},
+            {"max_count",{{"type","integer"},{"description","Cap total episode count at this (default 10000)"}}}
+        }}}}
+    });
+    handlers_["prune_episodes"] = [this](const json& p) {
+        uint64_t max_age = p.value("max_age_days", 90);
+        size_t   max_cnt = p.value("max_count", 10000);
+        int64_t  deleted = field_store_->prune_episodes(max_age, max_cnt);
+        std::string msg = "pruned " + std::to_string(deleted) + " episode memories";
+        return ToolResult::ok(msg, {{"deleted", deleted}});
+    };
+
     tools_.push_back({{"name","hygiene_stats"},{"description","Get memory hygiene statistics"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
