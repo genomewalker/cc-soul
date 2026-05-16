@@ -84,10 +84,11 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.51</span>
       </div>
-      <p class="whats-new-title">1M-scale roadmap complete — payload content sidecar</p>
+      <p class="whats-new-title">1M-scale roadmap complete — memory index correctness fixes</p>
       <p class="whats-new-desc">
-        <strong>Payload content sidecar</strong> (v5.21.50) &mdash; <code>MemoryPayload.content</code> moves from the main bincode snapshot into a flat <code>.pld</code> sidecar (<code>[magic][count]([id][len][bytes])&times;N</code>). Saves ~400&thinsp;MB from the snapshot at 1M&thinsp;memories. v11 snapshot magic; v10 snapshots load transparently with no migration step.
-        <strong>Mmap embeddings + checkpoint fixes</strong> (v5.21.47&ndash;49) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> activates mmap at any scale; checkpoint correctly merges mmap bulk + heap delta; flat Hamming scan; auto WAL compaction; episode TTL pruning.
+        <strong>binary_vec delete path</strong> (v5.21.51) &mdash; <code>remove()</code> now clears <code>emb_offsets</code> for deleted memories; mmap-sourced entries no longer leak into <code>total_embedding_count()</code> or <code>all_ids()</code> after deletion. <code>purge_wrong_dim()</code> explicitly clears <code>binary_vec</code>/<code>binary_vec_pos</code>.
+        <strong>Payload content sidecar</strong> (v5.21.50) &mdash; <code>MemoryPayload.content</code> moves to a flat <code>.pld</code> sidecar; ~400&thinsp;MB off the main snapshot at 1M&thinsp;memories. v10 snapshots load transparently.
+        <strong>Mmap embeddings + checkpoint fixes</strong> (v5.21.47&ndash;49) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code>; flat Hamming scan; auto WAL compaction; episode TTL pruning.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
