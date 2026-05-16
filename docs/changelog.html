@@ -459,13 +459,14 @@ body::before {
     <!-- 5.21.x -->
     <article class="changelog-version reveal">
       <div class="version-header">
-        <span class="version-number">v5.21.0&ndash;5.21.49</span>
+        <span class="version-number">v5.21.0&ndash;5.21.50</span>
         <span class="version-date">May 2026</span>
         <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
         <ul>
+          <li><strong>Payload content sidecar</strong> (v5.21.50) &mdash; <code>MemoryPayload.content</code> moved from bincode into a flat <code>.pld</code> sidecar: <code>[PLD_MAGIC:u64][count:u64]([id:u64][len:u32][bytes&times;len])&times;N</code>. <code>save_full_snapshot()</code> writes <code>.pld</code> then clears content before bincode serialization; <code>load_payload_sidecar()</code> repopulates on load. v10 snapshots (content in bincode, no <code>.pld</code>) load transparently as a legacy path. New snapshot magic <code>v1.0.11</code> (<code>0xF011_5741_7E00_000B</code>). At 1M&thinsp;memories &times; ~500&thinsp;B average content: ~400&thinsp;MB off the main bincode snapshot.</li>
           <li><strong>Flat binary scan Vec</strong> (v5.21.47) &mdash; <code>hamming_candidates()</code> now iterates a contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code> instead of <code>HashMap::iter()</code>. Position index (<code>binary_vec_pos</code>) gives O(1) swap-remove on delete; in-place update on upsert. ~4&times; fewer cache misses at 1M&thinsp;memories. Guard requires <code>binary_vec.len() == binary_codes.len()</code> before using the fast path.</li>
           <li><strong>Auto WAL compaction</strong> (v5.21.47) &mdash; <code>maybe_compact_wal(threshold)</code> checks segment count via <code>wal_segment_count()</code> and, if over threshold and 1&thinsp;h has elapsed since last compact, calls <code>compact_wal()</code>. Called every 10 embed cycles (~5&thinsp;min) from <code>embed_loop</code> with threshold=50. Cooldown tracked via <code>last_compact_ms: Arc&lt;AtomicI64&gt;</code> on <code>ChittaField</code>. FFI: <code>cf_wal_segment_count</code>, <code>cf_maybe_compact_wal</code>.</li>
           <li><strong>Episode TTL pruning</strong> (v5.21.47) &mdash; <code>prune_episodes(max_age_days, max_count)</code> deletes episodes older than 90&thinsp;days with strength&thinsp;&lt;&thinsp;0.3, then caps total episode count at 10&thinsp;K (80% target on cap trigger). Called every 200 embed cycles (~1.7&thinsp;h). Exposed as <code>prune_episodes</code> MCP tool. FFI: <code>cf_prune_episodes</code>.</li>
