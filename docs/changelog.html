@@ -459,7 +459,7 @@ body::before {
     <!-- 5.21.x -->
     <article class="changelog-version reveal">
       <div class="version-header">
-        <span class="version-number">v5.21.0&ndash;5.21.51</span>
+        <span class="version-number">v5.21.0&ndash;5.21.52</span>
         <span class="version-date">May 2026</span>
         <span class="version-latest">Latest</span>
       </div>
@@ -481,6 +481,7 @@ body::before {
         </ul>
         <h4>Fixed</h4>
         <ul>
+          <li><strong>Deleted set trimming</strong> (v5.21.52) &mdash; <code>trim_deleted()</code> on <code>SemanticIndex</code> retains only IDs still present as nodes in <code>hnsw</code> or <code>delta_hnsw</code> — the only structures that can surface a deleted ID in search results. Called at the end of every <code>normalize_all()</code> (once per WAL replay / restart); follows with <code>shrink_to_fit()</code> to return freed memory to the allocator. Prevents unbounded growth of the soft-delete set under high churn.</li>
           <li><strong>binary_vec delete path</strong> (v5.21.51) &mdash; <code>SemanticIndex::remove()</code> now clears <code>emb_offsets</code> for the removed ID; previously mmap-sourced memories leaked into <code>total_embedding_count()</code> and <code>all_ids()</code> after deletion, inflating the binary guard threshold and including deleted IDs in HNSW rebuilds. <code>purge_wrong_dim()</code> now explicitly clears <code>binary_vec</code> and <code>binary_vec_pos</code> alongside <code>binary_codes</code> rather than relying on the <code>normalize_all()</code> length-mismatch rebuild.</li>
           <li><strong>Mmap checkpoint data loss</strong> (v5.21.49) &mdash; <code>save_embeddings_sidecar()</code> previously wrote only the heap delta when mmap was active, overwriting the sidecar with a fraction of the dataset. Now copies raw <code>f32</code> bytes directly from the mmap (zero-deserialise) and appends the heap delta; the next load and <code>activate_mmap_embeddings()</code> call recover the full combined dataset.</li>
           <li><strong>Binary codes wipeout after mmap activation</strong> (v5.21.49) &mdash; <code>normalize_all()</code> rebuilt <code>binary_codes</code> by iterating <code>self.embeddings</code> (heap-only), producing an empty map when mmap was active and disabling the Hamming fast path. Now iterates all IDs via <code>EmbLookup</code> over both heap and mmap.</li>
