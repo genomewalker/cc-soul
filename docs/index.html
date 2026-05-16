@@ -84,12 +84,11 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.49</span>
       </div>
-      <p class="whats-new-title">1M-scale runtime: mmap embeddings fully active, flat binary scan, auto WAL compaction, episode pruning</p>
+      <p class="whats-new-title">Mmap checkpoint correctness + 1M-scale runtime</p>
       <p class="whats-new-desc">
-        <strong>Mmap embeddings — fully active</strong> &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> splits heap/mmap field borrows so HNSW insert, search, and neighbor selection all work with mmap-backed embeddings. <code>activate_mmap_embeddings()</code> now fires whenever the <code>.emb</code> sidecar exists (no size threshold); heap HashMap freed at any scale after first checkpoint. <code>total_embedding_count()</code> unifies heap + mmap counts across all guards.
-        <strong>Flat binary scan</strong> &mdash; Hamming pre-filter iterates a contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code>. ~4&times; fewer cache misses at 1M&thinsp;memories; swap-remove keeps deletes O(1).
-        <strong>Auto WAL compaction</strong> &mdash; <code>maybe_compact_wal(50)</code> fires every 10 embed cycles with a 1-hour cooldown; WAL stays under ~50 segments unattended.
-        <strong>Episode TTL pruning</strong> &mdash; <code>prune_episodes(90, 10000)</code> runs every ~1.7&thinsp;h; deletes weak old episodes and caps total at 10&thinsp;K. Also the <code>prune_episodes</code> MCP tool.
+        <strong>Checkpoint correctness fix</strong> (v5.21.49) &mdash; <code>save_embeddings_sidecar()</code> now merges mmap bulk (zero-copy raw bytes) + heap delta so no embeddings are lost at checkpoint when mmap is active. <code>normalize_all()</code> binary rebuild iterates both sources via <code>EmbLookup</code>; Hamming fast path no longer wiped after mmap activation.
+        <strong>Mmap embeddings — fully active</strong> (v5.21.48) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> enables HNSW neighbor lookups against mmap-backed embeddings. Fires at any scale; heap freed after first checkpoint.
+        <strong>Flat binary scan &bull; Auto WAL compaction &bull; Episode TTL pruning</strong> (v5.21.47) &mdash; contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code> Hamming scan; <code>maybe_compact_wal(50)</code> every 10 embed cycles; <code>prune_episodes(90,&thinsp;10000)</code> every ~1.7&thinsp;h.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
