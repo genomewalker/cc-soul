@@ -38,6 +38,9 @@ int cf_set_memory_status(struct CfHandle* h, uint64_t memory_id, uint8_t status)
 int cf_set_epistemic_status(struct CfHandle* h, uint64_t memory_id, uint8_t epistemic_status);
 int cf_set_affect(struct CfHandle* h, uint64_t memory_id, float valence, float arousal);
 int64_t cf_compact_wal(struct CfHandle* h);
+size_t  cf_wal_segment_count(const struct CfHandle* h);
+int     cf_maybe_compact_wal(struct CfHandle* h, size_t threshold);
+int64_t cf_prune_episodes(struct CfHandle* h, uint64_t max_age_days, size_t max_count);
 
 // Affective recall FFI
 int cf_recall_semantic_ctx(struct CfHandle* h,
@@ -297,6 +300,22 @@ public:
     /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.
     int64_t compact_wal() {
         return cf_compact_wal(handle_);
+    }
+
+    /// Count WAL segment files.
+    size_t wal_segment_count() const {
+        return cf_wal_segment_count(handle_);
+    }
+
+    /// Compact WAL if segments > threshold and 1h cooldown elapsed.
+    /// Returns 1=compacted, 0=skipped, -1=error.
+    int maybe_compact_wal(size_t threshold = 50) {
+        return cf_maybe_compact_wal(handle_, threshold);
+    }
+
+    /// Prune episode memories older than max_age_days (strength<0.3) and cap at max_count.
+    int64_t prune_episodes(uint64_t max_age_days = 90, size_t max_count = 10000) {
+        return cf_prune_episodes(handle_, max_age_days, max_count);
     }
 
     /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.

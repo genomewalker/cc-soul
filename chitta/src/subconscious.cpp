@@ -998,6 +998,12 @@ void Subconscious::embed_loop() {
                 std::cerr << "[embed_loop] Embedded " << embedded << "/" << pending.size() << " pending\n";
             }
         }
+        // Periodic maintenance every 10 embed cycles (~5 min at 30s/cycle).
+        if (++embed_cycle_count_ % 10 == 0)
+            field_store_->maybe_compact_wal(50);
+        // Episode pruning every 200 cycles (~1.7h at 30s/cycle).
+        if (embed_cycle_count_ % 200 == 0)
+            field_store_->prune_episodes(90, 10000);
         // Sleep 30s in small increments so shutdown is responsive.
         for (int i = 0; i < 300 && running_.load(); ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
