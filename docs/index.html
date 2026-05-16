@@ -84,11 +84,11 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.54</span>
       </div>
-      <p class="whats-new-title">Memory index correctness — HNSW sidecar staleness check</p>
+      <p class="whats-new-title">Build warning cleanup + memory index correctness series</p>
       <p class="whats-new-desc">
-        <strong>HNSW sidecar staleness check</strong> (v5.21.53) &mdash; <code>load_hnsw()</code> now validates against <code>total_embedding_count()</code> (heap + mmap) instead of heap-only <code>embeddings.len()</code>; previously a loaded sidecar would always be rejected when mmap was active.
-        <strong>Deleted set trimming</strong> (v5.21.52) &mdash; <code>trim_deleted()</code> removes soft-deleted IDs no longer reachable in either HNSW graph; prevents unbounded growth under high churn.
-        <strong>binary_vec + emb_offsets + payload sidecar</strong> (v5.21.47&ndash;51) &mdash; delete path fixes; <code>.pld</code> sidecar; mmap embeddings; flat Hamming scan; auto WAL compaction; episode TTL pruning.
+        <strong>Warning-free build</strong> (v5.21.54) &mdash; removed dead <code>default_lsh_buckets()</code>, redundant <code>SessionRecallHit</code> import, and silenced reserved <code>config</code> field. Zero warnings.
+        <strong>HNSW sidecar staleness + deleted set trimming</strong> (v5.21.52&ndash;53) &mdash; <code>load_hnsw()</code> uses <code>total_embedding_count()</code>; <code>trim_deleted()</code> prevents unbounded soft-delete growth.
+        <strong>delete path + payload sidecar + mmap</strong> (v5.21.47&ndash;51) &mdash; <code>emb_offsets</code> cleared on remove; <code>.pld</code> sidecar; flat Hamming scan; WAL compaction; episode TTL pruning.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
