@@ -84,14 +84,12 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.47</span>
       </div>
-      <p class="whats-new-title">HNSW, PoE reliability, chitta_thinking, and chitta-research</p>
+      <p class="whats-new-title">1M-scale runtime: flat binary scan, auto WAL compaction, episode pruning</p>
       <p class="whats-new-desc">
-        <strong>Two-tier HNSW</strong> &mdash; above 100&thinsp;K memories, new inserts route to a small delta graph (O(log N<sub>delta</sub>)) instead of the large base; merged at checkpoint. Persisted as a <code>.delta.hnsw</code> sidecar.
-        <strong>v10 snapshot format</strong> &mdash; embeddings and binary sparse codes live in flat <code>.emb</code> / <code>.bin</code> sidecars, shrinking the main bincode snapshot and enabling future mmap access.
-        <strong>SSL NL gloss</strong> &mdash; SSL triplet memories re-embedded with natural-language sentences via <code>gloss_ssl_content()</code>, closing the representation gap between compact SSL format and BGE queries.
-        <strong>Alias memories</strong> &mdash; every SSL memory auto-creates a linked <code>kind=alias</code> NL counterpart connected by an <code>alias-of</code> triplet, keeping both representations synchronized.
-        <strong>Embed worker fix</strong> &mdash; idle gate removed; background embedding now runs every 30&thinsp;s during active sessions, clearing the pending queue without waiting for inactivity.
-        <strong>HNSW semantic index</strong> activates above 2,000 memories for dense recall at scale.
+        <strong>Flat binary scan</strong> &mdash; Hamming pre-filter now iterates a contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code> instead of a HashMap. ~4&times; fewer cache misses at 1M&thinsp;memories; swap-remove keeps deletes O(1).
+        <strong>Auto WAL compaction</strong> &mdash; <code>maybe_compact_wal(50)</code> fires every 10 embed cycles (~5&thinsp;min) with a 1-hour cooldown; WAL never accumulates more than ~50 segments unattended.
+        <strong>Episode TTL pruning</strong> &mdash; <code>prune_episodes(90, 10000)</code> runs every ~1.7&thinsp;h; deletes weak episodes older than 90&thinsp;days and caps total episode count at 10&thinsp;K. Also exposed as the <code>prune_episodes</code> MCP tool.
+        <strong>Mmap embedding skeleton</strong> &mdash; <code>activate_mmap_embeddings()</code> builds an offset index from the <code>.emb</code> sidecar and clears the 1&thinsp;GB heap HashMap above 200&thinsp;K memories. Infrastructure in place; fires automatically when scale warrants it.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
