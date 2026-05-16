@@ -84,12 +84,12 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.48</span>
       </div>
-      <p class="whats-new-title">1M-scale runtime: flat binary scan, auto WAL compaction, episode pruning</p>
+      <p class="whats-new-title">1M-scale runtime: mmap embeddings fully active, flat binary scan, auto WAL compaction, episode pruning</p>
       <p class="whats-new-desc">
-        <strong>Flat binary scan</strong> &mdash; Hamming pre-filter now iterates a contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code> instead of a HashMap. ~4&times; fewer cache misses at 1M&thinsp;memories; swap-remove keeps deletes O(1).
-        <strong>Auto WAL compaction</strong> &mdash; <code>maybe_compact_wal(50)</code> fires every 10 embed cycles (~5&thinsp;min) with a 1-hour cooldown; WAL never accumulates more than ~50 segments unattended.
-        <strong>Episode TTL pruning</strong> &mdash; <code>prune_episodes(90, 10000)</code> runs every ~1.7&thinsp;h; deletes weak episodes older than 90&thinsp;days and caps total episode count at 10&thinsp;K. Also exposed as the <code>prune_episodes</code> MCP tool.
-        <strong>Mmap embedding skeleton</strong> &mdash; <code>activate_mmap_embeddings()</code> builds an offset index from the <code>.emb</code> sidecar and clears the 1&thinsp;GB heap HashMap above 200&thinsp;K memories. Infrastructure in place; fires automatically when scale warrants it.
+        <strong>Mmap embeddings — fully active</strong> &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> splits heap/mmap field borrows so HNSW insert, search, and neighbor selection all work with mmap-backed embeddings. <code>activate_mmap_embeddings()</code> now fires whenever the <code>.emb</code> sidecar exists (no size threshold); heap HashMap freed at any scale after first checkpoint. <code>total_embedding_count()</code> unifies heap + mmap counts across all guards.
+        <strong>Flat binary scan</strong> &mdash; Hamming pre-filter iterates a contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code>. ~4&times; fewer cache misses at 1M&thinsp;memories; swap-remove keeps deletes O(1).
+        <strong>Auto WAL compaction</strong> &mdash; <code>maybe_compact_wal(50)</code> fires every 10 embed cycles with a 1-hour cooldown; WAL stays under ~50 segments unattended.
+        <strong>Episode TTL pruning</strong> &mdash; <code>prune_episodes(90, 10000)</code> runs every ~1.7&thinsp;h; deletes weak old episodes and caps total at 10&thinsp;K. Also the <code>prune_episodes</code> MCP tool.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
