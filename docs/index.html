@@ -84,11 +84,10 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.21.50</span>
       </div>
-      <p class="whats-new-title">Mmap checkpoint correctness + 1M-scale runtime</p>
+      <p class="whats-new-title">1M-scale roadmap complete — payload content sidecar</p>
       <p class="whats-new-desc">
-        <strong>Checkpoint correctness fix</strong> (v5.21.49) &mdash; <code>save_embeddings_sidecar()</code> now merges mmap bulk (zero-copy raw bytes) + heap delta so no embeddings are lost at checkpoint when mmap is active. <code>normalize_all()</code> binary rebuild iterates both sources via <code>EmbLookup</code>; Hamming fast path no longer wiped after mmap activation.
-        <strong>Mmap embeddings — fully active</strong> (v5.21.48) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> enables HNSW neighbor lookups against mmap-backed embeddings. Fires at any scale; heap freed after first checkpoint.
-        <strong>Flat binary scan &bull; Auto WAL compaction &bull; Episode TTL pruning</strong> (v5.21.47) &mdash; contiguous <code>Vec&lt;(MemoryId, [u64;4])&gt;</code> Hamming scan; <code>maybe_compact_wal(50)</code> every 10 embed cycles; <code>prune_episodes(90,&thinsp;10000)</code> every ~1.7&thinsp;h.
+        <strong>Payload content sidecar</strong> (v5.21.50) &mdash; <code>MemoryPayload.content</code> moves from the main bincode snapshot into a flat <code>.pld</code> sidecar (<code>[magic][count]([id][len][bytes])&times;N</code>). Saves ~400&thinsp;MB from the snapshot at 1M&thinsp;memories. v11 snapshot magic; v10 snapshots load transparently with no migration step.
+        <strong>Mmap embeddings + checkpoint fixes</strong> (v5.21.47&ndash;49) &mdash; <code>EmbLookup&lt;&apos;a&gt;</code> activates mmap at any scale; checkpoint correctly merges mmap bulk + heap delta; flat Hamming scan; auto WAL compaction; episode TTL pruning.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
