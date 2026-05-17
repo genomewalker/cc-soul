@@ -69,6 +69,9 @@ INTERNAL_TOOLS = {
     "connect_batch", "research_cycle", "research_store", "research_topics",
     # Write-gate
     "write_gate_stats",
+    # Symbol event log
+    "symbol_event_log",
+    "mark_memory_invalidated",
     # Daemon internals
     "cycle", "anticipation_gate_status", "anticipation_record_outcome",
     "session_register", "session_heartbeat", "session_deregister",

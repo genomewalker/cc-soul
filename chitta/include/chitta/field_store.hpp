@@ -43,6 +43,9 @@ int     cf_maybe_compact_wal(struct CfHandle* h, size_t threshold);
 int64_t cf_prune_episodes(struct CfHandle* h, uint64_t max_age_days, size_t max_count);
 uint64_t cf_promote_staged_memories(struct CfHandle* h);
 char*    cf_write_gate_stats(const struct CfHandle* h);
+uint64_t cf_log_symbol_event(struct CfHandle* h, const char* params_json);
+char*    cf_query_symbol_events(const struct CfHandle* h, const char* params_json);
+int      cf_mark_memory_invalidated(struct CfHandle* h, uint64_t memory_id, const char* reason);
 
 // Affective recall FFI
 int cf_recall_semantic_ctx(struct CfHandle* h,
@@ -334,6 +337,22 @@ public:
         std::string r(s);
         cf_free_string(s);
         return r;
+    }
+
+    uint64_t log_symbol_event(const std::string& params_json) {
+        return cf_log_symbol_event(handle_, params_json.c_str());
+    }
+
+    std::string query_symbol_events(const std::string& params_json) const {
+        char* s = cf_query_symbol_events(handle_, params_json.c_str());
+        if (!s) return "[]";
+        std::string r(s);
+        cf_free_string(s);
+        return r;
+    }
+
+    bool mark_memory_invalidated(uint64_t memory_id, const std::string& reason) {
+        return cf_mark_memory_invalidated(handle_, memory_id, reason.c_str()) == 0;
     }
 
     /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.
@@ -775,6 +794,17 @@ public:
             embedding.data(), embedding.size(),
             desc_ptr, memory_id, &id);
         if (r != 0) throw std::runtime_error(last_error());
+        // Auto-log symbol event for code-intel tracking
+        {
+            nlohmann::json ev;
+            ev["symbol_name"] = name;
+            ev["file_path"]   = file_path;
+            ev["symbol_id"]   = id;
+            ev["kind"]        = 0; // Edited (Created also mapped here; upsert is idempotent)
+            ev["session_id"]  = "";
+            ev["harness"]     = "";
+            cf_log_symbol_event(handle_, ev.dump().c_str());
+        }
         return id;
     }
 
