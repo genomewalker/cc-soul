@@ -41,6 +41,8 @@ int64_t cf_compact_wal(struct CfHandle* h);
 size_t  cf_wal_segment_count(const struct CfHandle* h);
 int     cf_maybe_compact_wal(struct CfHandle* h, size_t threshold);
 int64_t cf_prune_episodes(struct CfHandle* h, uint64_t max_age_days, size_t max_count);
+uint64_t cf_promote_staged_memories(struct CfHandle* h);
+char*    cf_write_gate_stats(const struct CfHandle* h);
 
 // Affective recall FFI
 int cf_recall_semantic_ctx(struct CfHandle* h,
@@ -316,6 +318,22 @@ public:
     /// Prune episode memories older than max_age_days (strength<0.3) and cap at max_count.
     int64_t prune_episodes(uint64_t max_age_days = 90, size_t max_count = 10000) {
         return cf_prune_episodes(handle_, max_age_days, max_count);
+    }
+
+    /// Promote staged memories that have been recalled; prune stale ones.
+    /// Returns {promoted, pruned} packed as (promoted<<32)|pruned.
+    std::pair<uint32_t,uint32_t> promote_staged_memories() {
+        uint64_t r = cf_promote_staged_memories(handle_);
+        return {static_cast<uint32_t>(r >> 32), static_cast<uint32_t>(r & 0xFFFFFFFF)};
+    }
+
+    /// Return JSON with staged memory count and oldest staged age.
+    std::string write_gate_stats_json() const {
+        char* s = cf_write_gate_stats(handle_);
+        if (!s) return "{}";
+        std::string r(s);
+        cf_free_string(s);
+        return r;
     }
 
     /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.

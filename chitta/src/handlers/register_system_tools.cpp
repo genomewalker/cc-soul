@@ -138,6 +138,11 @@ void FieldRpcHandler::register_system_tools() {
         return ToolResult::ok(msg, {{"deleted", deleted}});
     };
 
+    tools_.push_back({{"name","write_gate_stats"},{"description","Show write-gate admission stats: staged memory count and oldest staged memory age"},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["write_gate_stats"] = [this](const json& p) { return tool_write_gate_stats(p); };
+
     tools_.push_back({{"name","hygiene_stats"},{"description","Get memory hygiene statistics"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
