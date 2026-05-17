@@ -621,6 +621,24 @@
       </div>
     </div>
 
+    <!-- MEMORY QUALITY & INTROSPECTION -->
+    <div class="tools-category" id="cat-quality">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6" stroke="#7BBFA8" stroke-width="1.2"/><path d="M10 7 L10 11" stroke="#7BBFA8" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="13.5" r="0.7" fill="#7BBFA8"/></svg>
+        </div>
+        <span class="tools-category-name">Memory Quality &amp; Introspection</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-category-body">
+        <div class="tool-row"><span class="tool-name">what_do_i_know_about</span><span class="tool-desc">Introspect what cc-soul believes about a topic &mdash; returns claims with provenance, staleness verdict, and contradiction flags</span></div>
+        <div class="tool-row"><span class="tool-name">cross_harness_conflicts</span><span class="tool-desc">Find memories where <code>claude-code</code> and <code>codex</code> harnesses disagree on the same topic, ranked by disagreement score</span></div>
+        <div class="tool-row"><span class="tool-name">write_gate_stats</span><span class="tool-desc">Show staged memory count and oldest staged memory age (write-gate admission stats)</span></div>
+        <div class="tool-row"><span class="tool-name">mark_memory_invalidated</span><span class="tool-desc">Mark a memory as invalidated by a commit hash or symbol-change ID, setting <code>invalidated_by</code> on <code>MemoryState</code></span></div>
+      </div>
+    </div>
+
     <!-- HYGIENE & CALIBRATION -->
     <div class="tools-category" id="cat-hygiene">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
