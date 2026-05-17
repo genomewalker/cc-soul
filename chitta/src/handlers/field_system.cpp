@@ -582,6 +582,7 @@ ToolResult FieldRpcHandler::tool_hygiene_run(const json& params) {
     size_t purged = field_store_->purge_corrupt();
 
     size_t trimmed = field_store_->trim_realm_names();
+    size_t requeued = field_store_->requeue_ghost_embeddings();
     field_store_->flush();
 
     std::ostringstream ss;
@@ -590,7 +591,8 @@ ToolResult FieldRpcHandler::tool_hygiene_run(const json& params) {
        << "  demoted  : " << demoted   << "\n"
        << "  removed  : " << removed   << " (confidence < " << threshold << ")\n"
        << "  purged   : " << purged    << " corrupt/empty nodes\n"
-       << "  trimmed  : " << trimmed   << " dirty realm names\n";
+       << "  trimmed  : " << trimmed   << " dirty realm names\n"
+       << "  requeued : " << requeued  << " ghost embeddings\n";
 
     return ToolResult::ok(ss.str(), {
         {"promoted",  promoted},
@@ -598,6 +600,7 @@ ToolResult FieldRpcHandler::tool_hygiene_run(const json& params) {
         {"removed",   removed},
         {"purged",    purged},
         {"trimmed",   trimmed},
+        {"requeued",  requeued},
         {"threshold", threshold},
     });
 }
