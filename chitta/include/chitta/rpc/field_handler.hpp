@@ -665,6 +665,7 @@ private:
     #include "handlers/field_distill.hpp"
     #include "handlers/field_misc.hpp"
     #include "handlers/field_contradiction.hpp"
+    #include "handlers/field_write_gate.hpp"
     #include "handlers/field_operator.hpp"
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
