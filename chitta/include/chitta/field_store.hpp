@@ -46,6 +46,7 @@ char*    cf_write_gate_stats(const struct CfHandle* h);
 uint64_t cf_log_symbol_event(struct CfHandle* h, const char* params_json);
 char*    cf_query_symbol_events(const struct CfHandle* h, const char* params_json);
 int      cf_mark_memory_invalidated(struct CfHandle* h, uint64_t memory_id, const char* reason);
+char*    cf_query_cross_harness_conflicts(const struct CfHandle* h, const char* realm, uint32_t limit, float min_score);
 char*    cf_symbol_stale_for_memory(const struct CfHandle* h, uint64_t memory_id);
 char*    cf_memory_claim_info(const struct CfHandle* h, uint64_t memory_id, int64_t now_ms);
 
@@ -355,6 +356,12 @@ public:
 
     bool mark_memory_invalidated(uint64_t memory_id, const std::string& reason) {
         return cf_mark_memory_invalidated(handle_, memory_id, reason.c_str()) == 0;
+    }
+
+    std::string query_cross_harness_conflicts(const std::string& realm, uint32_t limit, float min_score) const {
+        char* s = cf_query_cross_harness_conflicts(handle_, realm.c_str(), limit, min_score);
+        if (!s) return "[]";
+        std::string r(s); cf_free_string(s); return r;
     }
 
     std::string symbol_stale_for_memory_json(uint64_t memory_id) const {

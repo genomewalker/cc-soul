@@ -90,8 +90,27 @@ ToolResult FieldRpcHandler::tool_what_do_i_know_about(const json& params) {
         if ((int)claims.size() >= k) break;
     }
 
+    // Cross-harness conflicts scoped to the recalled cluster
+    json cross_harness = json::array();
+    if (!claims.empty()) {
+        std::string ch_raw = field_store_->query_cross_harness_conflicts(realm, 10, 0.3f);
+        try {
+            auto ch_arr = json::parse(ch_raw);
+            // Keep only pairs where at least one memory_id is in our claims set
+            std::unordered_set<uint64_t> claim_ids;
+            for (const auto& c : claims) claim_ids.insert(c["memory_id"].get<uint64_t>());
+            for (auto& pair : ch_arr) {
+                uint64_t a = pair.value("memory_a_id", uint64_t(0));
+                uint64_t b = pair.value("memory_b_id", uint64_t(0));
+                if (claim_ids.count(a) || claim_ids.count(b))
+                    cross_harness.push_back(std::move(pair));
+            }
+        } catch (...) {}
+    }
+
     return ToolResult::ok(
-        json{{"claims", claims}, {"topic", topic}, {"total", claims.size()}, {"ok", true}}.dump()
+        json{{"claims", claims}, {"cross_harness_conflicts", cross_harness},
+             {"topic", topic}, {"total", claims.size()}, {"ok", true}}.dump()
     );
 }
 

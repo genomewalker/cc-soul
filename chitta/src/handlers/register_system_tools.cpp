@@ -172,6 +172,15 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["what_do_i_know_about"] = [this](const json& p) { return tool_what_do_i_know_about(p); };
 
+    tools_.push_back({{"name","cross_harness_conflicts"},{"description","Find memories where claude-code and codex harnesses disagree on the same topic"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"realm",{{"type","string"},{"description","Realm filter (default: all)"}}},
+            {"limit",{{"type","integer"},{"description","Max conflict pairs to return (default 20)"}}},
+            {"min_disagreement_score",{{"type","number"},{"description","Minimum 1-cosine_similarity threshold (default 0.3)"}}}
+        }}}}
+    });
+    handlers_["cross_harness_conflicts"] = [this](const json& p) { return tool_cross_harness_conflicts(p); };
+
     tools_.push_back({{"name","hygiene_stats"},{"description","Get memory hygiene statistics"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });

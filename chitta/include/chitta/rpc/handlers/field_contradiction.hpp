@@ -7,3 +7,4 @@
     ToolResult tool_detect_contradictions(const json& params);
     ToolResult tool_resolve_contradiction(const json& params);
     ToolResult tool_scan_contradictions(const json& params);
+    ToolResult tool_cross_harness_conflicts(const json& params);

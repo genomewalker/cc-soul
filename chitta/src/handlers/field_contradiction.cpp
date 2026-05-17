@@ -252,4 +252,22 @@ ToolResult FieldRpcHandler::tool_resolve_contradiction(const json& params) {
     return ToolResult::ok(ss.str(), {{"ops", ops}});
 }
 
+ToolResult FieldRpcHandler::tool_cross_harness_conflicts(const json& params) {
+    std::string realm     = params.value("realm", "");
+    int limit             = params.value("limit", 20);
+    double min_score      = params.value("min_disagreement_score", 0.3);
+
+    std::string raw = field_store_->query_cross_harness_conflicts(
+        realm, static_cast<uint32_t>(limit), static_cast<float>(min_score));
+
+    try {
+        auto arr = json::parse(raw);
+        return ToolResult::ok(
+            json{{"conflicts", arr}, {"total", arr.size()}, {"ok", true}}.dump()
+        );
+    } catch (...) {
+        return ToolResult::ok(raw);
+    }
+}
+
 } // namespace chitta
