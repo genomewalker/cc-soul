@@ -67,6 +67,8 @@ INTERNAL_TOOLS = {
     "type_hierarchy", "version_check", "export_soul", "import_soul",
     # Research internals
     "connect_batch", "research_cycle", "research_store", "research_topics",
+    # Write-gate
+    "write_gate_stats",
     # Daemon internals
     "cycle", "anticipation_gate_status", "anticipation_record_outcome",
     "session_register", "session_heartbeat", "session_deregister",
