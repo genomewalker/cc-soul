@@ -125,6 +125,50 @@
   </div>
 </section>
 
+<!-- CODEX INSTALL -->
+<section class="content-section" id="codex">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="section-title">Codex</h2>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">cc-soul also works as a Codex plugin. The same chitta daemon, same 150+ tools, same memory &mdash; hooks wired into Codex&rsquo;s lifecycle events so memory flows automatically across both harnesses.</p>
+    </div>
+    <div class="steps-list">
+      <div class="step-card reveal reveal-delay-1">
+        <div class="step-header">
+          <span class="step-number">1</span>
+          <div class="step-info">
+            <h3 class="step-title">Run smart-install</h3>
+            <p class="step-desc">If you haven&rsquo;t already, install via Claude Code first &mdash; this builds the binaries and starts the daemon.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="command">claude</span> plugin add cc-soul@genomewalker-cc-soul</div>
+      </div>
+      <div class="step-card reveal reveal-delay-2">
+        <div class="step-header">
+          <span class="step-number">2</span>
+          <div class="step-info">
+            <h3 class="step-title">Wire Codex hooks</h3>
+            <p class="step-desc">Run the Codex hook configurator. Writes <code style="color:var(--aura-300);">~/.codex/hooks.json</code> with session-start, prompt, pre-tool, and stop handlers pointing at the same chitta daemon.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="command">~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/$(cat ~/.claude/plugins/cache/genomewalker-cc-soul/.version)/scripts/configure-codex-hooks.sh</span></div>
+      </div>
+      <div class="step-card reveal reveal-delay-3">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <div class="step-info">
+            <h3 class="step-title">Start a Codex session</h3>
+            <p class="step-desc">Memory from Claude Code sessions is immediately available in Codex, and vice versa. One soul, two harnesses.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># In a Codex session:</span>
+<span class="command">"What do you remember about this codebase?"</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- WHAT HAPPENS -->
 <section class="content-section">
   <div class="container">
