@@ -46,6 +46,8 @@ char*    cf_write_gate_stats(const struct CfHandle* h);
 uint64_t cf_log_symbol_event(struct CfHandle* h, const char* params_json);
 char*    cf_query_symbol_events(const struct CfHandle* h, const char* params_json);
 int      cf_mark_memory_invalidated(struct CfHandle* h, uint64_t memory_id, const char* reason);
+char*    cf_symbol_stale_for_memory(const struct CfHandle* h, uint64_t memory_id);
+char*    cf_memory_claim_info(const struct CfHandle* h, uint64_t memory_id, int64_t now_ms);
 
 // Affective recall FFI
 int cf_recall_semantic_ctx(struct CfHandle* h,
@@ -353,6 +355,18 @@ public:
 
     bool mark_memory_invalidated(uint64_t memory_id, const std::string& reason) {
         return cf_mark_memory_invalidated(handle_, memory_id, reason.c_str()) == 0;
+    }
+
+    std::string symbol_stale_for_memory_json(uint64_t memory_id) const {
+        char* s = cf_symbol_stale_for_memory(handle_, memory_id);
+        if (!s) return R"({"stale":false,"reason":null})";
+        std::string r(s); cf_free_string(s); return r;
+    }
+
+    std::string memory_claim_info_json(uint64_t memory_id, int64_t now_ms) const {
+        char* s = cf_memory_claim_info(handle_, memory_id, now_ms);
+        if (!s) return "{}";
+        std::string r(s); cf_free_string(s); return r;
     }
 
     /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.

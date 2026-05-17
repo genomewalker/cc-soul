@@ -441,6 +441,7 @@ add_executable(chittad
     src/handlers/field_contradiction.cpp
     src/handlers/field_write_gate.cpp
     src/handlers/field_symbol_events.cpp
+    src/handlers/field_introspection.cpp
     src/handlers/field_distill.cpp
     src/handlers/field_lookup.cpp
     src/handlers/field_memory_ops.cpp

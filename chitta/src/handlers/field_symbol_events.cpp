@@ -5,7 +5,6 @@
 namespace chitta {
 
 ToolResult FieldRpcHandler::tool_symbol_event_log(const json& params) {
-    auto lock = acquire_shared_lock();
     std::string symbol_name = params.value("symbol_name", "");
     std::string file_path   = params.value("file_path", "");
     int limit               = params.value("limit", 50);
@@ -25,7 +24,6 @@ ToolResult FieldRpcHandler::tool_symbol_event_log(const json& params) {
 }
 
 ToolResult FieldRpcHandler::tool_mark_memory_invalidated(const json& params) {
-    auto lock = acquire_shared_lock();
     if (!params.contains("memory_id")) {
         return ToolResult::error("memory_id required");
     }

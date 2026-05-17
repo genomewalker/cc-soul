@@ -160,6 +160,18 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["mark_memory_invalidated"] = [this](const json& p) { return tool_mark_memory_invalidated(p); };
 
+    tools_.push_back({{"name","what_do_i_know_about"},{"description","Introspection: return claims + provenance + staleness + contradictions for a topic"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"topic",{{"type","string"},{"description","Topic or question to introspect"}}},
+            {"k",{{"type","integer"},{"description","Max claims to return (default 10)"}}},
+            {"realm",{{"type","string"},{"description","Realm filter"}}},
+            {"confidence_min",{{"type","number"},{"description","Minimum confidence threshold (default 0.0)"}}},
+            {"include_stale",{{"type","boolean"},{"description","Include stale memories (default true)"}}},
+            {"include_contradictions",{{"type","boolean"},{"description","Include contradiction info (default true)"}}}
+        }},{"required",{"topic"}}}}
+    });
+    handlers_["what_do_i_know_about"] = [this](const json& p) { return tool_what_do_i_know_about(p); };
+
     tools_.push_back({{"name","hygiene_stats"},{"description","Get memory hygiene statistics"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
