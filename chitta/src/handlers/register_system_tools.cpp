@@ -143,6 +143,23 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["write_gate_stats"] = [this](const json& p) { return tool_write_gate_stats(p); };
 
+    tools_.push_back({{"name","symbol_event_log"},{"description","Query the symbol-keyed event log. Filter by symbol_name and/or file_path."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"symbol_name",{{"type","string"},{"description","Filter by symbol name"}}},
+            {"file_path",{{"type","string"},{"description","Filter by file path"}}},
+            {"limit",{{"type","integer"},{"description","Max events to return (default 50)"}}}
+        }}}}
+    });
+    handlers_["symbol_event_log"] = [this](const json& p) { return tool_symbol_event_log(p); };
+
+    tools_.push_back({{"name","mark_memory_invalidated"},{"description","Mark a memory as invalidated by a commit hash or symbol-change ID."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"memory_id",{{"type","integer"},{"description","Memory ID to mark"}}},
+            {"reason",{{"type","string"},{"description","Commit hash or change ID causing invalidation"}}}
+        }},{"required",{"memory_id"}}}}
+    });
+    handlers_["mark_memory_invalidated"] = [this](const json& p) { return tool_mark_memory_invalidated(p); };
+
     tools_.push_back({{"name","hygiene_stats"},{"description","Get memory hygiene statistics"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
