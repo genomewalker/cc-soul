@@ -981,18 +981,31 @@ void Subconscious::embed_loop() {
         if (!pending.empty()) {
             stats_.last_embedding_at = now_ms();
             size_t embedded = 0;
+
+            // Collect texts for the batch (content fetch + gloss prep).
+            std::vector<uint64_t>    batch_ids;
+            std::vector<std::string> batch_texts;
+            batch_ids.reserve(pending.size());
+            batch_texts.reserve(pending.size());
             for (uint64_t id : pending) {
                 if (!running_.load()) break;
                 auto content = field_store_->get_content(id);
                 if (content.empty()) continue;
                 auto gloss = chitta::ssl::gloss_ssl_content(content);
-                auto text  = gloss.empty() ? content : content + "\n" + gloss;
-                auto emb = embed(prefix + text);
-                if (emb.empty()) { stats_.embedding_skips++; continue; }
-                // No C++ lock: Rust store uses internal RwLocks.
-                field_store_->backfill_embedding(id, emb);
-                embedded++;
+                batch_ids.push_back(id);
+                batch_texts.push_back(prefix + (gloss.empty() ? content : content + "\n" + gloss));
             }
+
+            // One ONNX session_->Run() for the whole batch.
+            if (!batch_ids.empty() && embedder_ && embedder_->ready()) {
+                auto arthas = embedder_->transform_batch(batch_texts);
+                for (size_t i = 0; i < batch_ids.size() && i < arthas.size(); ++i) {
+                    if (arthas[i].nu.is_zero()) { stats_.embedding_skips++; continue; }
+                    field_store_->backfill_embedding(batch_ids[i], arthas[i].nu.data);
+                    embedded++;
+                }
+            }
+
             if (embedded > 0) {
                 stats_.symbols_embedded += embedded;
                 std::cerr << "[embed_loop] Embedded " << embedded << "/" << pending.size() << " pending\n";
