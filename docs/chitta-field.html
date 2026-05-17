@@ -669,6 +669,35 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
 </section>
 
 
+<!-- ═══ MEMORY QUALITY LAYER ═══ -->
+<section class="cf-page-section" id="quality">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Memory quality layer</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Four mechanisms shipped in v5.21.55&ndash;59 that turn chitta-field from a write-once store into a self-correcting one: write-gate admission, symbol-event correlation, introspection, and cross-harness disagreement detection.</p>
+
+    <h3 class="reveal reveal-delay-2" style="margin-top:var(--space-6)">Write-gate (staged admission)</h3>
+    <div class="cf-prose reveal reveal-delay-3" style="max-width:640px">
+      <p>All new memories start <code>staged=true</code> and are promoted to <code>staged=false</code> on first recall (<code>access_count &ge; 1</code>). Staged memories score 0.80&times; in the retrieval pipeline — they still surface when no promoted memory wins, but are ranked lower. Stale staged memories (age &gt; 7&nbsp;days, never recalled) are auto-pruned. A background pass runs every 50 embed cycles via <code>promote_staged_memories()</code>. The <code>write_gate_stats</code> MCP tool reports <code>staged_count</code> and <code>oldest_staged_age_days</code>.</p>
+    </div>
+
+    <h3 class="reveal reveal-delay-2" style="margin-top:var(--space-5)">Symbol-keyed event log</h3>
+    <div class="cf-prose reveal reveal-delay-3" style="max-width:640px">
+      <p>A WAL-backed <code>SymbolEventLog</code> organ records typed events keyed on symbol identity: <code>Edited</code>, <code>Created</code>, <code>Deleted</code>, <code>TestFailed</code>, <code>TestPassed</code>, <code>Committed</code>. Each event carries <code>symbol_name</code>, <code>file_path</code>, <code>session_id</code>, <code>harness</code>, and an optional <code>memory_id</code> link. Indexed by symbol name and file path for O(1) lookup; fully rebuilt from WAL on restart (not stored in the full snapshot). <code>upsert_symbol()</code> auto-logs an <code>Edited</code> event on every symbol write. <code>invalidated_by: Option&lt;String&gt;</code> on <code>MemoryState</code> records the commit hash or symbol-change ID that made a memory stale — set via <code>mark_memory_invalidated</code>.</p>
+    </div>
+
+    <h3 class="reveal reveal-delay-2" style="margin-top:var(--space-5)">Introspection &mdash; <code>what_do_i_know_about</code></h3>
+    <div class="cf-prose reveal reveal-delay-3" style="max-width:640px">
+      <p>A single MCP call that answers <em>"what does this session believe about X, and how trustworthy is each claim?"</em> For each recalled hit: <code>staged</code> flag, <code>invalidated_by</code>, <code>source_session</code>, <code>source_tool</code>, <code>age_days</code> (from <code>memory_claim_info</code>); a staleness verdict that checks <code>invalidated_by</code> then walks artifact refs against the live symbol index; contradiction peers from <code>get_conflicts</code>. Returns <code>claims[]</code>, <code>cross_harness_conflicts[]</code>, <code>topic</code>, <code>total</code>.</p>
+    </div>
+
+    <h3 class="reveal reveal-delay-2" style="margin-top:var(--space-5)">Cross-harness disagreement</h3>
+    <div class="cf-prose reveal reveal-delay-3" style="max-width:640px">
+      <p><code>harness: Option&lt;String&gt;</code> is inferred from <code>source_tool</code> on every <code>put_memory()</code> call (<code>"codex"</code> if the tool name starts with <code>codex</code>, <code>"claude-code"</code> otherwise). The <code>cross_harness_conflicts</code> tool scans all live non-staged memories, groups by HNSW proximity, and returns pairs where harnesses differ — ranked by <code>1 &minus; cosine_similarity</code> as the disagreement score. Wired into <code>what_do_i_know_about</code> as a per-cluster filter. Snapshot V13 (<code>0xF011_5741_7E00_000D</code>) adds <code>LegacyMemoryPayloadV12</code> migration covering all V1&ndash;V12 snapshots on disk.</p>
+    </div>
+  </div>
+</section>
+
+
 <!-- ═══ FEP ATTRACTOR NETWORK ═══ -->
 <section class="cf-page-section" id="fep">
   <div class="container">
