@@ -5,7 +5,7 @@
 namespace chitta {
 
 ToolResult FieldRpcHandler::tool_write_gate_stats(const json& /*params*/) {
-    auto lock = acquire_shared_lock();
+
     std::string stats = field_store_->write_gate_stats_json();
     try {
         auto j = json::parse(stats);
