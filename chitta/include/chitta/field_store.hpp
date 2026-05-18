@@ -240,7 +240,9 @@ struct FieldRecallHit {
     float       surprise_boost   = 1.0f;
     float       arousal_boost    = 1.0f;
     float       mood_congruence  = 1.0f;
-    float       frustration_boost = 1.0f;
+    float       frustration_boost    = 1.0f;
+    float       interference_factor  = 1.0f;
+    float       spacing_boost        = 1.0f;
 };
 
 /// Thin RAII C++ wrapper around the chitta-field C FFI.
@@ -1655,7 +1657,9 @@ private:
             h.surprise_boost   = buf[i].surprise_boost;
             h.arousal_boost    = buf[i].arousal_boost;
             h.mood_congruence  = buf[i].mood_congruence;
-            h.frustration_boost = buf[i].frustration_boost;
+            h.frustration_boost   = buf[i].frustration_boost;
+            h.interference_factor = buf[i].interference_factor;
+            h.spacing_boost       = buf[i].spacing_boost;
 
             // Fetch content (has written out-param)
             written = 0;
