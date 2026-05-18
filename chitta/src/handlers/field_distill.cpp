@@ -36,7 +36,12 @@ ToolResult FieldRpcHandler::tool_suggestion_track(const json& params) {
     if (content.empty()) return ToolResult::error("content is required");
 
     std::string realm = params.value("realm", "brahman");
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     uint64_t id = field_store_->remember("suggestion", realm, content, embedding, 0.7f, 0.01f);
 
     std::string id_str = std::to_string(id);
