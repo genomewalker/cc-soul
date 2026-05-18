@@ -2222,6 +2222,33 @@ async def call_tool(name: str, arguments: dict):
 
     # Check if this is a composite tool
     loop = asyncio.get_event_loop()
+
+    # Merge-aware write policy (remember / grow only; never for hook-triggered observe)
+    _MERGE_WRITE_TOOLS = {"remember", "grow"}
+    _write_policy = arguments.pop("write_policy", None)
+    _merge_env = os.environ.get("CHITTA_MERGE_POLICY", "off")
+    if name in _MERGE_WRITE_TOOLS and (_write_policy == "merge_aware" or _merge_env == "merge_aware"):
+        _content = arguments.get("content", "")
+        _realm = arguments.get("realm", "")
+        try:
+            import merge_judge as _mj
+            _recall_raw = await loop.run_in_executor(
+                _executor, daemon_call, "recall",
+                {"query": _content, "limit": 5, "strategy": "hybrid", **( {"realm": _realm} if _realm else {})}
+            )
+            _candidates = json.loads(_recall_raw).get("results", []) if _recall_raw else []
+            _decision = _mj.judge(_content, _candidates)
+            _action = _decision.get("action", "add")
+            if _action == "discard":
+                return [TextContent(type="text", text=f"[merge_aware] skipped: {_decision.get('reason', 'duplicate')}")]
+            if _action == "update":
+                _tid = _decision.get("target_id")
+                if _tid:
+                    await loop.run_in_executor(_executor, daemon_call, "update",
+                        {"id": str(_tid), "content": _content})
+                    return [TextContent(type="text", text=f"[merge_aware] updated #{_tid}: {_decision.get('reason', '')}")]
+        except Exception:
+            pass  # fall through to normal write on any judge failure
     if name in COMPOSITE_HANDLERS:
         result = await loop.run_in_executor(_executor, COMPOSITE_HANDLERS[name], arguments)
     else:
