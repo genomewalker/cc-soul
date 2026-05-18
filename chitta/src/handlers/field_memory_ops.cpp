@@ -694,6 +694,35 @@ ToolResult FieldRpcHandler::tool_query_triplets_temporal(const json& params) {
         {{"triplets", results}, {"count", results.size()}});
 }
 
+ToolResult FieldRpcHandler::tool_triplet_query_as_of(const json& params) {
+    std::string subject = params.value("subject", "");
+    if (subject.empty()) return ToolResult::error("subject is required");
+    int64_t world_ms = params.value("world_ms", int64_t(0));
+    if (world_ms == 0) {
+        world_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+    std::string raw = field_store_->query_subject_as_of(subject, world_ms);
+    auto triplets = json::parse(raw, nullptr, false);
+    if (triplets.is_discarded()) triplets = json::array();
+    return ToolResult::ok(std::to_string(triplets.size()) + " triplet(s) as of " + std::to_string(world_ms),
+        {{"subject", subject}, {"world_ms", world_ms}, {"triplets", triplets}});
+}
+
+ToolResult FieldRpcHandler::tool_triplet_supersede(const json& params) {
+    uint64_t old_id = params.value("old_id", uint64_t(0));
+    uint64_t new_id = params.value("new_id", uint64_t(0));
+    if (old_id == 0 || new_id == 0) return ToolResult::error("old_id and new_id are required");
+    int64_t at_ms = params.value("at_ms", int64_t(0));
+    if (at_ms == 0) {
+        at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+    field_store_->triplet_supersede(old_id, new_id, at_ms);
+    return ToolResult::ok("Triplet #" + std::to_string(old_id) + " superseded by #" + std::to_string(new_id),
+        {{"old_id", old_id}, {"new_id", new_id}, {"at_ms", at_ms}});
+}
+
 ToolResult FieldRpcHandler::tool_list_by_status(const json& params) {
     std::string status_filter = params.value("status", "superseded");
     size_t limit = params.value("limit", 50);
