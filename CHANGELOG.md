@@ -2,6 +2,32 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.21.66] - 2026-05-18
+
+### Fixed — Daemon Lock Starvation
+
+- **Pre-embed write tools before exclusive lock** — `remember`, `observe`, `grow`, `learn*` now compute embeddings (pure ML inference on `yantra_`, no `field_store_` access) before acquiring `rpc_mutex_` exclusively. Previously 30–60 s ML inference held the write lock, causing `health_check` and all reads to queue for 20+ minutes.
+- **Thread pool min workers 2 → 8** — pool now starts with 8 workers instead of 2, providing spare capacity when individual workers are occupied by slow operations.
+
+## [5.21.65] - 2026-05-18
+
+### Performance — Memory & Startup Overhaul
+
+Daemon RAM reduced from **22–26 GB → 2–4 GB**. Snapshot size reduced from **4.2 GB → 420 MB**.
+
+Root cause was runaway triplet accumulation: the distillation pipeline re-extracted the same subject-predicate-object facts on every run with no deduplication, producing ~14 million duplicate and invalidated entries over time.
+
+#### Fixed
+
+- **`TripletStore` deduplication** — `add()` checks for an existing live `(subject, predicate, object)` entry before inserting; duplicates update weight in place. Eliminates the primary source of unbounded growth.
+- **Invalidated triplet purge** — `purge_invalidated()` removes all `valid_to_ms != 0` entries at load time and before snapshot save. Cleared 13.7M dead entries (3.4 GB → 110 MB) on first startup after upgrade.
+- **Derived index skip** — `TripletStore`'s three lookup indexes (`by_subject`, `by_object`, `by_predicate`) are cleared before serialization and rebuilt after deserialization. Previously serialized as redundant string copies (~3× snapshot bloat).
+- **`AssocEdge` deduplication** — `add_assoc_edge()` upserts by `(dst, edge_type)` instead of appending.
+- **`malloc_trim` after store open** — freed pages from load-time migration are returned to the OS immediately.
+- **Streaming snapshot load** — deserialization now uses `BufReader` (1 MB read-ahead) instead of `std::fs::read()` which allocated the entire file as `Vec<u8>` before any deserialization.
+- **Daemon lock race** — `acquire_lock()` now runs before `early_server` binds the socket; competing startups fail in milliseconds.
+- **Coactivation stats cap** — `coactivation_stats` pruned to top-20 pairs per memory at load and save time.
+
 ## [5.21.45] - 2026-05-16
 
 ### Added
