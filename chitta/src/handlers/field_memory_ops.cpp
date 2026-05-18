@@ -82,7 +82,12 @@ ToolResult FieldRpcHandler::tool_observe(const json& params) {
 
     std::string ssl_content = to_ssl_format(content, category);
 
-    auto embedding = embed_text(ssl_content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(ssl_content);
+    }
     uint64_t id = field_store_->remember(category, realm, ssl_content, embedding, confidence, 0.001f);
 
     // Provenance: source + evidence + epistemic status + initial lifecycle status
@@ -257,7 +262,12 @@ ToolResult FieldRpcHandler::tool_grow(const json& params) {
     std::string ssl = title.empty() ? to_ssl_format(content, type) :
         "[" + type + "] " + title + "\n" + content;
 
-    auto embedding = embed_text(ssl);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(ssl);
+    }
     float confidence = (type == "wisdom" || type == "belief") ? 0.85f : 0.70f;
     uint64_t id = field_store_->remember(type, "brahman", ssl, embedding, confidence, 0.001f);
 

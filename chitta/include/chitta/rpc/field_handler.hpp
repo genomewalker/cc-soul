@@ -237,6 +237,39 @@ public:
             if (it == handlers_.end()) {
                 return make_error(id, -32601, "Unknown tool: " + name);
             }
+
+            // Pre-embed write tools BEFORE taking the exclusive lock.
+            // embed_ssl_aware() / embed_text() only use yantra_ (ML model),
+            // not field_store_, so they are safe outside the lock.  Previously
+            // this ran inside the exclusive lock for the full 30-60s inference
+            // window, starving every concurrent reader.
+            // Pre-embed write tools BEFORE the exclusive lock.
+            // embed_*() only uses yantra_ (ML model), not field_store_.
+            // Previously embedding ran inside the exclusive lock for 30-60 s,
+            // starving every concurrent reader.
+            if (!is_read_only_tool(name) && !args.contains("_preembedding")) {
+                std::string content = args.value("content", "");
+                if (!content.empty()) {
+                    std::vector<float> emb;
+                    if (name == "remember") {
+                        emb = embed_ssl_aware(content);
+                    } else if (name == "observe") {
+                        std::string category = args.value("category", "episode");
+                        emb = embed_text(to_ssl_format(content, category));
+                    } else if (name == "grow") {
+                        std::string type  = args.value("type", "wisdom");
+                        std::string title = args.value("title", "");
+                        std::string ssl   = title.empty() ? to_ssl_format(content, type)
+                                          : "[" + type + "] " + title + "\n" + content;
+                        emb = embed_text(ssl);
+                    } else if (name == "learn" || name == "learn_correction" ||
+                               name == "learn_milestone" || name == "learn_outcome") {
+                        emb = embed_ssl_aware(content);
+                    }
+                    if (!emb.empty()) args["_preembedding"] = emb;
+                }
+            }
+
             ToolResult result;
             if (is_read_only_tool(name)) {
                 std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
