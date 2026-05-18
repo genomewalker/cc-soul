@@ -151,6 +151,28 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["triplet_supersede"] = [this](const json& p) { return tool_triplet_supersede(p); };
 
+    tools_.push_back({{"name","graph_traverse"},{"description","BFS graph traversal from a start node over triplet edges"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"start",{{"type","string"},{"description","Starting node"}}},
+            {"edge_types",{{"type","array"},{"items",{{"type","string"}}},{"description","Predicate filter (empty = all)"}}},
+            {"max_hops",{{"type","integer"},{"description","Max BFS depth (default 3)"}}},
+            {"max_results",{{"type","integer"},{"description","Max nodes returned (default 50)"}}},
+            {"direction",{{"type","string"},{"enum",{"outgoing","incoming","both"}},{"description","Edge direction (default outgoing)"}}}
+        }},{"required",{"start"}}}}
+    });
+    handlers_["graph_traverse"] = [this](const json& p) { return tool_graph_traverse(p); };
+
+    tools_.push_back({{"name","graph_pagerank"},{"description","Personalized PageRank over the triplet graph"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"seeds",{{"type","array"},{"items",{{"type","string"}}},{"description","Seed nodes"}}},
+            {"edge_types",{{"type","array"},{"items",{{"type","string"}}},{"description","Predicate filter (empty = all)"}}},
+            {"damping",{{"type","number"},{"description","Damping factor (default 0.85)"}}},
+            {"iterations",{{"type","integer"},{"description","PPR iterations (default 20)"}}},
+            {"top_k",{{"type","integer"},{"description","Nodes to return (default 20)"}}}
+        }},{"required",{"seeds"}}}}
+    });
+    handlers_["graph_pagerank"] = [this](const json& p) { return tool_graph_pagerank(p); };
+
     tools_.push_back({{"name","connect_temporal"},{"description","Create triplet with temporal validity"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},{"object",{{"type","string"}}},

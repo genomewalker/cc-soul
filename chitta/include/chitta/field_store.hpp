@@ -218,6 +218,11 @@ int cf_spectral_drift(struct CfHandle* h,
 // Bi-temporal triplet FFI
 char* cf_triplet_query_as_of(struct CfHandle* h, const char* subject, int64_t world_ms);
 int   cf_triplet_supersede(struct CfHandle* h, uint64_t old_id, uint64_t new_id, int64_t at_ms);
+// Graph traversal FFI
+char* cf_graph_traverse(struct CfHandle* h, const char* start, const char* edge_types_json,
+                        size_t max_hops, size_t max_results, const char* direction);
+char* cf_graph_pagerank(struct CfHandle* h, const char* seeds_json, const char* edge_types_json,
+                        float damping, uint8_t iterations, size_t top_k);
 }
 
 namespace chitta {
@@ -810,6 +815,28 @@ public:
     /// Mark old_id as superseded by new_id at ingestion-time at_ms.
     void triplet_supersede(uint64_t old_id, uint64_t new_id, int64_t at_ms) {
         cf_triplet_supersede(handle_, old_id, new_id, at_ms);
+    }
+
+    /// BFS traversal from start node. Returns JSON array of TraversalHit objects.
+    std::string graph_traverse(const std::string& start, const std::string& edge_types_json,
+                               size_t max_hops, size_t max_results, const std::string& direction) {
+        char* s = cf_graph_traverse(handle_, start.c_str(), edge_types_json.c_str(),
+                                    max_hops, max_results, direction.c_str());
+        if (!s) return "[]";
+        std::string result(s);
+        cf_free_string(s);
+        return result;
+    }
+
+    /// Personalized PageRank. Returns JSON array of [node, score] pairs.
+    std::string graph_pagerank(const std::string& seeds_json, const std::string& edge_types_json,
+                               float damping, uint8_t iterations, size_t top_k) {
+        char* s = cf_graph_pagerank(handle_, seeds_json.c_str(), edge_types_json.c_str(),
+                                    damping, iterations, top_k);
+        if (!s) return "[]";
+        std::string result(s);
+        cf_free_string(s);
+        return result;
     }
 
     /// Health check — returns true if store is accessible.
