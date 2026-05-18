@@ -124,7 +124,12 @@ ToolResult FieldRpcHandler::tool_reconsolidate(const json& params) {
     std::string existing = field_store_->get_content(id);
     if (existing.empty()) return ToolResult::error("Memory not found: " + std::to_string(id));
 
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     int rc = field_store_->update_memory_content(id, content, embedding);
     if (rc != 0) return ToolResult::error("Failed to update memory content");
 

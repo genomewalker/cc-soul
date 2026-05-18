@@ -133,7 +133,12 @@ ToolResult FieldRpcHandler::tool_consolidation_merge(const json& params) {
     if (field_store_->get_content(static_cast<uint64_t>(secondary_id)).empty())
         return ToolResult::error("secondary_id not found: " + secondary_str);
 
-    auto embedding = embed_text(merged_content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(merged_content);
+    }
     uint64_t new_id = field_store_->remember(
         "wisdom", "brahman", merged_content, embedding, 0.85f, 0.001f);
 
@@ -295,7 +300,12 @@ ToolResult FieldRpcHandler::tool_curiosity_note_gap(const json& params) {
     std::string content = gap;
     if (!context.empty()) content = gap + "\nContext: " + context;
 
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     uint64_t id = field_store_->remember("question", realm, content, embedding, 0.7f, 0.0f);
 
     std::string id_str = std::to_string(id);

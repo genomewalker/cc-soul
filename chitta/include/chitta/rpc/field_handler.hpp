@@ -279,6 +279,38 @@ public:
                         if (!title.empty())
                             emb = embed_text(title + ": turns " + std::to_string(start_turn)
                                              + "-" + std::to_string(end_turn));
+                    } else if (name == "update" || name == "reconsolidate") {
+                        emb = embed_text(content);
+                    } else if (name == "consolidation_merge") {
+                        std::string mc = args.value("merged_content", "");
+                        if (!mc.empty()) emb = embed_text(mc);
+                    } else if (name == "curiosity_note_gap") {
+                        std::string gap     = args.value("gap", "");
+                        std::string ctx     = args.value("context", "");
+                        std::string txt     = gap;
+                        if (!ctx.empty()) txt += "\nContext: " + ctx;
+                        if (!txt.empty()) emb = embed_text(txt);
+                    } else if (name == "profile_update") {
+                        std::string uid   = args.value("user_id", "default");
+                        std::string field = args.value("field", "");
+                        std::string val   = args.value("value", "");
+                        if (!field.empty()) emb = embed_text("profile " + uid + " " + field + " " + val);
+                    } else if (name == "profile_observe") {
+                        std::string obs_type = args.value("observation_type", "");
+                        std::string val      = args.value("value", "");
+                        std::string uid      = args.value("user_id", "default");
+                        if (!obs_type.empty())
+                            emb = embed_text("observation[" + obs_type + "] for " + uid + ": " + val);
+                    } else if (name == "goal_set") {
+                        std::string title = args.value("title", "");
+                        std::string desc  = args.value("description", "");
+                        std::string dl    = args.value("deadline", "");
+                        if (!title.empty()) {
+                            std::string txt = title;
+                            if (!desc.empty()) txt += ": " + desc;
+                            if (!dl.empty())   txt += " (by " + dl + ")";
+                            emb = embed_text(txt);
+                        }
                     }
                     if (!emb.empty()) args["_preembedding"] = emb;
                 }

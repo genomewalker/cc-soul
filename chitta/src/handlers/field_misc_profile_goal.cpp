@@ -21,7 +21,12 @@ ToolResult FieldRpcHandler::tool_profile_update(const json& params) {
     if (field.empty()) return ToolResult::error("field is required");
 
     std::string content = "profile:" + field + "=" + value;
-    auto embedding = embed_text("profile " + user_id + " " + field + " " + value);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text("profile " + user_id + " " + field + " " + value);
+    }
     uint64_t id = field_store_->remember("profile", "brahman", content, embedding, 0.9f, 0.0f);
 
     field_store_->add_triplet("profile:" + user_id, "has_" + field, value);
@@ -36,7 +41,12 @@ ToolResult FieldRpcHandler::tool_profile_observe(const json& params) {
     std::string user_id          = params.value("user_id", "default");
 
     std::string content = "observation[" + observation_type + "] for " + user_id + ": " + value;
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     uint64_t id = field_store_->remember("observation", "brahman", content, embedding, 0.7f, 0.01f);
 
     return ToolResult::ok("Observation recorded #" + std::to_string(id),
@@ -62,7 +72,12 @@ ToolResult FieldRpcHandler::tool_goal_set(const json& params) {
         }
     }
 
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     uint64_t id = field_store_->remember("goal", realm, content, embedding, 0.9f, 0.0f);
 
     return ToolResult::ok("Goal set #" + std::to_string(id),
