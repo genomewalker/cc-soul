@@ -134,6 +134,23 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["triplet_history"] = [this](const json& p) { return tool_triplet_history(p); };
 
+    tools_.push_back({{"name","triplet_query_as_of"},{"description","Query triplets for a subject valid at a given world timestamp, excluding superseded entries"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"subject",{{"type","string"},{"description","Subject node to query"}}},
+            {"world_ms",{{"type","integer"},{"description","World-time epoch ms (default: now)"}}}
+        }},{"required",{"subject"}}}}
+    });
+    handlers_["triplet_query_as_of"] = [this](const json& p) { return tool_triplet_query_as_of(p); };
+
+    tools_.push_back({{"name","triplet_supersede"},{"description","Mark one triplet as superseded by another (bi-temporal update)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"old_id",{{"type","integer"},{"description","Triplet ID being superseded"}}},
+            {"new_id",{{"type","integer"},{"description","Replacing triplet ID"}}},
+            {"at_ms",{{"type","integer"},{"description","Ingestion-time of supersession (default: now)"}}}
+        }},{"required",{"old_id","new_id"}}}}
+    });
+    handlers_["triplet_supersede"] = [this](const json& p) { return tool_triplet_supersede(p); };
+
     tools_.push_back({{"name","connect_temporal"},{"description","Create triplet with temporal validity"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"subject",{{"type","string"}}},{"predicate",{{"type","string"}}},{"object",{{"type","string"}}},

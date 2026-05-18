@@ -214,6 +214,10 @@ int cf_save_spectral_snapshot(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
 int cf_spectral_drift(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
+
+// Bi-temporal triplet FFI
+char* cf_triplet_query_as_of(struct CfHandle* h, const char* subject, int64_t world_ms);
+int   cf_triplet_supersede(struct CfHandle* h, uint64_t old_id, uint64_t new_id, int64_t at_ms);
 }
 
 namespace chitta {
@@ -792,6 +796,20 @@ public:
         char buf[65536]; size_t written = 0;
         cf_query_object(handle_, object.c_str(), buf, sizeof(buf), &written);
         return std::string(buf, written);
+    }
+
+    /// Query triplets for subject valid at world_ms, excluding superseded. Returns JSON string.
+    std::string query_subject_as_of(const std::string& subject, int64_t world_ms) {
+        char* s = cf_triplet_query_as_of(handle_, subject.c_str(), world_ms);
+        if (!s) return "[]";
+        std::string result(s);
+        cf_free_string(s);
+        return result;
+    }
+
+    /// Mark old_id as superseded by new_id at ingestion-time at_ms.
+    void triplet_supersede(uint64_t old_id, uint64_t new_id, int64_t at_ms) {
+        cf_triplet_supersede(handle_, old_id, new_id, at_ms);
     }
 
     /// Health check — returns true if store is accessible.

@@ -1902,15 +1902,21 @@ def handle_research_gateway(arguments: dict) -> str:
 def handle_triplets_gateway(arguments: dict) -> str:
     """Unified triplet operations.
 
-    Actions: connect (default), query, history
+    Actions: connect (default), query, history, query_as_of, supersede, traverse, pagerank
     """
     action = arguments.pop("action", "connect")
     tool_map = {
         "connect": "connect_temporal",
         "query": "query_triplets_temporal",
         "history": "triplet_history",
+        "query_as_of": "triplet_query_as_of",
+        "supersede": "triplet_supersede",
+        "traverse": "graph_traverse",
+        "pagerank": "graph_pagerank",
     }
-    tool = tool_map.get(action, "connect_temporal")
+    tool = tool_map.get(action)
+    if not tool:
+        return f"Unknown action: {action}. Use: {', '.join(tool_map.keys())}"
     return daemon_call(tool, arguments)
 
 
