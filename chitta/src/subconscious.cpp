@@ -987,23 +987,32 @@ void Subconscious::embed_loop() {
             std::vector<std::string> batch_texts;
             batch_ids.reserve(pending.size());
             batch_texts.reserve(pending.size());
+            std::vector<uint64_t> unembed_ids;
             for (uint64_t id : pending) {
                 if (!running_.load()) break;
                 auto content = field_store_->get_content(id);
-                if (content.empty()) continue;
+                if (content.size() < 20) { unembed_ids.push_back(id); continue; }
                 auto gloss = chitta::ssl::gloss_ssl_content(content);
                 batch_ids.push_back(id);
                 batch_texts.push_back(prefix + (gloss.empty() ? content : content + "\n" + gloss));
             }
+            if (!unembed_ids.empty())
+                field_store_->force_clear_embed_pending(unembed_ids);
 
             // One ONNX session_->Run() for the whole batch.
             if (!batch_ids.empty() && embedder_ && embedder_->ready()) {
                 auto arthas = embedder_->transform_batch(batch_texts);
                 for (size_t i = 0; i < batch_ids.size() && i < arthas.size(); ++i) {
-                    if (arthas[i].nu.is_zero()) { stats_.embedding_skips++; continue; }
+                    if (arthas[i].nu.is_zero()) {
+                        stats_.embedding_skips++;
+                        unembed_ids.push_back(batch_ids[i]);
+                        continue;
+                    }
                     field_store_->backfill_embedding(batch_ids[i], arthas[i].nu.data);
                     embedded++;
                 }
+                if (!unembed_ids.empty())
+                    field_store_->force_clear_embed_pending(unembed_ids);
             }
 
             if (embedded > 0) {
