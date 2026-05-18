@@ -456,12 +456,34 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.21.65 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.21.65</span>
+        <span class="version-date">May 18, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Fixed &mdash; Memory &amp; Startup Overhaul</h4>
+        <p>Daemon RAM reduced from <strong>22&ndash;26&thinsp;GB &rarr; 2&ndash;4&thinsp;GB</strong>. Snapshot size reduced from <strong>4.2&thinsp;GB &rarr; 420&thinsp;MB</strong>. Root cause: runaway triplet accumulation — the distillation pipeline re-extracted the same subject-predicate-object facts on every run with no deduplication, producing ~14&thinsp;million duplicate and invalidated entries over time.</p>
+        <ul>
+          <li><strong><code>TripletStore</code> deduplication</strong> &mdash; <code>add()</code> checks for an existing live <code>(subject, predicate, object)</code> entry before inserting; duplicates update weight in place. Eliminates the primary source of unbounded growth.</li>
+          <li><strong>Invalidated triplet purge</strong> &mdash; <code>purge_invalidated()</code> removes all <code>valid_to_ms != 0</code> entries at load time and before snapshot save. Cleared 13.7&thinsp;M dead entries (3.4&thinsp;GB &rarr; 110&thinsp;MB) on first startup after upgrade.</li>
+          <li><strong>Derived index skip</strong> &mdash; <code>TripletStore</code>&rsquo;s three lookup indexes (<code>by_subject</code>, <code>by_object</code>, <code>by_predicate</code>) are cleared before serialization and rebuilt after deserialization. Previously serialized as redundant string copies (~3&times; snapshot bloat).</li>
+          <li><strong><code>AssocEdge</code> deduplication</strong> &mdash; <code>add_assoc_edge()</code> upserts by <code>(dst, edge_type)</code> instead of appending.</li>
+          <li><strong><code>malloc_trim</code> after store open</strong> &mdash; freed pages from load-time migration are returned to the OS immediately.</li>
+          <li><strong>Streaming snapshot load</strong> &mdash; deserialization now uses <code>BufReader</code> (1&thinsp;MB read-ahead) instead of <code>std::fs::read()</code> which allocated the entire file as <code>Vec&lt;u8&gt;</code> before any deserialization.</li>
+          <li><strong>Daemon lock race</strong> &mdash; <code>acquire_lock()</code> now runs before <code>early_server</code> binds the socket; competing startups fail in milliseconds.</li>
+          <li><strong>Coactivation stats cap</strong> &mdash; <code>coactivation_stats</code> pruned to top-20 pairs per memory at load and save time.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.21.x -->
     <article class="changelog-version reveal">
       <div class="version-header">
-        <span class="version-number">v5.21.0&ndash;5.21.59</span>
+        <span class="version-number">v5.21.0&ndash;5.21.64</span>
         <span class="version-date">May 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
