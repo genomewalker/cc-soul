@@ -79,15 +79,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
-               int http_port, const std::string& http_static_dir) {
+               int http_port, const std::string& http_static_dir,
+               DaemonLock& lock) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
-
-    DaemonLock lock;
-    if (!acquire_lock(mind_path, lock)) {
-        std::cerr << "[daemon] Another daemon is running (lock held)\n";
-        return 1;
-    }
 
     // Distillation uses HTTP to Ollama/vLLM (endpoint auto-discovered)
     if (distill_config.enabled) {
@@ -929,14 +924,8 @@ int main(int argc, char* argv[]) {
         }
         bool ok = (h->status == "ok");
         std::cerr << "Status: " << (ok ? "ok" : h->status) << "\n";
-        std::cerr << "chitta-field daemon " << (ok ? "healthy" : "unhealthy") << "\n";
-        // Print structured info same as before
-        auto info = client.send_request({{"name","health_check"},{"params",{}}});
-        if (info.contains("result") && info["result"].contains("structured")) {
-            auto& s = info["result"]["structured"];
-            if (s.contains("memories")) std::cerr << "  memories : ~" << s["memories"].get<int64_t>() << "\n";
-            if (s.contains("pending"))  std::cerr << "  pending  : " << s["pending"].get<int64_t>() << " (awaiting embed)\n";
-        }
+        if (h->pid)       std::cerr << "  pid      : " << h->pid << "\n";
+        if (h->uptime_ms) std::cerr << "  uptime   : " << (h->uptime_ms / 1000) << "s\n";
         return ok ? 0 : 1;
     }
 
@@ -983,9 +972,14 @@ int main(int argc, char* argv[]) {
 
     // For daemon: clean up stale files then bind socket early so clients get
     // "warming_up" instead of "connection refused" during the 3+ minute snapshot load.
+    DaemonLock daemon_lock;
     if (command == "daemon") {
         if (!cleanup_stale_daemon(mind_path)) {
             std::cerr << "[daemon] Another daemon is running\n";
+            return 1;
+        }
+        if (!acquire_lock(mind_path, daemon_lock)) {
+            std::cerr << "[daemon] Another daemon is running (lock held)\n";
             return 1;
         }
     }
@@ -993,6 +987,7 @@ int main(int argc, char* argv[]) {
     if (command == "daemon") {
         early_server = std::make_unique<SocketServer>(sock_path);
         if (!early_server->start()) {
+            release_lock(daemon_lock);
             std::cerr << "[daemon] Another daemon is running (socket in use)\n";
             return 1;
         }
@@ -1037,7 +1032,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
+        result = cmd_daemon(field_store, yantra_raw, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, daemon_lock);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {
