@@ -333,10 +333,18 @@ private:
             }
             if (explain) {
                 entry["explain"] = {
-                    {"semantic_weight",  h.semantic_weight},
-                    {"status_mul",       h.status_mul},
-                    {"epistemic_mul",    h.epistemic_mul},
-                    {"strength_factor",  h.strength_factor},
+                    {"semantic_weight",     h.semantic_weight},
+                    {"status_mul",          h.status_mul},
+                    {"epistemic_mul",       h.epistemic_mul},
+                    {"strength_factor",     h.strength_factor},
+                    {"actr_activation",     h.actr_activation},
+                    {"access_count",        h.access_count},
+                    {"interference_factor", h.interference_factor},
+                    {"spacing_boost",       h.spacing_boost},
+                    {"surprise_boost",      h.surprise_boost},
+                    {"arousal_boost",       h.arousal_boost},
+                    {"mood_congruence",     h.mood_congruence},
+                    {"frustration_boost",   h.frustration_boost},
                 };
             }
             arr.push_back(std::move(entry));
