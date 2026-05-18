@@ -51,6 +51,9 @@
 #include <unistd.h>
 #include <climits>
 #include <fcntl.h>
+#if defined(__linux__)
+#include <malloc.h>
+#endif
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -1024,6 +1027,10 @@ int main(int argc, char* argv[]) {
     }
 
     FieldStore& field_store = *field_store_ptr;
+    // Return pages freed during load-time migration (triplet purge, dedup) back to OS.
+#if defined(__linux__)
+    malloc_trim(0);
+#endif
     VakYantra* yantra_raw = nullptr;
 #ifdef CHITTA_WITH_ONNX
     yantra_raw = yantra.get();
