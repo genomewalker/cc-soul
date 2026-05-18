@@ -723,6 +723,35 @@ ToolResult FieldRpcHandler::tool_triplet_supersede(const json& params) {
         {{"old_id", old_id}, {"new_id", new_id}, {"at_ms", at_ms}});
 }
 
+ToolResult FieldRpcHandler::tool_graph_traverse(const json& params) {
+    std::string start = params.value("start", "");
+    if (start.empty()) return ToolResult::error("start is required");
+    std::string edge_types_json = params.contains("edge_types") ? params["edge_types"].dump() : "[]";
+    size_t max_hops    = params.value("max_hops",    3);
+    size_t max_results = params.value("max_results", 50);
+    std::string direction = params.value("direction", "outgoing");
+    std::string raw = field_store_->graph_traverse(start, edge_types_json, max_hops, max_results, direction);
+    auto hits = json::parse(raw, nullptr, false);
+    if (hits.is_discarded()) hits = json::array();
+    return ToolResult::ok(std::to_string(hits.size()) + " node(s) reachable from " + start,
+        {{"start", start}, {"direction", direction}, {"hits", hits}});
+}
+
+ToolResult FieldRpcHandler::tool_graph_pagerank(const json& params) {
+    if (!params.contains("seeds") || !params["seeds"].is_array())
+        return ToolResult::error("seeds array is required");
+    std::string seeds_json = params["seeds"].dump();
+    std::string edge_types_json = params.contains("edge_types") ? params["edge_types"].dump() : "[]";
+    float   damping    = params.value("damping",    0.85f);
+    uint8_t iterations = params.value("iterations", uint8_t(20));
+    size_t  top_k      = params.value("top_k",      size_t(20));
+    std::string raw = field_store_->graph_pagerank(seeds_json, edge_types_json, damping, iterations, top_k);
+    auto ranked = json::parse(raw, nullptr, false);
+    if (ranked.is_discarded()) ranked = json::array();
+    return ToolResult::ok(std::to_string(ranked.size()) + " nodes ranked",
+        {{"seeds", params["seeds"]}, {"ranked", ranked}});
+}
+
 ToolResult FieldRpcHandler::tool_list_by_status(const json& params) {
     std::string status_filter = params.value("status", "superseded");
     size_t limit = params.value("limit", 50);

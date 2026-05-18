@@ -30,4 +30,6 @@
     ToolResult tool_query_triplets_temporal(const json& params);
     ToolResult tool_triplet_query_as_of(const json& params);
     ToolResult tool_triplet_supersede(const json& params);
+    ToolResult tool_graph_traverse(const json& params);
+    ToolResult tool_graph_pagerank(const json& params);
     ToolResult tool_list_by_status(const json& params);
