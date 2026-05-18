@@ -513,8 +513,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                               queue_count, queue_distill_count, queue_fail_count);
     queue_proc.start();
 
-    // Thread pool for async RPC handling (scales 2-16 workers based on load)
-    ThreadPool pool(2, 16);
+    // Thread pool for async RPC handling (scales 8-16 workers based on load)
+    ThreadPool pool(8, 16);
 
     // Watchdog callback - log stuck operations
     pool.set_watchdog_callback([]([[maybe_unused]] const std::string& method, [[maybe_unused]] int64_t secs) {

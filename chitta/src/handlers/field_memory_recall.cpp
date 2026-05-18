@@ -35,7 +35,12 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         if (auto act = classify_speech_act(content)) kind = *act;
     }
 
-    auto embedding = embed_ssl_aware(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_ssl_aware(content);
+    }
 
     uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
 
