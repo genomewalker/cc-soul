@@ -456,12 +456,29 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.21.67 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.21.67</span>
+        <span class="version-date">May 18, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Fixed &mdash; More Pre-embed Before Lock</h4>
+        <p>Extended the pre-embed pattern to three more high-frequency write tools called by hooks and the distillation pipeline:</p>
+        <ul>
+          <li><strong><code>suggestion_track</code></strong> &mdash; embeds <code>content</code> before <code>rpc_mutex_</code>.</li>
+          <li><strong><code>anticipation_observe</code></strong> &mdash; pre-computes <code>"anticipation: context → action"</code> embedding from params.</li>
+          <li><strong><code>create_episode</code></strong> &mdash; pre-computes <code>"title: turns N-M"</code> embedding from params.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.21.66 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.21.66</span>
         <span class="version-date">May 18, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Fixed &mdash; Daemon Lock Starvation</h4>

@@ -2,6 +2,12 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.21.67] - 2026-05-18
+
+### Fixed — More Pre-embed Before Lock
+
+Extended the pre-embed pattern to `suggestion_track`, `anticipation_observe`, and `create_episode` — three high-frequency write tools called by hooks and the distillation pipeline that were holding the exclusive `rpc_mutex_` lock during ML inference.
+
 ## [5.21.66] - 2026-05-18
 
 ### Fixed — Daemon Lock Starvation
