@@ -456,12 +456,24 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.21.68 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.21.68</span>
+        <span class="version-date">May 18, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Fixed &mdash; Pre-embed All Medium-Frequency Write Handlers</h4>
+        <p>Completed the pre-embed pattern for remaining write tools: <code>update</code>, <code>consolidation_merge</code>, <code>curiosity_note_gap</code>, <code>propose_change</code>, <code>profile_update</code>, <code>profile_observe</code>, <code>goal_set</code>, <code>reconsolidate</code>. All 15 write handlers that call <code>embed_text()</code>/<code>embed_ssl_aware()</code> now compute embeddings outside <code>rpc_mutex_</code>.</p>
+      </div>
+    </article>
+
     <!-- 5.21.67 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.21.67</span>
         <span class="version-date">May 18, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Fixed &mdash; More Pre-embed Before Lock</h4>

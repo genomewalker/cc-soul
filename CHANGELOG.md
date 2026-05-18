@@ -2,6 +2,12 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.21.68] - 2026-05-18
+
+### Fixed — Pre-embed All Medium-Frequency Write Handlers
+
+Completed the pre-embed pattern for the remaining write tools: `update`, `consolidation_merge`, `curiosity_note_gap`, `propose_change`, `profile_update`, `profile_observe`, `goal_set`, `reconsolidate`. All 15 write handlers that call `embed_text()`/`embed_ssl_aware()` now compute embeddings outside `rpc_mutex_`.
+
 ## [5.21.67] - 2026-05-18
 
 ### Fixed — More Pre-embed Before Lock
