@@ -123,7 +123,12 @@ ToolResult FieldRpcHandler::tool_propose_change(const json& params) {
     std::string text = "change to " + id_str + ": " + content;
     if (!proposed_by.empty()) text += " (by " + proposed_by + ")";
 
-    auto embedding = embed_text(text);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(text);
+    }
     uint64_t proposal_id = field_store_->remember(
         "proposal", "brahman", text, embedding, 0.7f, 0.001f);
 

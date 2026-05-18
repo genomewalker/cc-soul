@@ -372,7 +372,12 @@ ToolResult FieldRpcHandler::tool_update(const json& params) {
     }
 
     field_store_->forget(id);
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
     uint64_t new_id = field_store_->remember(kind, realm, content, embedding, confidence, 0.001f);
 
     // Link old→new for audit
