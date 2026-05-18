@@ -265,6 +265,20 @@ public:
                     } else if (name == "learn" || name == "learn_correction" ||
                                name == "learn_milestone" || name == "learn_outcome") {
                         emb = embed_ssl_aware(content);
+                    } else if (name == "suggestion_track") {
+                        emb = embed_text(content);
+                    } else if (name == "anticipation_observe") {
+                        std::string context = args.value("context", "");
+                        std::string action  = args.value("action", "");
+                        if (!context.empty() && !action.empty())
+                            emb = embed_text("anticipation: " + context + " \xe2\x86\x92 " + action);
+                    } else if (name == "create_episode") {
+                        std::string title = args.value("title", "");
+                        int start_turn    = args.value("start_turn", 0);
+                        int end_turn      = args.value("end_turn", 0);
+                        if (!title.empty())
+                            emb = embed_text(title + ": turns " + std::to_string(start_turn)
+                                             + "-" + std::to_string(end_turn));
                     }
                     if (!emb.empty()) args["_preembedding"] = emb;
                 }

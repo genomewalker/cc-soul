@@ -16,7 +16,12 @@ ToolResult FieldRpcHandler::tool_anticipation_observe(const json& params) {
     field_store_->add_triplet(context, "anticipates", action);
 
     std::string text = "anticipation: " + context + " → " + action;
-    auto embedding = embed_text(text);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(text);
+    }
     uint64_t id = field_store_->remember("anticipation", realm, text, embedding, 0.7f, 0.001f);
 
     return ToolResult::ok("Pattern recorded (id: " + std::to_string(id) + ")",

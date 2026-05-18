@@ -504,7 +504,12 @@ ToolResult FieldRpcHandler::tool_create_episode(const json& params) {
     std::string content = title + ": turns " + std::to_string(start_turn)
         + "-" + std::to_string(end_turn);
 
-    auto embedding = embed_text(content);
+    std::vector<float> embedding;
+    if (params.contains("_preembedding")) {
+        embedding = params["_preembedding"].get<std::vector<float>>();
+    } else {
+        embedding = embed_text(content);
+    }
 
     uint64_t episode_id = field_store_->remember(
         "episode", realm, content, embedding, 0.8f, 0.0f);
