@@ -456,12 +456,27 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.21.66 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.21.66</span>
+        <span class="version-date">May 18, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Fixed &mdash; Daemon Lock Starvation</h4>
+        <ul>
+          <li><strong>Pre-embed write tools before exclusive lock</strong> &mdash; <code>remember</code>, <code>observe</code>, <code>grow</code>, <code>learn*</code> now compute embeddings (pure ML inference on <code>yantra_</code>, no <code>field_store_</code> access) before acquiring <code>rpc_mutex_</code> exclusively. Previously 30&ndash;60&thinsp;s ML inference held the write lock, causing <code>health_check</code> and all reads to queue for 20+ minutes.</li>
+          <li><strong>Thread pool min workers 2 &rarr; 8</strong> &mdash; pool now starts with 8 workers instead of 2, providing spare capacity when individual workers are occupied by slow operations.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.21.65 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.21.65</span>
         <span class="version-date">May 18, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Fixed &mdash; Memory &amp; Startup Overhaul</h4>
