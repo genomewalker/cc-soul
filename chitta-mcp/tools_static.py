@@ -51,6 +51,10 @@ TOOLS = [
                                                 "type": "string"
                                         }
                                 ]
+                        },
+                        "write_policy": {
+                                "description": "off (default) = store immediately; merge_aware = LLM dedup check first",
+                                "type": "string"
                         }
                 },
                 "required": [
@@ -886,6 +890,10 @@ TOOLS = [
                         },
                         "type": {
                                 "description": "Type: wisdom, belief, failure, aspiration, dream",
+                                "type": "string"
+                        },
+                        "write_policy": {
+                                "description": "off (default) = store immediately; merge_aware = LLM dedup check first",
                                 "type": "string"
                         }
                 },
