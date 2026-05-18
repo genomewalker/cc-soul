@@ -914,7 +914,31 @@ int main(int argc, char* argv[]) {
     }
 
     if (command == "shutdown") return cmd_shutdown(sock_path);
-    if (command == "status") return cmd_status(sock_path);
+    if (command == "status")   return cmd_status(sock_path);
+    if (command == "health") {
+        // Socket-only: never load FieldStore for a health ping.
+        SocketClient client(sock_path);
+        if (!client.connect()) {
+            std::cerr << "Status: not running\n";
+            return 1;
+        }
+        auto h = client.check_health();
+        if (!h) {
+            std::cerr << "Status: unreachable\n";
+            return 1;
+        }
+        bool ok = (h->status == "ok");
+        std::cerr << "Status: " << (ok ? "ok" : h->status) << "\n";
+        std::cerr << "chitta-field daemon " << (ok ? "healthy" : "unhealthy") << "\n";
+        // Print structured info same as before
+        auto info = client.send_request({{"name","health_check"},{"params",{}}});
+        if (info.contains("result") && info["result"].contains("structured")) {
+            auto& s = info["result"]["structured"];
+            if (s.contains("memories")) std::cerr << "  memories : ~" << s["memories"].get<int64_t>() << "\n";
+            if (s.contains("pending"))  std::cerr << "  pending  : " << s["pending"].get<int64_t>() << " (awaiting embed)\n";
+        }
+        return ok ? 0 : 1;
+    }
 
     // Commands that need Mind - daemonize first if needed
     if (command == "daemon") {
