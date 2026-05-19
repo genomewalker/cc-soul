@@ -164,6 +164,7 @@
     <a href="#cat-surprise" class="submenu-toc-link" data-section="cat-surprise">Surprise Memory</a>
     <a href="#cat-debt" class="submenu-toc-link" data-section="cat-debt">Epistemic Debt</a>
     <a href="#cat-integration" class="submenu-toc-link" data-section="cat-integration">Integration Kernel</a>
+    <a href="#cat-cec" class="submenu-toc-link" data-section="cat-cec">Causal Episode Compiler</a>
   </div>
 </nav>
 
@@ -1085,6 +1086,40 @@
         <div class="tool-row"><span class="tool-name">get_task</span><span class="tool-desc">Get full task view &mdash; contract, delegations, evidence links, pending probes, and completion criteria</span></div>
         <div class="tool-row"><span class="tool-name">query_tasks</span><span class="tool-desc">Query task contracts with optional realm, session, status, and priority filters</span></div>
         <div class="tool-row"><span class="tool-name">agent_protocol_stats</span><span class="tool-desc">Agent protocol memory statistics &mdash; total tasks, delegations, evidence links, probes, and criteria counts</span></div>
+      </div>
+    </div>
+
+    <!-- CAUSAL EPISODE COMPILER (CEC, Phases 1-14) -->
+    <div class="tools-category collapsed" id="cat-cec">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1" opacity="0.5"/><circle cx="10" cy="10" r="3" stroke="#CBAF86" stroke-width="1" opacity="0.7"/><line x1="10" y1="3" x2="10" y2="7" stroke="#CBAF86" stroke-width="1"/><line x1="10" y1="13" x2="10" y2="17" stroke="#CBAF86" stroke-width="1"/><line x1="3" y1="10" x2="7" y2="10" stroke="#CBAF86" stroke-width="1"/><line x1="13" y1="10" x2="17" y2="10" stroke="#CBAF86" stroke-width="1"/></svg>
+        </div>
+        <span class="tools-category-name">Causal Episode Compiler (Phases 1&ndash;14)</span>
+        <span class="tools-category-count">20 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">log_event</span><span class="tool-desc">Log a structured CEC event &mdash; (tool, entity, outcome) appended to EventTape and CDAWG</span></div>
+        <div class="tool-row"><span class="tool-name">log_event_ex</span><span class="tool-desc">Log event with extended fields &mdash; token_cost, latency_ms, retry_count for regret-shaped Q-values</span></div>
+        <div class="tool-row"><span class="tool-name">log_decision</span><span class="tool-desc">Record a branch point &mdash; chosen symbol, rejected alternatives, and typed rejection reasons</span></div>
+        <div class="tool-row"><span class="tool-name">recall_last_action</span><span class="tool-desc">Find the most recent EventTape occurrence of a (tool, entity) pair</span></div>
+        <div class="tool-row"><span class="tool-name">recall_failure_pattern</span><span class="tool-desc">Return top-k CDAWG states with high fail_ratio (≥60% failures, ≥3 occurrences)</span></div>
+        <div class="tool-row"><span class="tool-name">recall_causal</span><span class="tool-desc">PMI-ranked causal antecedents &mdash; what sequences historically preceded this (tool, entity)</span></div>
+        <div class="tool-row"><span class="tool-name">recall_causal_antecedent</span><span class="tool-desc">Direct PMI antecedent query with backward eligibility trace context</span></div>
+        <div class="tool-row"><span class="tool-name">recall_counterfactual</span><span class="tool-desc">CDAWG sibling-edge divergence &mdash; what alternative would have had a lower fail_ratio from the same prefix</span></div>
+        <div class="tool-row"><span class="tool-name">recall_true_counterfactual</span><span class="tool-desc">DecisionTape counterfactual &mdash; alternatives the agent explicitly considered and rejected</span></div>
+        <div class="tool-row"><span class="tool-name">recall_motif_value</span><span class="tool-desc">Top-k CDAWG states reachable from (tool, entity) sorted by cross-session Q-value</span></div>
+        <div class="tool-row"><span class="tool-name">recall_hdcbind</span><span class="tool-desc">HDC heteroassociative binding &mdash; unbind a known role/value to infer the missing role by Hamming distance</span></div>
+        <div class="tool-row"><span class="tool-name">refutation_stats</span><span class="tool-desc">Causal refutation ledger &mdash; live vs refuted Sequitur rules with support/contradict counts</span></div>
+        <div class="tool-row"><span class="tool-name">hypothesis_probes</span><span class="tool-desc">Top-k rules by Wilson probe_value &mdash; most uncertain hypotheses ranked by expected information gain</span></div>
+        <div class="tool-row"><span class="tool-name">executor_flush</span><span class="tool-desc">Promote shadow policies meeting lift gate, demote drifted policies, fire active policies for current context</span></div>
+        <div class="tool-row"><span class="tool-name">list_policies</span><span class="tool-desc">List CEC intervention policies &mdash; active and/or shadow, with source rule and lift metrics</span></div>
+        <div class="tool-row"><span class="tool-name">consolidation_pass</span><span class="tool-desc">Run Sequitur grammar induction, promote rules to triplet KG, rebuild HypothesisMarket, take Turīya sample</span></div>
+        <div class="tool-row"><span class="tool-name">turiya_status</span><span class="tool-desc">Turīya witness health vector &mdash; diagnosis, trend, Q-variance, refutation pressure, recent history</span></div>
+        <div class="tool-row"><span class="tool-name">tape_stats</span><span class="tool-desc">EventTape statistics &mdash; total events, tombstoned count, compression ratio</span></div>
+        <div class="tool-row"><span class="tool-name">verbalize_rules</span><span class="tool-desc">Top-k Sequitur rules as human-readable heuristics, e.g. &ldquo;Whenever edit(store.rs) fails, recall_failure_pattern tends to follow&rdquo;</span></div>
+        <div class="tool-row"><span class="tool-name">queue_experiments</span><span class="tool-desc">File deliberate micro-experiments for high-uncertainty hypotheses (probe_value &gt; 0.4, refute_ratio &lt; 0.3)</span></div>
       </div>
     </div>
 

@@ -833,6 +833,50 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
       </div>
 
     </div>
+
+    <!-- CEC Organs sub-section -->
+    <div class="reveal" style="margin-top:var(--space-7)"><div class="section-divider"></div><h3 class="heading-section" style="font-size:var(--text-xl)">Causal Episode Compiler organs <span style="font-size:var(--text-xs);color:var(--ash-400);font-weight:400;">v5.25&ndash;v5.38 &middot; Phases 1&ndash;14</span></h3></div>
+    <p class="section-intro reveal reveal-delay-1">A second, parallel memory substrate that indexes <strong>state transitions</strong> <code>(tool, entity, outcome)</code> instead of content. Runs alongside HNSW/BM25/HDC recall lanes, which are untouched. The atom of memory is a causal edge, not a document.</p>
+
+    <div class="cf-feature-grid reveal reveal-delay-2">
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F4FC;</div>
+        <h3>EventTape</h3>
+        <p>Append-only log of <code>(tool_id, entity_key, outcome_class, session_id, ts_ms)</code> with deterministic entity canonicalization (path stripping, FQN lowercasing, URL hostname). Tool and entity names interned to <code>u16</code>/<code>u32</code>. Serialized in <code>FullSnapshot</code>. Also records <code>DecisionPoint</code> branch events (chosen sym + typed rejection reasons). Phase 12: <code>compress_low_surprisal(threshold)</code> tombstones predictable success events.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x25C6;</div>
+        <h3>CdawgOrgan</h3>
+        <p>Online Blumer CDAWG over packed <code>u64</code> symbols. O(1) amortized per <code>extend()</code>. Each state holds <code>RoaringBitmap</code> endpos, <code>fail_count</code>/<code>succ_count</code>, TD(&lambda;) credit, and Q-value. Rebuilt from EventTape at load (ephemeral, not in snapshot). Supports PPM prediction, counterfactual sibling-edge comparison, top-k Q-value motif retrieval, and TD credit propagation up suffix links weighted by <code>1/|endpos|</code>.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2696;</div>
+        <h3>RefutationLedger</h3>
+        <p>Tracks <code>support</code> (sym_a &rarr; expected sym_b) and <code>contradict</code> (sym_a &rarr; anything else) counts per Sequitur rule. Hysteresis: flip to <em>Refuted</em> at ratio &gt; 0.4, reinstate below 0.2. Antecedent index (<code>HashMap&lt;u64, Vec&lt;RefutEntry&gt;&gt;</code>) enables O(1) per-event checks. On refutation, writes a <code>refuted_by</code> triplet to the KG. Ephemeral; rebuilt from EventTape after each Sequitur pass.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F4CA;</div>
+        <h3>HypothesisMarket</h3>
+        <p>Wilson score CI (95%, z=1.96) + binary entropy per Sequitur rule. <code>probe_value = H(p&#x0302;) &times; (1 &minus; |p&#x0302; &minus; 0.5| &times; 2)</code> — maximized at p&#x0302;=0.5 (maximum uncertainty), zero at certainty. <code>top_probes(k)</code> returns rules the system is most uncertain about, ranked by expected information gain. Drives Phase 14 self-directed experimentation. Ephemeral; rebuilt after each <code>consolidation_pass()</code>.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F6E1;</div>
+        <h3>InterventionStore (CEC)</h3>
+        <p>Shadow-to-active policy lifecycle for CEC interventions. Three policy kinds: <code>OpenTask</code>, <code>GuardPolicy</code>, <code>TurnInjection</code>. Shadow eval gate: minimum 20 events + <code>expected_lift &gt; 0.15</code>. Adversarial invariant: <code>fire_active()</code> checks <code>refutation_ratio &lt; 0.3</code> before firing — policies whose source rule is under active refutation are suspended. Auto-proposes tasks on Sequitur rule refutation and on Phase 14 experiment queue.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F441;</div>
+        <h3>TuriyaMonitor</h3>
+        <p>Pure read-only witness organ. Samples CDAWG state count, EventTape length, tracked/refuted Sequitur rules, HypothesisMarket mean probe_value, Q-value variance, and per-sample deltas after each <code>consolidation_pass()</code>. Rolling 100-sample <code>VecDeque</code>. Five typed diagnoses in priority order: <code>refutation_flood</code>, <code>stale</code>, <code>q_collapse</code>, <code>high_uncertainty</code>, <code>healthy</code>. Persisted in <code>FullSnapshot</code> (V16). Zero write surface to any other organ.</p>
+      </div>
+
+    </div>
   </div>
 </section>
 
