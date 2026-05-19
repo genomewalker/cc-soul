@@ -16,6 +16,10 @@ STDIN_DATA=$(cat)
 file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 [[ -z "$file_path" || ! -f "$file_path" ]] && exit 0
 
+# CEC: log edit event to EventTape + CDAWG (all extensions, fire-and-forget)
+timeout 0.5 "$CHITTA_BIN" log_event --tool "edit" --entity "$file_path" \
+    --outcome 0 --ts_ms "$(date +%s%3N)" >/dev/null 2>&1 &
+
 # Only re-index source extensions tree-sitter understands
 case "$file_path" in
     *.rs|*.cpp|*.c|*.h|*.hpp|*.cc|*.cxx \
