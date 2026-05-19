@@ -84,6 +84,7 @@ int   cf_log_event(struct CfHandle* h, const char* tool, const char* entity,
 int   cf_recall_last_action(struct CfHandle* h, const char* tool, const char* entity,
     size_t k, CfRecallHit* buf, size_t buf_cap, size_t* written);
 char* cf_recall_failure_pattern(struct CfHandle* h, size_t k);
+char* cf_recall_causal_antecedent(struct CfHandle* h, const char* tool, const char* entity, size_t k);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -712,6 +713,18 @@ public:
     /// Return top-k failure patterns as JSON string — best-effort, caller frees with cf_free_string.
     std::string recall_failure_pattern_json(size_t k) {
         char* raw = cf_recall_failure_pattern(handle_, k);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    /// Return top-k PMI-ranked causal antecedents for (tool, entity) as JSON.
+    /// JSON array: [{rank, content, pmi, count}]
+    std::string recall_causal_antecedent_json(const std::string& tool,
+                                              const std::string& entity,
+                                              size_t k) {
+        char* raw = cf_recall_causal_antecedent(handle_, tool.c_str(), entity.c_str(), k);
         if (!raw) return "[]";
         std::string result(raw);
         cf_free_string(raw);
