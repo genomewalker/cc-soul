@@ -547,7 +547,7 @@ fi
 
 # Check if Claude used a learn_* tool (indicated by tool output patterns)
 CLAUDE_LEARNED=false
-if echo "$RESPONSE" | grep -qiE '(learn_correction|learn_preference|learn_insight|learn_approach|learn_outcome|learn_milestone|Stored correction|Stored preference|Stored insight|Stored approach|Stored outcome|Stored milestone)'; then
+if echo "$RESPONSE" | grep -qiE '(learn_correction|learn_preference|learn_insight|learn_approach|learn_outcome|learn_milestone|Stored correction|Stored preference|Stored insight|Stored approach|Stored outcome|Stored milestone|Stored memory #|auto-checkpoint)'; then
     CLAUDE_LEARNED=true
 fi
 
