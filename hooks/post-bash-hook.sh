@@ -25,6 +25,12 @@ command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
 output=$(echo "$STDIN_DATA" | jq -r '.tool_result.stdout // empty' | head -c 500)
 stderr=$(echo "$STDIN_DATA" | jq -r '.tool_result.stderr // empty' | head -c 500)
 
+# CEC: log bash event to EventTape + CDAWG (fire-and-forget, non-blocking)
+_cec_outcome=$([ "$exit_code" = "0" ] && echo 0 || echo 1)
+_cec_entity=$(echo "$command" | awk '{print $1}' | sed 's|.*/||' | head -c 80)
+[[ -n "$_cec_entity" ]] && timeout 0.5 "$CHITTA_BIN" log_event --tool "bash" \
+    --entity "$_cec_entity" --outcome "$_cec_outcome" --ts_ms "$(date +%s%3N)" >/dev/null 2>&1 &
+
 # Normalize command to first word (basename only)
 normalize_cmd() {
     echo "$1" | awk '{print $1}' | sed 's|.*/||'
