@@ -873,7 +873,13 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
       <div class="cf-feature-card">
         <div class="cf-feature-icon">&#x1F441;</div>
         <h3>TuriyaMonitor</h3>
-        <p>Pure read-only witness organ. Samples CDAWG state count, EventTape length, tracked/refuted Sequitur rules, HypothesisMarket mean probe_value, Q-value variance, and per-sample deltas after each <code>consolidation_pass()</code>. Rolling 100-sample <code>VecDeque</code>. Five typed diagnoses in priority order: <code>refutation_flood</code>, <code>stale</code>, <code>q_collapse</code>, <code>high_uncertainty</code>, <code>healthy</code>. Persisted in <code>FullSnapshot</code> (V16). Zero write surface to any other organ.</p>
+        <p>Pure read-only witness organ. Samples CDAWG state count, EventTape length, tracked/refuted Sequitur rules, HypothesisMarket mean probe_value, Q-value variance, FEP drift/shock EWMAs, and per-sample deltas after each <code>consolidation_pass()</code>. Rolling 100-sample <code>VecDeque</code>. Seven typed diagnoses in priority order: <code>refutation_flood</code>, <code>stale</code>, <code>q_collapse</code>, <code>high_uncertainty</code>, <code>fep_context_drift</code> (ewma_drift &gt; 0.5 — world-model going silently stale), <code>fep_emission_shock</code> (ewma_shock &gt; 0.3 — known context, novel outcomes), <code>healthy</code>. Persisted in <code>FullSnapshot</code> (V16). Zero write surface to any other organ.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F300;</div>
+        <h3>FepPriorOrgan <span style="font-size:0.75em;opacity:0.6">(Phase 15)</span></h3>
+        <p>Non-actuating generative model <code>P(sym | context)</code> over the EventTape symbol stream. Factored Dirichlet-multinomial emission: <code>P(tool | state) &middot; P(outcome | state, tool)</code> — entity marginalized. Latent context = CDAWG active state plus its k=4 suffix-link chain (soft posterior, not point-mass). Online Bayesian count update with exponential forgetting (<code>STATE_DECAY = 0.9995</code>). Free energy per step: <code>F = E<sub>q</sub>[&minus;log P(sym|z)] + KL(q<sub>t</sub> || prior<sub>z</sub>)</code> — variational bound, tractable. Two EWMA diagnostic signals fed to TuriyaMonitor: <code>ewma_drift</code> (rising KL → world-model going stale) and <code>ewma_shock</code> (high NLL + low KL → known context, novel outcome). Fully ephemeral — rebuilt from EventTape on each <code>consolidation_pass()</code>, not persisted in snapshot.</p>
       </div>
 
     </div>
