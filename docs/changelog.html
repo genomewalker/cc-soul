@@ -456,12 +456,29 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.41.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.39.0&ndash;5.41.0</span>
+        <span class="version-date">May 19, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added &mdash; Causal Episode Compiler: Phases 15&ndash;17</h4>
+        <ul>
+          <li><strong>Phase 15 &mdash; FEP prior organ</strong> (v5.39.0) &mdash; <code>FepPriorOrgan</code> (new <code>organ/fep_prior.rs</code>): non-actuating generative model <code>P(sym | context)</code> over EventTape. Factored Dirichlet-multinomial emission: <code>P(tool | state) &middot; P(outcome | state, tool)</code>, entity marginalized. Online Bayesian count update with exponential forgetting (<code>STATE_DECAY = 0.9995</code>). Free energy per step replaces PPM surprisal in the Phase&nbsp;3 write gate. Two EWMA signals fed to TuriyaMonitor: <code>ewma_drift</code> (context_drift diagnosis) and <code>ewma_shock</code> (emission_shock diagnosis), extending the monitor to 7 typed diagnoses. Fully ephemeral; rebuilt from EventTape each <code>consolidation_pass()</code>. New tool: <code>fep_status</code>. FFI: <code>cf_fep_status</code>. Multi-model origin: GPT-5.5 + Opus 4.7 — FEP as tractable variational bound over the CEC symbol stream, not full FEP machinery.</li>
+          <li><strong>Phase 16 &mdash; MemoryKind lattice + CPU-native QueryRouter</strong> (v5.40.0) &mdash; <code>MemoryKind</code> (new <code>organ/memory_kind.rs</code>): four typed kinds — <code>Thought</code>, <code>Observation</code>, <code>Decision</code>, <code>CodeFact</code> — inferred at write time from tags/realm/content prefix. Static <code>edge_legal(from, to)</code> matrix enforced in <code>add_assoc_edge()</code>: <code>(Observation, Thought)</code> and <code>(Decision, Thought)</code> illegal (rationalization chain). <code>QueryRouter</code> (new <code>organ/query_router.rs</code>): typed <code>RecallRequest</code> IR dispatches to <code>Exact</code> | <code>Fuzzy</code> | <code>Temporal</code> | <code>Causal</code> | <code>Hybrid</code> | <code>NeedsDisambiguation</code>. LLM called only when grammar leaves a named <code>UnboundSlot</code> — every token spend corresponds to a specific auditable hole. Four falsifiability metrics written per <code>consolidation_pass()</code>: token-displacement ratio, deterministic replay rate, router error rate, contradiction yield. New tool: <code>routed_recall</code>. FFI: <code>cf_routed_recall</code>. Design from GPT-5.5 + Opus 4.7: edge-legality as highest-ROI structural guarantee; escalation via parse failure, not model confidence.</li>
+          <li><strong>Phase 17 &mdash; MemProvenance lattice + Reconciler + open-weight harvest</strong> (v5.41.0) &mdash; <code>MemProvenance</code> (new <code>organ/provenance.rs</code>): five provenance tags on every payload. Open-weight-generated writes enter <code>candidate</code> band; promoted only via <code>witness_memory()</code> on closed-loop signal (user correction, tool-result, router hit-rate delta). Candidate-laundering guard in <code>add_assoc_edge()</code>: <code>src.candidate &amp;&amp; !dst.candidate</code> &rarr; edge rejected. <code>Reconciler</code> R0 (new <code>organ/reconciler.rs</code>): <code>reconcile_all()</code> scans assoc_edges for kind-legality violations and laundering; <code>detect_contradictions()</code> groups by (realm, 6-word prefix). R0/R1 split inviolable — R0 is model-free, deterministically replayable; R1 proposals only validated by R0 before commit. <code>harvest_scope()</code>: demand-driven extraction targets from Turīya anomalies + router misses. <code>scripts/harvest_ow.py</code>: offline open-weight extraction — <code>vocab_geometry</code> (embedding matrix PCA &rarr; HDC seed vectors), <code>triplet_extract</code> (model over corpus &rarr; S,P,O JSONL), <code>feature_dict</code> (sparse autoencoder). New tools: <code>witness_memory</code>, <code>reconcile_pass</code>, <code>harvest_scope</code>. FFI: <code>cf_witness_memory</code>, <code>cf_reconcile_pass</code>, <code>cf_harvest_scope</code>. Design from GPT-5.5 + Opus 4.7: failure mode first (globally inconsistent retrieval under cross-session contradiction); harvest scope demand-driven, not bulk ingest.</li>
+          <li>All new tools wired end-to-end: FFI (<code>cf_*</code>), C++ wrappers in <code>field_store.hpp</code>, handler implementations in <code>field_memory_recall.cpp</code>, registered in <code>register_memory_core_tools.cpp</code> and <code>TOOL_SPECS</code>, exposed in <code>chitta-mcp/server.py</code> <code>ADVANCED_TOOLS</code>.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.38.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.35.0&ndash;5.38.0</span>
         <span class="version-date">May 19, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added &mdash; Causal Episode Compiler: Phases 11&ndash;14</h4>

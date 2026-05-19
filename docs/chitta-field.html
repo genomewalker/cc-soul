@@ -882,6 +882,30 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
         <p>Non-actuating generative model <code>P(sym | context)</code> over the EventTape symbol stream. Factored Dirichlet-multinomial emission: <code>P(tool | state) &middot; P(outcome | state, tool)</code> — entity marginalized. Latent context = CDAWG active state plus its k=4 suffix-link chain (soft posterior, not point-mass). Online Bayesian count update with exponential forgetting (<code>STATE_DECAY = 0.9995</code>). Free energy per step: <code>F = E<sub>q</sub>[&minus;log P(sym|z)] + KL(q<sub>t</sub> || prior<sub>z</sub>)</code> — variational bound, tractable. Two EWMA diagnostic signals fed to TuriyaMonitor: <code>ewma_drift</code> (rising KL → world-model going stale) and <code>ewma_shock</code> (high NLL + low KL → known context, novel outcome). Fully ephemeral — rebuilt from EventTape on each <code>consolidation_pass()</code>, not persisted in snapshot.</p>
       </div>
 
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F5C2;</div>
+        <h3>MemoryKind lattice <span style="font-size:0.75em;opacity:0.6">(Phase 16)</span></h3>
+        <p>Four typed memory kinds inferred at write time from <code>kind</code> tag, <code>realm</code>, and content prefix: <code>Thought</code> (speculation, synthesis), <code>Observation</code> (recorded external fact), <code>Decision</code> (chosen action with rationale), <code>CodeFact</code> (symbol, callgraph, file, type). Static edge-legality matrix enforced in <code>add_assoc_edge()</code> before materialization — <code>(Observation, Thought)</code> and <code>(Decision, Thought)</code> are illegal (rationalization: speculation laundered into fact). Existing memories default to <code>Observation</code> via <code>#[serde(default)]</code> on upgrade. The highest-ROI addition for provenance hygiene: prevents a whole class of hallucinated provenance chains by construction.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F9ED;</div>
+        <h3>QueryRouter <span style="font-size:0.75em;opacity:0.6">(Phase 16)</span></h3>
+        <p>Typed query grammar over <code>RecallRequest</code> IR: <code>kind_filter</code>, <code>realm</code>, <code>subject</code>, <code>predicate</code>, <code>freetext</code>, <code>time_from_ms</code>/<code>time_to_ms</code>, <code>causal_tool</code>/<code>causal_entity</code>. <code>route()</code> returns a <code>DispatchKind</code> — <code>Exact</code> | <code>Fuzzy</code> | <code>Temporal</code> | <code>Causal</code> | <code>Hybrid</code> | <code>NeedsDisambiguation(Vec&lt;UnboundSlot&gt;)</code>. LLM called only when the grammar leaves a named unbound slot — every token spend corresponds to a specific, auditable hole. Fully bound requests execute zero-token deterministic relational algebra. Four falsifiability metrics written per <code>consolidation_pass()</code>: token-displacement ratio, deterministic replay rate, router error rate, contradiction yield.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x1F4DC;</div>
+        <h3>MemProvenance lattice <span style="font-size:0.75em;opacity:0.6">(Phase 17)</span></h3>
+        <p>First-class provenance axis on every <code>MemoryPayload</code>: <code>Human</code>, <code>Claude</code>, <code>Codex</code>, <code>OpenWeightDistilled</code>, <code>OpenWeightGenerated</code>. <code>can_write_kind(kind)</code> gate: open-weight-generated writes always enter the <code>candidate</code> band — forbidden from direct <code>Decision</code> or <code>CodeFact</code> writes. <code>candidate: bool</code> on payload; promoted only by <code>witness_memory()</code> on a closed-loop signal (user <code>[correction]</code>, tool-result outcome, or router hit-rate delta). Candidate-laundering guard in <code>add_assoc_edge()</code>: if <code>src.candidate &amp;&amp; !dst.candidate</code>, the edge is rejected — a quarantined memory cannot cite established knowledge as evidence. Stored with <code>#[serde(default)]</code>; no snapshot migration required.</p>
+      </div>
+
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2694;</div>
+        <h3>Reconciler (R0) <span style="font-size:0.75em;opacity:0.6">(Phase 17)</span></h3>
+        <p>CPU-native deliberation operator — no model call, deterministically replayable. <code>reconcile_all()</code> scans all assoc_edges for MemoryKind legality violations and candidate&rarr;established laundering; results returned as <code>illegal_edges</code>, <code>unresolved</code>. <code>detect_contradictions()</code> groups payloads by <code>(realm, first-6-word content prefix)</code> — kind mismatches within the same prefix group produce a <code>conflict_score=0.6</code> pair; same-kind body divergence produces <code>0.4</code>. Capped at 50 pairs to avoid O(n²) on large stores. R0/R1 split is inviolable: R0 ops are structural graph traversal; R1 (model proposal) produces only proposals that R0 validates before commit. Results logged to triplet KG as <code>(contradiction:A-B, &ldquo;conflict_score&rdquo;, &ldquo;0.6&rdquo;)</code> entries.</p>
+      </div>
+
     </div>
   </div>
 </section>
