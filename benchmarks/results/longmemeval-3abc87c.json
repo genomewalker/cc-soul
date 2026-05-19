@@ -1,0 +1,46 @@
+{
+  "dataset": "longmemeval_oracle",
+  "sha": "3abc87c",
+  "rows": [
+    {
+      "qid": "gpt4_2655b836",
+      "qtype": "temporal-reasoning",
+      "correct": false,
+      "latency_ms": 747,
+      "answer": "[4%] [failure] [assistant] That's great to hear that the dealership was able to fix your GPS issue! As for common issues with GPS systems in newer cars, yes, there are a few things to be aware of:",
+      "gold": "GPS system not functioning correctly"
+    },
+    {
+      "qid": "gpt4_2487a7cb",
+      "qtype": "temporal-reasoning",
+      "correct": false,
+      "latency_ms": 1991,
+      "answer": "[12%] [episode] [assistant] In that case, you can focus on the dashboarding tools' ease of use, customization options, and overall user experience. Here's a revised comparison between Tableau and Powe",
+      "gold": "'Data Analysis using Python' webinar"
+    },
+    {
+      "qid": "gpt4_76048e76",
+      "qtype": "temporal-reasoning",
+      "correct": true,
+      "latency_ms": 1280,
+      "answer": "[9%] [result] [user] By the way, speaking of bikes, I'm glad I got my bike repaired back in mid-February. The gears were acting up, and I couldn't shift properly, but the bike shop fixed it for me. It",
+      "gold": "bike"
+    },
+    {
+      "qid": "gpt4_2312f94c",
+      "qtype": "temporal-reasoning",
+      "correct": false,
+      "latency_ms": 2155,
+      "answer": "[13%] [episode] [assistant] Congratulations on your new laptop and smartphone!",
+      "gold": "Samsung Galaxy S22"
+    },
+    {
+      "qid": "0bb5a684",
+      "qtype": "temporal-reasoning",
+      "correct": false,
+      "latency_ms": 1765,
+      "answer": "[11%] [task] [assistant] Taking notes during a meeting is an essential skill to ensure that you capture important information, action items, and decisions. Here are some suggestions on how to effectiv",
+      "gold": "7 days. 8 days (including the last day) is also acceptable."
+    }
+  ]
+}
