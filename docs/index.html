@@ -85,11 +85,10 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.34.0</span>
       </div>
-      <p class="whats-new-title">Causal Episode Compiler &mdash; Phases 6&ndash;8</p>
+      <p class="whats-new-title">Causal Episode Compiler &mdash; Phases 9&ndash;10</p>
       <p class="whats-new-desc">
-        <strong>Counterfactual recall</strong> (v5.30.0) &mdash; <code>recall_counterfactual</code> compares CDAWG sibling edges at the same prefix state: &ldquo;what alternative tool/entity would have had a lower failure rate in this same context?&rdquo; Wilson lower bound ranks uncertain alternatives below certain ones.
-        <strong>Causal refutation ledger</strong> (v5.31.0) &mdash; promoted Sequitur rules now track falsification evidence. <code>RefutationLedger</code> observes every <code>(sym_a &rarr; sym_b)</code> event; rules flip to <em>Refuted</em> when contradict&thinsp;&gt;&thinsp;40% and reinstate below 20%. <code>refutation_stats</code> surfaces which learned patterns are being actively disproved.
-        <strong>Motif Q-values</strong> (v5.32.0) &mdash; every CDAWG state accumulates a TD(0) Q-value from real outcome events, weighted by <code>1/|endpos|</code>. <code>recall_motif_value</code> answers: &ldquo;which action sequences have the highest expected success rate from this context?&rdquo;
+        <strong>Active memory executor</strong> (v5.33.0) &mdash; CEC closes the read&rarr;write loop. <code>InterventionStore</code> proposes shadow policies on Sequitur rule refutation; a 20-event / lift&thinsp;&gt;&thinsp;0.15 gate promotes them to active. <code>executor_flush</code> and <code>list_policies</code> expose the policy lifecycle. Adversarial invariant: policies whose source rule exceeds <code>refutation_ratio&thinsp;&gt;&thinsp;0.3</code> are auto-suspended before firing.
+        <strong>Regret &amp; hypothesis market</strong> (v5.34.0) &mdash; <code>DecisionTape</code> records explicit branch points (chosen action + rejected alternatives + reason). <code>log_event_ex</code> computes regret-shaped utility <code>U&thinsp;=&thinsp;reward&thinsp;&minus;&thinsp;&alpha;&middot;cost&thinsp;&minus;&thinsp;&beta;&middot;latency&thinsp;&minus;&thinsp;&gamma;&middot;retries</code>. <code>HypothesisMarket</code> ranks Sequitur rules by Wilson probe_value (expected information gain) — turning the refutation ledger into an experiment planner. New tools: <code>recall_true_counterfactual</code>, <code>hypothesis_probes</code>.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>

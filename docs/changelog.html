@@ -459,9 +459,25 @@ body::before {
     <!-- 5.32.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
-        <span class="version-number">v5.30.0&ndash;5.32.0</span>
+        <span class="version-number">v5.33.0&ndash;5.34.0</span>
         <span class="version-date">May 19, 2026</span>
         <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added &mdash; Causal Episode Compiler: Phases 9&ndash;10</h4>
+        <ul>
+          <li><strong>Phase 9 &mdash; Active memory executor</strong> (v5.33.0) &mdash; <code>InterventionStore</code> (new <code>organ/intervention_store.rs</code>) converts CEC from a pure read path into a control system. On every Sequitur rule refutation (<code>contradict_ratio &gt; 0.4</code>), <code>log_event()</code> auto-files a task in the <code>TaskRegistry</code> and proposes a <code>TurnInjection</code> policy in shadow mode. Shadow eval gate: minimum 20 events + <code>expected_lift &gt; 0.15</code>. Adversarial invariant: <code>fire_active()</code> checks <code>refutation_ratio &lt; 0.3</code> before firing any policy &mdash; policies whose source rule is being refuted are auto-suspended. Fixed field-name collision (<code>organ::intervention</code> vs. <code>organ::intervention_store</code>) by renaming the CEC field to <code>cec_policy_store</code>. New tools: <code>executor_flush</code>, <code>list_policies</code>. FFI: <code>cf_executor_flush</code>, <code>cf_list_policies</code>.</li>
+          <li><strong>Phase 10a &mdash; DecisionTape</strong> (v5.34.0) &mdash; <code>organ/decision_tape.rs</code>: explicit branch-point memory recording <code>(chosen_sym, rejected: Vec&lt;(sym, RejectionReason)&gt;, confidence_delta)</code> per turn. Six typed rejection reasons: <code>LowerQValue</code>, <code>HigherFailRate</code>, <code>RefutedRule</code>, <code>CostEstimate</code>, <code>OutOfScope</code>, <code>UserOverride</code>. Persisted in <code>FullSnapshot</code> (V14&rarr;V15 migration). Also fixes a latent bug where <code>snap.event_tape</code> was discarded on load and rebuilt from scratch; tape is now correctly restored from snapshot. <code>recall_true_counterfactual</code> queries the DecisionTape directly instead of inferring from CDAWG sibling edges. FFI: <code>cf_log_decision</code>, <code>cf_recall_true_counterfactual</code>.</li>
+          <li><strong>Phase 10b &mdash; Regret-shaped Q-values</strong> (v5.34.0) &mdash; <code>log_event_ex(…, token_cost, latency_ms, retry_count)</code> computes utility <code>U&thinsp;=&thinsp;base&thinsp;&minus;&thinsp;0.001&middot;cost&thinsp;&minus;&thinsp;0.00001&middot;latency&thinsp;&minus;&thinsp;0.1&middot;retries</code> before calling <code>update_q</code>. Prevents &ldquo;9-step success&rdquo; from outranking &ldquo;3-step success&rdquo; in Q-value. Parameter <code>reward</code> renamed to <code>utility</code> throughout <code>update_q</code>. FFI: <code>cf_log_event_ex</code>.</li>
+          <li><strong>Phase 10c &mdash; Hypothesis Market</strong> (v5.34.0) &mdash; <code>organ/hypothesis_market.rs</code>: Wilson score CI (95%, z=1.96) + binary entropy per Sequitur rule. <code>probe_value&thinsp;=&thinsp;H(p&#x0302;)&thinsp;&times;&thinsp;(1&thinsp;&minus;&thinsp;|p&#x0302;&thinsp;&minus;&thinsp;0.5|&thinsp;&times;&thinsp;2)</code> &mdash; maximised at p&#x0302;=0.5 (maximum uncertainty), zero at certainty. Rebuilt from <code>RefutationLedger</code> after each <code>consolidation_pass()</code>; ephemeral (not in snapshot). Phase 9 executor reads <code>HypothesisMarket::top_probes()</code> before selecting which policy to fire &mdash; rules with high certainty get interventions, uncertain rules get disambiguation tasks. New tool: <code>hypothesis_probes --k N</code>. FFI: <code>cf_hypothesis_probes</code>.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.30.0&ndash;5.32.0</span>
+        <span class="version-date">May 19, 2026</span>
       </div>
       <div class="version-body">
         <h4>Added &mdash; Causal Episode Compiler: Phases 6&ndash;8</h4>
