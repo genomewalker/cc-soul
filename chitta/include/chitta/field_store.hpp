@@ -109,6 +109,7 @@ char* cf_tape_stats(const struct CfHandle* h);
 char* cf_verbalize_rules(const struct CfHandle* h, size_t k);
 char* cf_queue_experiments(struct CfHandle* h, size_t k);
 char* cf_fep_status(const struct CfHandle* h);
+char* cf_routed_recall(const struct CfHandle* h, const char* request_json);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -892,6 +893,14 @@ public:
     std::string fep_status_json() {
         char* raw = cf_fep_status(handle_);
         if (!raw) return R"({"obs_count":0})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string routed_recall_json(const std::string& request_json) {
+        char* raw = cf_routed_recall(handle_, request_json.c_str());
+        if (!raw) return R"({"dispatch":"error","hits":[]})";
         std::string result(raw);
         cf_free_string(raw);
         return result;

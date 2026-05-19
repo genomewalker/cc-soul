@@ -843,6 +843,16 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"k", "Max rules to return", false, "10"}}},
     {"queue_experiments", "CEC Phase 14 Self-directed experimentation: file OpenTask interventions for the k most uncertain Sequitur rules (probe_value > 0.4). Skips rules with refutation_ratio >= 0.3 (adversarial gate). Also triggered automatically by consolidation_pass when turiya_status reports high_uncertainty.",
      {{"k", "Max experiments to queue", false, "5"}}},
+    {"routed_recall", "CEC Phase 16 CPU-native query router: dispatches to cheapest lane (exact/fuzzy/temporal/causal/hybrid) without an LLM call. Returns needs_disambiguation with named unbound slots when the typed grammar cannot fully bind the request.",
+     {{"subject",       "Exact triplet subject — compiles to relational lookup",    false, ""},
+      {"predicate",     "Exact triplet predicate",                                  false, ""},
+      {"freetext",      "Free-text query — fuzzy ANN+BM25 lane",                    false, ""},
+      {"realm",         "Filter by realm",                                           false, ""},
+      {"causal_tool",   "CEC causal query: tool name",                              false, ""},
+      {"causal_entity", "CEC causal query: entity name (required with causal_tool)",false, ""},
+      {"time_from_ms",  "Temporal lower bound (epoch ms)",                          false, ""},
+      {"time_to_ms",    "Temporal upper bound (epoch ms)",                          false, ""},
+      {"k",             "Max hits to return",                                        false, "10"}}},
 };
 
 // Build set of known tools from specs
@@ -948,6 +958,7 @@ void print_usage(const char* prog) {
               << "  CEC witness: turiya_status, tape_stats, verbalize_rules\n"
               << "  CEC experiment: queue_experiments\n"
               << "  CEC phase15: fep_status\n"
+              << "  CEC phase16: routed_recall\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

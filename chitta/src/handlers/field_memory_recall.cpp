@@ -1156,4 +1156,48 @@ ToolResult FieldRpcHandler::tool_fep_status(const json& /*params*/) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_routed_recall(const json& params) {
+    // Build RecallRequest JSON from tool params.
+    json req = json::object();
+    if (params.contains("subject"))       req["subject"]       = params["subject"];
+    if (params.contains("predicate"))     req["predicate"]     = params["predicate"];
+    if (params.contains("freetext"))      req["freetext"]      = params["freetext"];
+    if (params.contains("realm"))         req["realm"]         = params["realm"];
+    if (params.contains("causal_tool"))   req["causal_tool"]   = params["causal_tool"];
+    if (params.contains("causal_entity")) req["causal_entity"] = params["causal_entity"];
+    if (params.contains("time_from_ms"))  req["time_from_ms"]  = params["time_from_ms"];
+    if (params.contains("time_to_ms"))    req["time_to_ms"]    = params["time_to_ms"];
+    req["k"] = params.value("k", 10);
+
+    std::string raw = field_store_->routed_recall_json(req.dump());
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        std::string dispatch = parsed.value("dispatch", "unknown");
+        int cost = parsed.value("token_cost", 0);
+        auto hits = parsed.value("hits", json::array());
+        ss << "routed_recall: dispatch=" << dispatch
+           << "  token_cost=" << cost
+           << "  hits=" << hits.size() << "\n";
+        if (dispatch == "needs_disambiguation") {
+            for (auto& slot : parsed.value("unbound_slots", json::array()))
+                ss << "  unbound: " << slot.value("slot","?")
+                   << " — " << slot.value("context","") << "\n";
+        } else {
+            int i = 0;
+            for (auto& h : hits) {
+                if (i++ >= 5) { ss << "  ...\n"; break; }
+                if (h.contains("content"))
+                    ss << "  • " << h.value("content","").substr(0,120) << "\n";
+                else if (h.contains("object"))
+                    ss << "  • " << h.value("subject","") << " → "
+                       << h.value("predicate","") << " → " << h.value("object","") << "\n";
+            }
+        }
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta
