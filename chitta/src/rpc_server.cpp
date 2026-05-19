@@ -839,6 +839,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"verbalize_rules", "CEC Phase 13 Verbalization: convert top-k Sequitur rules to natural language using a deterministic template. No LLM. Shows what the agent has learned as readable heuristics.",
      {{"k", "Max rules to return", false, "10"}}},
+    {"queue_experiments", "CEC Phase 14 Self-directed experimentation: file OpenTask interventions for the k most uncertain Sequitur rules (probe_value > 0.4). Skips rules with refutation_ratio >= 0.3 (adversarial gate). Also triggered automatically by consolidation_pass when turiya_status reports high_uncertainty.",
+     {{"k", "Max experiments to queue", false, "5"}}},
 };
 
 // Build set of known tools from specs
@@ -942,6 +944,7 @@ void print_usage(const char* prog) {
               << "  CEC market:  hypothesis_probes, refutation_stats\n"
               << "  CEC exec:    executor_flush, list_policies, consolidation_pass\n"
               << "  CEC witness: turiya_status, tape_stats, verbalize_rules\n"
+              << "  CEC experiment: queue_experiments\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
