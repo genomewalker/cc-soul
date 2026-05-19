@@ -852,4 +852,35 @@ ToolResult FieldRpcHandler::tool_recall_hdcbind(const json& params) {
     return ToolResult::ok(ss.str(), {{"results", out}});
 }
 
+ToolResult FieldRpcHandler::tool_consolidation_pass(const json& params) {
+    bool preview_only = params.value("preview", false);
+    if (preview_only) {
+        size_t k = static_cast<size_t>(params.value("k", 5));
+        std::string raw = field_store_->consolidation_preview_json(k);
+        auto parsed = json::parse(raw, nullptr, false);
+        json arr = parsed.is_array() ? parsed : json::array();
+        std::ostringstream ss;
+        ss << "Top-" << k << " consolidation rules (no writes):\n";
+        for (const auto& item : arr) {
+            ss << "  " << item.value("key","?") << " (×" << item.value("support",0) << ")\n";
+        }
+        return ToolResult::ok(ss.str(), {{"rules", arr}});
+    }
+    std::string raw = field_store_->consolidation_pass_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    size_t found    = parsed.is_object() ? parsed.value("rules_found",    0) : 0;
+    size_t promoted = parsed.is_object() ? parsed.value("rules_promoted", 0) : 0;
+    std::string msg = "Consolidation pass complete: " + std::to_string(found)
+                    + " rules found, " + std::to_string(promoted) + " promoted to KG.";
+    // Return a sample key to verify queryability
+    std::string preview_raw = field_store_->consolidation_preview_json(1);
+    auto prev = json::parse(preview_raw, nullptr, false);
+    std::string sample_key = (prev.is_array() && !prev.empty()) ? prev[0].value("key","") : "";
+    json out;
+    out["rules_found"]    = found;
+    out["rules_promoted"] = promoted;
+    out["sample_key"]     = sample_key;
+    return ToolResult::ok(msg, {{"result", out}});
+}
+
 } // namespace chitta

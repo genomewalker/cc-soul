@@ -200,9 +200,9 @@ ADVANCED_TOOLS = {
     "tick_lineage_staleness", "lineage_expiry_check",
     # Contradiction detection (legacy query tools)
     "why_active", "what_superseded", "show_conflicts",
-    # CEC: Event tape + CDAWG (Phase 1-4)
+    # CEC: Event tape + CDAWG + Sequitur (Phase 1-5)
     "log_event", "recall_last_action", "recall_failure_pattern", "recall_causal_antecedent",
-    "recall_hdcbind",
+    "recall_hdcbind", "consolidation_pass",
 }
 
 # Combined set of tools to hide from listing (but still callable)

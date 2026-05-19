@@ -87,6 +87,8 @@ char* cf_recall_failure_pattern(struct CfHandle* h, size_t k);
 char* cf_recall_causal_antecedent(struct CfHandle* h, const char* tool, const char* entity, size_t k);
 char* cf_recall_hdcbind(struct CfHandle* h, const char* known_role, const char* known_val,
                         const char* query_role, size_t k);
+char* cf_consolidation_preview(struct CfHandle* h, size_t k);
+char* cf_consolidation_pass(struct CfHandle* h);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -740,6 +742,22 @@ public:
         char* raw = cf_recall_hdcbind(handle_, known_role.c_str(), known_val.c_str(),
                                       query_role.c_str(), k);
         if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string consolidation_preview_json(size_t k = 5) {
+        char* raw = cf_consolidation_preview(handle_, k);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string consolidation_pass_json() {
+        char* raw = cf_consolidation_pass(handle_);
+        if (!raw) return "{}";
         std::string result(raw);
         cf_free_string(raw);
         return result;

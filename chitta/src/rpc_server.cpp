@@ -790,6 +790,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"known_val",  "Value for the known role", true, nullptr},
       {"query_role", "Role to infer (tool|entity|outcome)", true, nullptr},
       {"k", "Max results", false, "5"}}},
+    {"consolidation_pass", "Run Sequitur grammar consolidation: promote frequent bigrams to triplet KG. Use --preview 1 for dry run.",
+     {{"preview", "If 1, dry run — show rules without writing", false, "0"},
+      {"k",       "Rules to show in preview", false, "5"}}},
 };
 
 // Build set of known tools from specs

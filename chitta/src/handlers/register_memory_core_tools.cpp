@@ -461,6 +461,11 @@ void FieldRpcHandler::register_memory_core_tools() {
         }},{"required",{"known_role","known_val","query_role"}}}}
     });
     handlers_["recall_hdcbind"] = [this](const json& p) { return tool_recall_hdcbind(p); };
+
+    tools_.push_back({{"name","consolidation_pass"},{"description","Run Sequitur grammar consolidation: find frequent bigrams in EventTape and promote rules to the triplet KG (subject=rule:..., predicates: compresses/avg_outcome/support/tape_range)."},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["consolidation_pass"] = [this](const json& p) { return tool_consolidation_pass(p); };
 }
 
 } // namespace chitta
