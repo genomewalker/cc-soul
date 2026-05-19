@@ -754,4 +754,77 @@ ToolResult FieldRpcHandler::tool_route_stats(const json&) {
     return ToolResult::ok(text, stats);
 }
 
+// ── CEC: Event tape + CDAWG ──────────────────────────────────────────────────
+
+ToolResult FieldRpcHandler::tool_log_event(const json& params) {
+    std::string tool   = params.value("tool", "");
+    std::string entity = params.value("entity", "");
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    uint8_t outcome    = static_cast<uint8_t>(params.value("outcome", 0));
+    uint64_t session   = static_cast<uint64_t>(params.value("session_id", 0));
+    int64_t  ts_ms     = static_cast<int64_t>(params.value("ts_ms", 0));
+    field_store_->log_event(tool, entity, outcome, session, ts_ms);
+    return ToolResult::ok("event logged");
+}
+
+ToolResult FieldRpcHandler::tool_recall_last_action(const json& params) {
+    std::string tool   = params.value("tool", "");
+    std::string entity = params.value("entity", "");
+    size_t k           = static_cast<size_t>(params.value("k", 5));
+    auto hits = field_store_->recall_last_action(tool, entity, k);
+    std::ostringstream ss;
+    ss << "Last " << hits.size() << " occurrences of " << tool << " on " << entity << ":\n";
+    json arr = json::array();
+    for (const auto& h : hits) {
+        ss << "  " << h.content << "\n";
+        json item; item["content"] = h.content; item["ts_ms"] = h.ts_ms;
+        arr.push_back(std::move(item));
+    }
+    return ToolResult::ok(ss.str(), {{"hits", arr}});
+}
+
+ToolResult FieldRpcHandler::tool_recall_failure_pattern(const json& params) {
+    size_t k = static_cast<size_t>(params.value("k", 5));
+    std::string raw = field_store_->recall_failure_pattern_json(k);
+    auto parsed = json::parse(raw, nullptr, false);
+    json arr = (parsed.is_array()) ? parsed : json::array();
+    std::ostringstream ss;
+    ss << "Top " << arr.size() << " failure patterns:\n";
+    json out = json::array();
+    for (const auto& p : arr) {
+        ss << "  " << p.value("content", "") << "\n";
+        json item;
+        item["content"]    = p.value("content", "");
+        item["fail_ratio"] = p.value("fail_ratio", 0.0f);
+        item["fail_count"] = p.value("fail_count", (uint64_t)0);
+        item["ts_ms"]      = p.value("ts_ms", (int64_t)0);
+        out.push_back(std::move(item));
+    }
+    return ToolResult::ok(ss.str(), {{"patterns", out}});
+}
+
+ToolResult FieldRpcHandler::tool_recall_causal_antecedent(const json& params) {
+    std::string tool   = params.value("tool", "");
+    std::string entity = params.value("entity", "");
+    size_t k           = static_cast<size_t>(params.value("k", 5));
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    std::string raw = field_store_->recall_causal_antecedent_json(tool, entity, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    json arr = (parsed.is_array()) ? parsed : json::array();
+    std::ostringstream ss;
+    ss << "PMI-ranked causal antecedents for " << tool << " on " << entity << ":\n";
+    json out = json::array();
+    for (const auto& p : arr) {
+        ss << "  " << p.value("content", "") << "\n";
+        json item;
+        item["content"] = p.value("content", "");
+        item["pmi"]     = p.value("pmi", 0.0f);
+        item["count"]   = p.value("count", (uint64_t)0);
+        out.push_back(std::move(item));
+    }
+    return ToolResult::ok(ss.str(), {{"antecedents", out}});
+}
+
 } // namespace chitta

@@ -102,3 +102,8 @@
     ToolResult tool_recall_spreading(const json& params);
     ToolResult tool_full_resonate(const json& params);
     ToolResult tool_route_stats(const json&);
+    // CEC: Event tape + CDAWG
+    ToolResult tool_log_event(const json& params);
+    ToolResult tool_recall_last_action(const json& params);
+    ToolResult tool_recall_failure_pattern(const json& params);
+    ToolResult tool_recall_causal_antecedent(const json& params);
