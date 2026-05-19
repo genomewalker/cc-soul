@@ -85,11 +85,11 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.32.0</span>
       </div>
-      <p class="whats-new-title">Build warning cleanup + memory index correctness series</p>
+      <p class="whats-new-title">Causal Episode Compiler &mdash; Phases 6&ndash;8</p>
       <p class="whats-new-desc">
-        <strong>Warning-free build</strong> (v5.21.54) &mdash; removed dead <code>default_lsh_buckets()</code>, redundant <code>SessionRecallHit</code> import, and silenced reserved <code>config</code> field. Zero warnings.
-        <strong>HNSW sidecar staleness + deleted set trimming</strong> (v5.21.52&ndash;53) &mdash; <code>load_hnsw()</code> uses <code>total_embedding_count()</code>; <code>trim_deleted()</code> prevents unbounded soft-delete growth.
-        <strong>delete path + payload sidecar + mmap</strong> (v5.21.47&ndash;51) &mdash; <code>emb_offsets</code> cleared on remove; <code>.pld</code> sidecar; flat Hamming scan; WAL compaction; episode TTL pruning.
+        <strong>Counterfactual recall</strong> (v5.30.0) &mdash; <code>recall_counterfactual</code> compares CDAWG sibling edges at the same prefix state: &ldquo;what alternative tool/entity would have had a lower failure rate in this same context?&rdquo; Wilson lower bound ranks uncertain alternatives below certain ones.
+        <strong>Causal refutation ledger</strong> (v5.31.0) &mdash; promoted Sequitur rules now track falsification evidence. <code>RefutationLedger</code> observes every <code>(sym_a &rarr; sym_b)</code> event; rules flip to <em>Refuted</em> when contradict&thinsp;&gt;&thinsp;40% and reinstate below 20%. <code>refutation_stats</code> surfaces which learned patterns are being actively disproved.
+        <strong>Motif Q-values</strong> (v5.32.0) &mdash; every CDAWG state accumulates a TD(0) Q-value from real outcome events, weighted by <code>1/|endpos|</code>. <code>recall_motif_value</code> answers: &ldquo;which action sequences have the highest expected success rate from this context?&rdquo;
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>

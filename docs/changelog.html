@@ -456,12 +456,49 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.32.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.30.0&ndash;5.32.0</span>
+        <span class="version-date">May 19, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added &mdash; Causal Episode Compiler: Phases 6&ndash;8</h4>
+        <ul>
+          <li><strong>Phase 6 &mdash; Counterfactual recall</strong> (v5.30.0) &mdash; <code>CdawgOrgan::counterfactual_alternatives(context, taken_sym, min_support, k)</code> enumerates sibling edges at the CDAWG state reached by prefix <em>P</em> and compares <code>fail_ratio(P&rarr;a)</code> vs <code>fail_ratio(P&rarr;b)</code>. Wilson lower bound (90% CI, z=1.645) ranks uncertain alternatives below well-supported ones. New tool: <code>recall_counterfactual --tool T --entity E --outcome N</code>. Gate: <code>min_support = 5</code>.</li>
+          <li><strong>Phase 7 &mdash; Causal refutation ledger</strong> (v5.31.0) &mdash; <code>RefutationLedger</code> (new <code>organ/refutation_ledger.rs</code>) tracks <code>support</code> (sym_a &rarr; expected sym_b) and <code>contradict</code> (sym_a &rarr; anything else) counts per Sequitur rule. Hysteresis thresholds: flip to <em>Refuted</em> when <code>ratio &gt; 0.4</code>, reinstate when <code>&lt; 0.2</code>. On refutation a <code>(rule_N, &ldquo;refuted_by&rdquo;, &ldquo;contradict_at_ts=…&rdquo;)</code> triplet is written. <code>consolidation_pass()</code> seeds the ledger from each Sequitur run; <code>log_event()</code> calls <code>observe(prev, curr, ts)</code> on every append. New tool: <code>refutation_stats --k N</code>.</li>
+          <li><strong>Phase 8 &mdash; Cross-session motif Q-values</strong> (v5.32.0) &mdash; <code>CdawgState</code> gains a <code>q_value: f32</code> field. <code>update_q(terminal_sym, reward, α, γ)</code> propagates TD(0) credit up the suffix-link tree weighted by <code>1/|endpos|</code> so generic high-frequency states do not absorb disproportionate signal. Called on every non-legacy outcome event (reward +1.0 success / &minus;1.0 failure, α=0.05, γ=0.95). <code>top_q_states(prefix, k)</code> BFS from a prefix state, returns top-k by Q. <code>store.rs::recall_motif_value</code> maps states to <code>RecallHit</code> with score <code>(q+1)/2</code> and next-action predictions from outgoing transitions. New tool: <code>recall_motif_value --tool T --entity E --k N</code>.</li>
+          <li><code>SequiturRule</code> gains <code>contradict_count: u32</code> for persistence across consolidation passes.</li>
+          <li>FFI: <code>cf_recall_counterfactual</code>, <code>cf_refutation_stats</code>, <code>cf_recall_motif_value</code>. All three wired through C++ handlers, registered in <code>register_memory_core_tools.cpp</code>, added to <code>TOOL_SPECS</code>, and exposed in MCP <code>ADVANCED_TOOLS</code>.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.29.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.25.0&ndash;5.29.0</span>
+        <span class="version-date">May 19, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added &mdash; Causal Episode Compiler: Phases 1&ndash;5</h4>
+        <p>Embedding-free agentic memory substrate indexing state transitions <code>(tool, entity, outcome)</code> rather than content. Runs in parallel with HNSW/BM25/HDC recall lanes, which are untouched.</p>
+        <ul>
+          <li><strong>Phase 1 &mdash; Event Tape + CDAWG</strong> (v5.25.0) &mdash; <code>EventTape</code>: append-only log of <code>(tool_id, entity_key, outcome_class, session_id, ts_ms)</code> with deterministic entity canonicalization. <code>CdawgOrgan</code>: online CDAWG over packed u64 symbols; ephemeral, rebuilt from EventTape at load. <code>EventTape</code> serialized in <code>FullSnapshot</code> (V13&rarr;V14). Existing memories receive a synthetic <code>legacy</code> event for warm-start. Tools: <code>log_event</code>, <code>recall_last_action</code>, <code>recall_failure_pattern</code>, <code>recall_causal</code>.</li>
+          <li><strong>Phase 2 &mdash; TD(&lambda;) + PMI antecedents + Roaring</strong> (v5.26.0) &mdash; <code>CdawgState.endpos</code> upgraded to <code>RoaringBitmap</code>. <code>push_td_credit()</code> backward eligibility traces (&delta;=+0.1/&minus;0.2, &gamma;=0.9). <code>recall_causal_antecedent</code> returns PMI-ranked predecessors.</li>
+          <li><strong>Phase 3 &mdash; Surprisal-gated writes + injection</strong> (v5.27.0) &mdash; PPM surprisal gate in <code>put_memory</code>: if <code>surprisal &gt; 2.0 nats</code>, <code>decay_rate</code> halved. <code>prompt-core.sh</code> injects a <code>&ldquo;&#9888; CEC:&rdquo;</code> warning when current CDAWG prefix has <code>fail_ratio &gt; 0.7 &amp;&amp; fail_count &ge; 3</code>.</li>
+          <li><strong>Phase 4 &mdash; HDC as heteroassociative binder</strong> (v5.28.0) &mdash; <code>EpisodeHdcStore</code>: each CEC event encoded as <code>bind(R_tool,t) XOR bind(R_entity,e) XOR bind(R_outcome,o)</code>. <code>recall_hdcbind(known_role, known_val, query_role)</code> XOR-unbinds to infer the missing role by Hamming distance against codebook. Tool: <code>recall_hdcbind</code>.</li>
+          <li><strong>Phase 5 &mdash; Sequitur grammar + procedural KG promotion</strong> (v5.29.0) &mdash; <code>run_sequitur()</code> counts bigrams with frequency&thinsp;&ge;&thinsp;5. <code>consolidation_pass()</code> promotes rules to triplet KG (<code>compresses</code>, <code>avg_outcome</code>, <code>support</code>, <code>tape_range</code> predicates). Dedup via <code>query_subject()</code>. Auto-triggers every 500 events. Tool: <code>consolidation_pass</code>.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.21.68 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.21.68</span>
         <span class="version-date">May 18, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Fixed &mdash; Pre-embed All Medium-Frequency Write Handlers</h4>
