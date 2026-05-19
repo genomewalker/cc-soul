@@ -2,6 +2,58 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.32.0] - 2026-05-19
+
+### Added — CEC Phase 8: Cross-Session Motif Q-Values
+
+- `CdawgState.q_value`: per-state expected-success scalar, persisted in CDAWG.
+- `CdawgOrgan::update_q(terminal_sym, reward, α, γ)`: TD(0) propagation up the
+  suffix-link tree, weighted by `1/|endpos|` so generic states don't absorb all
+  signal. Called on every non-legacy outcome event with reward ±1.
+- `CdawgOrgan::top_q_states(prefix, k)`: BFS from a prefix state, returns top-k
+  reachable states by Q-value.
+- `store.rs::recall_motif_value(tool, entity, k)`: maps Q-states to `RecallHit`
+  with normalised score `(q+1)/2` and next-action predictions from outgoing transitions.
+- New tool: **`recall_motif_value`** — "which action sequences have highest expected
+  success rate from this context?"
+- FFI: `cf_recall_motif_value` → JSON array `[{state_id, q_value, support, content}]`.
+
+## [5.31.0] - 2026-05-19
+
+### Added — CEC Phase 7: Causal Refutation Ledger
+
+Rules that know they're wrong.
+
+- `refutation_ledger.rs` (`RefutationLedger`): antecedent-indexed HashMap tracking
+  per-rule `support` (sym_a → sym_b observed) and `contradict` (sym_a → anything
+  else observed) counts with two hysteresis thresholds:
+  - `refute_ratio > 0.4` → rule flips to `Refuted(ts)`; writes
+    `(rule_N, "refuted_by", "contradict_at_ts=...")` triplet.
+  - `refute_ratio < 0.2` → rule reinstated to `Live`.
+- `SequiturRule.contradict_count`: persisted count of false-positive antecedent firings.
+- `log_event()` calls `ledger.observe(prev_sym, curr_sym, ts)` on every append.
+- `consolidation_pass()` calls `ledger.seed_from_rules()` after each Sequitur run.
+- `store.rs::refutation_stats(k)`: human-readable top-k by refute_ratio with live/
+  refuted counts.
+- New tool: **`refutation_stats`** — shows which promoted procedural rules are
+  being actively falsified.
+
+## [5.30.0] - 2026-05-19
+
+### Added — CEC Phase 6: Counterfactual Recall via CDAWG Sibling Edges
+
+- `CounterfactualHit` struct: `{symbol, fail_ratio, taken_fail_ratio, delta, support,
+  wilson_fail_lower}`.
+- `CdawgOrgan::counterfactual_alternatives(context, taken_sym, min_support, k)`:
+  walks to prefix state, enumerates sibling transitions, ranks by
+  `delta = taken_fail_ratio - alt_fail_ratio` (positive = alternative is better).
+  Wilson lower bound (90% CI, z=1.645) used as tiebreaker for uncertain estimates.
+- `store.rs::recall_counterfactual(tool, entity, outcome, k)`: builds context from
+  last 4 EventTape symbols, delegates to CDAWG.
+- New tool: **`recall_counterfactual`** — "what alternative tool/entity would have
+  had a lower failure rate in the same context?"
+- Gate: `min_support = 5` (same as failure_pattern).
+
 ## [5.29.0] - 2026-05-19
 
 ### Added — Causal Episode Compiler (CEC) — Phases 1–5
