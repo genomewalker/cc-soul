@@ -1019,6 +1019,12 @@ if [[ -x "$CHITTA_BIN" ]]; then
         --arg realm "${REALM:-brahman}" \
         '{realm: $realm, threshold: 0.92, dry_run: false, limit: 20}')"
     echo "[consolidation] Queued sleep consolidation for realm=${REALM:-brahman}" >&2
+
+    # CEC consolidation_pass: run Sequitur + promote rules + rebuild HypothesisMarket.
+    # nohup detaches from hook timeout; log to tmp for debugging.
+    _cec_log="${CHITTA_DB_PATH:-$HOME/.claude/mind}/.cec_consolidation.log"
+    nohup "$CHITTA_BIN" consolidation_pass >"$_cec_log" 2>&1 &
+    echo "[cec] consolidation_pass launched (pid $!, log: $_cec_log)" >&2
 fi
 
 # Record stop timestamp for both session-specific and legacy global paths.
