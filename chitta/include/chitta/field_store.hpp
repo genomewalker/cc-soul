@@ -78,6 +78,13 @@ int cf_recall_spreading(struct CfHandle* h, const char* query, size_t k, const c
 int cf_recall_hdc(struct CfHandle* h, const char* query, const char* realm,
     size_t k, CfRecallHit* buf, size_t buf_cap, size_t* written);
 
+// CEC: event tape + CDAWG
+int   cf_log_event(struct CfHandle* h, const char* tool, const char* entity,
+    uint8_t outcome, uint64_t session_id, int64_t ts_ms);
+int   cf_recall_last_action(struct CfHandle* h, const char* tool, const char* entity,
+    size_t k, CfRecallHit* buf, size_t buf_cap, size_t* written);
+char* cf_recall_failure_pattern(struct CfHandle* h, size_t k);
+
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
     const char* uploaded_by, const char* tags_json, int64_t ts_ms);
@@ -682,6 +689,33 @@ public:
                               k, buf, MAX_HITS, &written);
         if (r != 0) return {};
         return hits_to_results(buf, written);
+    }
+
+    /// Log a structured action event to the CEC tape and extend the CDAWG.
+    void log_event(const std::string& tool, const std::string& entity,
+                   uint8_t outcome, uint64_t session_id = 0, int64_t ts_ms = 0) {
+        cf_log_event(handle_, tool.c_str(), entity.c_str(), outcome, session_id, ts_ms);
+    }
+
+    /// Recall last k occurrences of (tool, entity) from the CDAWG — best-effort.
+    std::vector<FieldRecallHit> recall_last_action(const std::string& tool,
+                                                   const std::string& entity, size_t k) {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+        int r = cf_recall_last_action(handle_, tool.c_str(), entity.c_str(),
+                                      k, buf, MAX_HITS, &written);
+        if (r != 0) return {};
+        return hits_to_results(buf, written);
+    }
+
+    /// Return top-k failure patterns as JSON string — best-effort, caller frees with cf_free_string.
+    std::string recall_failure_pattern_json(size_t k) {
+        char* raw = cf_recall_failure_pattern(handle_, k);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
     }
 
     struct SessionHit {
