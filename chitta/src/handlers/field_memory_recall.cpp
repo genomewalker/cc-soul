@@ -1133,4 +1133,27 @@ ToolResult FieldRpcHandler::tool_queue_experiments(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_fep_status(const json& /*params*/) {
+    std::string raw = field_store_->fep_status_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        uint64_t obs    = parsed.value("obs_count",    (uint64_t)0);
+        double drift    = parsed.value("ewma_drift",   0.0);
+        double shock    = parsed.value("ewma_shock",   0.0);
+        int    states   = parsed.value("states_modeled", 0);
+        bool   cd       = parsed.value("context_drift",  false);
+        bool   es       = parsed.value("emission_shock", false);
+        ss << "FEP prior organ  obs=" << obs
+           << "  states_modeled=" << states
+           << "  drift=" << std::fixed << std::setprecision(4) << drift
+           << "  shock=" << shock;
+        if (cd) ss << "  [CONTEXT_DRIFT]";
+        if (es) ss << "  [EMISSION_SHOCK]";
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta
