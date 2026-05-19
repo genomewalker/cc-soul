@@ -114,3 +114,5 @@
     ToolResult tool_recall_motif_value(const json& params);
     ToolResult tool_executor_flush(const json& params);
     ToolResult tool_list_policies(const json& params);
+    ToolResult tool_recall_true_counterfactual(const json& params);
+    ToolResult tool_hypothesis_probes(const json& params);

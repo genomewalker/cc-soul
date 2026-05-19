@@ -95,6 +95,15 @@ char* cf_refutation_stats(struct CfHandle* h, size_t k);
 char* cf_recall_motif_value(struct CfHandle* h, const char* tool, const char* entity, size_t k);
 char* cf_executor_flush(struct CfHandle* h);
 char* cf_list_policies(struct CfHandle* h, bool active_only);
+int   cf_log_event_ex(struct CfHandle* h, const char* tool, const char* entity,
+                      uint8_t outcome, uint64_t session_id, int64_t ts_ms,
+                      uint32_t token_cost, uint32_t latency_ms, uint8_t retry_count);
+int   cf_log_decision(struct CfHandle* h, const char* chosen_tool, const char* chosen_entity,
+                      uint8_t chosen_outcome, const char* rejected_json,
+                      float confidence_delta, int64_t ts_ms);
+char* cf_recall_true_counterfactual(struct CfHandle* h, const char* tool,
+                                    const char* entity, uint8_t outcome, size_t k);
+char* cf_hypothesis_probes(struct CfHandle* h, size_t k);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -806,6 +815,38 @@ public:
     std::string list_policies_json(bool active_only = false) {
         char* raw = cf_list_policies(handle_, active_only);
         if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    int log_event_ex(const std::string& tool, const std::string& entity,
+                     uint8_t outcome, uint64_t session_id, int64_t ts_ms,
+                     uint32_t token_cost, uint32_t latency_ms, uint8_t retry_count) {
+        return cf_log_event_ex(handle_, tool.c_str(), entity.c_str(),
+                               outcome, session_id, ts_ms, token_cost, latency_ms, retry_count);
+    }
+
+    int log_decision(const std::string& chosen_tool, const std::string& chosen_entity,
+                     uint8_t chosen_outcome, const std::string& rejected_json,
+                     float confidence_delta, int64_t ts_ms) {
+        return cf_log_decision(handle_, chosen_tool.c_str(), chosen_entity.c_str(),
+                               chosen_outcome, rejected_json.c_str(), confidence_delta, ts_ms);
+    }
+
+    std::string recall_true_counterfactual_json(const std::string& tool,
+                                                const std::string& entity,
+                                                uint8_t outcome = 0, size_t k = 5) {
+        char* raw = cf_recall_true_counterfactual(handle_, tool.c_str(), entity.c_str(), outcome, k);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string hypothesis_probes_json(size_t k = 10) {
+        char* raw = cf_hypothesis_probes(handle_, k);
+        if (!raw) return "{}";
         std::string result(raw);
         cf_free_string(raw);
         return result;

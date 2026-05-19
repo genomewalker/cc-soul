@@ -968,4 +968,50 @@ ToolResult FieldRpcHandler::tool_list_policies(const json& params) {
     return ToolResult::ok(ss.str(), {{"policies", parsed.is_array() ? parsed : json::array()}});
 }
 
+ToolResult FieldRpcHandler::tool_recall_true_counterfactual(const json& params) {
+    std::string tool   = params.value("tool",    "");
+    std::string entity = params.value("entity",  "");
+    uint8_t outcome    = static_cast<uint8_t>(params.value("outcome", 0));
+    size_t k           = static_cast<size_t>(params.value("k", 5));
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    std::string raw = field_store_->recall_true_counterfactual_json(tool, entity, outcome, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_array() && !parsed.empty()) {
+        ss << "True counterfactuals for " << tool << "(" << entity << ") — "
+           << parsed.size() << " decision points where this was rejected:\n";
+        for (const auto& h : parsed) {
+            ss << "  " << h.value("content", "") << "\n";
+        }
+    } else {
+        ss << "No decision-tape entries yet for " << tool << "(" << entity
+           << ") — log decisions via log_event_ex to populate.";
+    }
+    return ToolResult::ok(ss.str(), {{"hits", parsed.is_array() ? parsed : json::array()}});
+}
+
+ToolResult FieldRpcHandler::tool_hypothesis_probes(const json& params) {
+    size_t k = static_cast<size_t>(params.value("k", 10));
+    std::string raw = field_store_->hypothesis_probes_json(k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        auto top = parsed.value("top_k", json::array());
+        ss << "hypothesis_probes: total=" << parsed.value("total", 0)
+           << " top_" << top.size() << "=[\n";
+        for (const auto& h : top) {
+            ss << "  rule_" << h.value("rule_id", 0)
+               << ": p_hat=" << h.value("p_hat", 0.0)
+               << " wilson=[" << h.value("wilson_lower", 0.0)
+               << "," << h.value("wilson_upper", 1.0) << "]"
+               << " probe_value=" << h.value("probe_value", 0.0) << "\n";
+        }
+        ss << "]";
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta
