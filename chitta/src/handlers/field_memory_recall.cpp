@@ -1200,4 +1200,50 @@ ToolResult FieldRpcHandler::tool_routed_recall(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_witness_memory(const json& params) {
+    uint64_t memory_id = params.value("memory_id", uint64_t(0));
+    std::string witness_kind = params.value("witness_kind", "");
+    if (memory_id == 0 || witness_kind.empty())
+        return ToolResult::error("memory_id and witness_kind required");
+    std::string raw = field_store_->witness_memory_json(memory_id, witness_kind);
+    auto parsed = json::parse(raw, nullptr, false);
+    bool ok = parsed.is_object() && parsed.value("ok", false);
+    std::string status = parsed.is_object() ? parsed.value("status", "unknown") : raw;
+    std::ostringstream ss;
+    ss << (ok ? "witness_memory: " : "witness_memory error: ") << status
+       << "  memory_id=" << memory_id << "  witness=" << witness_kind;
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_reconcile_pass(const json& /*params*/) {
+    std::string raw = field_store_->reconcile_pass_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "reconcile_pass:"
+           << "  illegal_edges=" << parsed.value("illegal_edges", 0)
+           << "  contradictions=" << parsed.value("contradictions", 0)
+           << "  unresolved="     << parsed.value("unresolved", 0);
+    } else { ss << raw; }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_harvest_scope(const json& /*params*/) {
+    std::string raw = field_store_->harvest_scope_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "harvest_scope:"
+           << "  diagnosis=" << parsed.value("turiya_diagnosis", "unknown")
+           << "  total_misses=" << parsed.value("total_router_misses", 0)
+           << "  budget_items=" << parsed.value("harvest_budget_items", 0)
+           << "\n";
+        for (auto& m : parsed.value("top_router_misses", json::array())) {
+            ss << "  miss: " << m.value("pattern", "?")
+               << " → corpus=" << m.value("suggested_corpus", "?") << "\n";
+        }
+    } else { ss << raw; }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta

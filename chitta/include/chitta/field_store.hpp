@@ -110,6 +110,9 @@ char* cf_verbalize_rules(const struct CfHandle* h, size_t k);
 char* cf_queue_experiments(struct CfHandle* h, size_t k);
 char* cf_fep_status(const struct CfHandle* h);
 char* cf_routed_recall(const struct CfHandle* h, const char* request_json);
+char* cf_witness_memory(const struct CfHandle* h, uint64_t memory_id, const char* witness_kind);
+char* cf_reconcile_pass(const struct CfHandle* h);
+char* cf_harvest_scope(const struct CfHandle* h);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -901,6 +904,30 @@ public:
     std::string routed_recall_json(const std::string& request_json) {
         char* raw = cf_routed_recall(handle_, request_json.c_str());
         if (!raw) return R"({"dispatch":"error","hits":[]})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string witness_memory_json(uint64_t memory_id, const std::string& witness_kind) {
+        char* raw = cf_witness_memory(handle_, memory_id, witness_kind.c_str());
+        if (!raw) return R"({"ok":false})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string reconcile_pass_json() {
+        char* raw = cf_reconcile_pass(handle_);
+        if (!raw) return R"({"illegal_edges":0,"contradictions":0,"unresolved":0})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string harvest_scope_json() {
+        char* raw = cf_harvest_scope(handle_);
+        if (!raw) return R"({"error":"unavailable"})";
         std::string result(raw);
         cf_free_string(raw);
         return result;

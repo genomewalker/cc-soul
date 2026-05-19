@@ -206,6 +206,7 @@ ADVANCED_TOOLS = {
     "recall_motif_value", "executor_flush", "list_policies",
     "recall_true_counterfactual", "hypothesis_probes", "turiya_status", "tape_stats",
     "verbalize_rules", "queue_experiments", "fep_status", "routed_recall",
+    "witness_memory", "reconcile_pass", "harvest_scope",
 }
 
 # Combined set of tools to hide from listing (but still callable)
