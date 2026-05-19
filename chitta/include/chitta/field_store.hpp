@@ -108,6 +108,7 @@ char* cf_turiya_status(const struct CfHandle* h);
 char* cf_tape_stats(const struct CfHandle* h);
 char* cf_verbalize_rules(const struct CfHandle* h, size_t k);
 char* cf_queue_experiments(struct CfHandle* h, size_t k);
+char* cf_fep_status(const struct CfHandle* h);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -883,6 +884,14 @@ public:
     std::string queue_experiments_json(size_t k = 5) {
         char* raw = cf_queue_experiments(handle_, k);
         if (!raw) return R"({"queued":0})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string fep_status_json() {
+        char* raw = cf_fep_status(handle_);
+        if (!raw) return R"({"obs_count":0})";
         std::string result(raw);
         cf_free_string(raw);
         return result;

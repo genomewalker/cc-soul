@@ -833,7 +833,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"k",       "Max results",                        false, "5"}}},
     {"hypothesis_probes", "Top-k Sequitur rules by Wilson probe_value (expected info gain). Highest = most uncertain — best candidates for deliberate disambiguation.",
      {{"k", "Max rules to return", false, "10"}}},
-    {"turiya_status", "CEC Phase 11 Turīya witness: read-only health vector across all CEC organs. Reports CDAWG growth, Sequitur rule churn, Q-value variance, refutation pressure, and hypothesis uncertainty. Diagnoses: healthy|stale|q_collapse|refutation_flood|high_uncertainty.",
+    {"fep_status", "CEC Phase 15 FEP prior organ: obs_count, states_modeled, ewma_drift (context_drift if >0.5), ewma_shock (emission_shock if >0.3). Context drift = world-model silently degrading; emission shock = known context, novel outcome.",
+     {}},
+    {"turiya_status", "CEC Phase 11 Turīya witness: read-only health vector across all CEC organs. Reports CDAWG growth, Sequitur rule churn, Q-value variance, refutation pressure, and hypothesis uncertainty. Diagnoses: healthy|stale|q_collapse|refutation_flood|high_uncertainty|fep_context_drift|fep_emission_shock.",
      {}},
     {"tape_stats", "CEC Phase 12 EventTape statistics: event count, tombstoned events (temporal compression), unique sessions, tools, entities, and failure events.",
      {}},
@@ -945,6 +947,7 @@ void print_usage(const char* prog) {
               << "  CEC exec:    executor_flush, list_policies, consolidation_pass\n"
               << "  CEC witness: turiya_status, tape_stats, verbalize_rules\n"
               << "  CEC experiment: queue_experiments\n"
+              << "  CEC phase15: fep_status\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
