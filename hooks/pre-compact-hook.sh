@@ -342,6 +342,14 @@ if [[ -n "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
     echo "[distill] Triggered for $DISTILL_SESSION_ID" >&2
 fi
 
+# CEC: run consolidation_pass before compaction so Sequitur rules + HypothesisMarket
+# are fresh when the compacted context is restored.
+if [[ -x "$CHITTA_BIN" ]]; then
+    _cec_log="${CHITTA_DB_PATH:-$HOME/.claude/mind}/.cec_consolidation.log"
+    nohup "$CHITTA_BIN" consolidation_pass >"$_cec_log" 2>&1 &
+    echo "[cec] consolidation_pass launched pre-compact (pid $!)" >&2
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════
 # COMPACT_CONTEXT: Memory-aware turn scoring before compaction
 # ═══════════════════════════════════════════════════════════════════════════
