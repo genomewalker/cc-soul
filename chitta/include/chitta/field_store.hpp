@@ -107,6 +107,7 @@ char* cf_hypothesis_probes(struct CfHandle* h, size_t k);
 char* cf_turiya_status(const struct CfHandle* h);
 char* cf_tape_stats(const struct CfHandle* h);
 char* cf_verbalize_rules(const struct CfHandle* h, size_t k);
+char* cf_queue_experiments(struct CfHandle* h, size_t k);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -874,6 +875,14 @@ public:
     std::string verbalize_rules_json(size_t k = 10) {
         char* raw = cf_verbalize_rules(handle_, k);
         if (!raw) return R"({"total":0,"rules":[]})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string queue_experiments_json(size_t k = 5) {
+        char* raw = cf_queue_experiments(handle_, k);
+        if (!raw) return R"({"queued":0})";
         std::string result(raw);
         cf_free_string(raw);
         return result;

@@ -1114,4 +1114,23 @@ ToolResult FieldRpcHandler::tool_verbalize_rules(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_queue_experiments(const json& params) {
+    size_t k = static_cast<size_t>(params.value("k", 5));
+    std::string raw = field_store_->queue_experiments_json(k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        int queued   = parsed.value("queued", 0);
+        int refuted  = parsed.value("skipped_refuted", 0);
+        int certain  = parsed.value("skipped_certain", 0);
+        ss << "queue_experiments: queued=" << queued
+           << " skipped_refuted=" << refuted
+           << " skipped_certain=" << certain;
+        if (queued == 0) ss << " (no uncertain rules above threshold)";
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta
