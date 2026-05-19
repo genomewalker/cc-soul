@@ -928,4 +928,44 @@ ToolResult FieldRpcHandler::tool_recall_motif_value(const json& params) {
     return ToolResult::ok(ss.str(), {{"hits", parsed.is_array() ? parsed : json::array()}});
 }
 
+ToolResult FieldRpcHandler::tool_executor_flush(const json& /*params*/) {
+    std::string raw = field_store_->executor_flush_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        auto promoted = parsed.value("promoted", json::array());
+        auto demoted  = parsed.value("demoted",  json::array());
+        ss << "executor_flush: promoted=" << promoted.size()
+           << " demoted=" << demoted.size();
+        if (auto store = parsed.find("store"); store != parsed.end())
+            ss << " " << store->dump();
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_list_policies(const json& params) {
+    bool active_only = params.value("active_only", false);
+    std::string raw  = field_store_->list_policies_json(active_only);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_array()) {
+        ss << "policies (" << parsed.size() << "):\n";
+        for (const auto& p : parsed) {
+            ss << "  [" << (p.value("active", false) ? "active" : "shadow") << "]"
+               << " id=" << p.value("id", 0)
+               << " rule=" << p.value("rule", 0)
+               << " " << p.value("kind", "")
+               << " shadow_events=" << p.value("shadow_events", 0)
+               << " lift=" << p.value("lift", 0.0)
+               << "\n";
+        }
+        if (parsed.empty()) ss << "  (none)\n";
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"policies", parsed.is_array() ? parsed : json::array()}});
+}
+
 } // namespace chitta

@@ -492,6 +492,18 @@ void FieldRpcHandler::register_memory_core_tools() {
         }},{"required",{"tool","entity"}}}}
     });
     handlers_["recall_motif_value"] = [this](const json& p) { return tool_recall_motif_value(p); };
+
+    tools_.push_back({{"name","executor_flush"},{"description","Promote shadow intervention policies that have passed the 20-event / lift>0.15 gate, demote policies whose source rule is refuted, and report active policy stats. Safe to call any time; idempotent."},
+        {"inputSchema",{{"type","object"},{"properties",{}}}}
+    });
+    handlers_["executor_flush"] = [this](const json& p) { return tool_executor_flush(p); };
+
+    tools_.push_back({{"name","list_policies"},{"description","List CEC intervention policies (shadow and active). Each entry shows rule source, kind (OpenTask/TurnInjection/GuardPolicy), shadow event count, lift, and fire count."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"active_only", {{"type","boolean"},{"description","If true, only return active (promoted) policies"}}}
+        }}}}
+    });
+    handlers_["list_policies"] = [this](const json& p) { return tool_list_policies(p); };
 }
 
 } // namespace chitta

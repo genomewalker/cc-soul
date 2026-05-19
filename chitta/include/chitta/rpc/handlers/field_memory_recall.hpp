@@ -112,3 +112,5 @@
     ToolResult tool_consolidation_pass(const json& params);
     ToolResult tool_refutation_stats(const json& params);
     ToolResult tool_recall_motif_value(const json& params);
+    ToolResult tool_executor_flush(const json& params);
+    ToolResult tool_list_policies(const json& params);
