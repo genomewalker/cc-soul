@@ -652,6 +652,14 @@ install_python_packages() {
         fi
     fi
 
+    # Symlink cec-status to BIN_DIR so it's on PATH alongside chitta
+    local cec_status_src="$PLUGIN_DIR/scripts/cec-status.sh"
+    if [[ -f "$cec_status_src" ]]; then
+        chmod +x "$cec_status_src"
+        ln -sf "$cec_status_src" "$BIN_DIR/cec-status"
+        echo "[cc-soul] Linked cec-status → $BIN_DIR/cec-status"
+    fi
+
     # Install model-export tools (optimum + onnxruntime) for embedding model management.
     # Required for: nomic-embed export, model swap, re-embedding after dim change.
     if ! $python_cmd -c "import optimum.onnxruntime" 2>/dev/null; then
