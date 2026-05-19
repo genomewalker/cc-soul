@@ -195,6 +195,10 @@ fi
 # ===========================================
 REALM=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null | grep -oP 'realm": "\K[^"]+' || echo "brahman")
 
+# CEC: log user_prompt event (fire-and-forget)
+timeout 0.5 "$CHITTA_BIN" log_event --tool "user_prompt" \
+    --entity "$REALM" --outcome 0 --ts_ms "$(date +%s%3N)" >/dev/null 2>&1 &
+
 # ===========================================
 # MEMORY RETRIEVAL: Choose strategy based on mode
 # ===========================================
