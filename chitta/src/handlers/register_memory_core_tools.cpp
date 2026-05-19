@@ -476,6 +476,22 @@ void FieldRpcHandler::register_memory_core_tools() {
         }},{"required",{"tool","entity"}}}}
     });
     handlers_["recall_counterfactual"] = [this](const json& p) { return tool_recall_counterfactual(p); };
+
+    tools_.push_back({{"name","refutation_stats"},{"description","Show Sequitur rules that are being falsified: rules whose antecedent appears but is NOT followed by the expected consequent. Returns live/refuted counts and top-k by refutation ratio."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"k", {{"type","integer"},{"description","Max rules to show (default 10)"}}}
+        }}}}
+    });
+    handlers_["refutation_stats"] = [this](const json& p) { return tool_refutation_stats(p); };
+
+    tools_.push_back({{"name","recall_motif_value"},{"description","Return top-k CDAWG motif states reachable from (tool, entity) ranked by Q-value: which action sequences have the highest expected success rate from this context?"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",   {{"type","string"}}},
+            {"entity", {{"type","string"}}},
+            {"k",      {{"type","integer"},{"description","Max states to return (default 5)"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["recall_motif_value"] = [this](const json& p) { return tool_recall_motif_value(p); };
 }
 
 } // namespace chitta

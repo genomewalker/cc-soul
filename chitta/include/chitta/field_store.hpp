@@ -91,6 +91,8 @@ char* cf_recall_counterfactual(struct CfHandle* h, const char* tool, const char*
                                uint8_t outcome, size_t k);
 char* cf_consolidation_preview(struct CfHandle* h, size_t k);
 char* cf_consolidation_pass(struct CfHandle* h);
+char* cf_refutation_stats(struct CfHandle* h, size_t k);
+char* cf_recall_motif_value(struct CfHandle* h, const char* tool, const char* entity, size_t k);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -770,6 +772,22 @@ public:
     std::string consolidation_pass_json() {
         char* raw = cf_consolidation_pass(handle_);
         if (!raw) return "{}";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string refutation_stats_json(size_t k = 10) {
+        char* raw = cf_refutation_stats(handle_, k);
+        if (!raw) return "refutation_stats: no data";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string recall_motif_value_json(const std::string& tool, const std::string& entity, size_t k = 5) {
+        char* raw = cf_recall_motif_value(handle_, tool.c_str(), entity.c_str(), k);
+        if (!raw) return "[]";
         std::string result(raw);
         cf_free_string(raw);
         return result;
