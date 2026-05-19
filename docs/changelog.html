@@ -456,12 +456,31 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
-    <!-- 5.32.0 -->
+    <!-- 5.34.5 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.34.1&ndash;5.34.5</span>
+        <span class="version-date">May 19, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added &mdash; CEC Real-Time Ingestion + Tooling</h4>
+        <ul>
+          <li><strong>Real-time event ingestion via PostToolUse hooks</strong> (v5.34.1) &mdash; every tool use now emits a CEC <code>log_event</code> automatically. <code>post-bash-hook.sh</code>: <code>log_event(bash, cmd_basename, exit_code&rarr;outcome)</code>. <code>post-edit-hook.sh</code>: <code>log_event(edit, file_path, 0)</code> for all file extensions. Both fire-and-forget background subshells; do not block the 5&thinsp;s hook budget.</li>
+          <li><strong>Conversational event ingestion</strong> (v5.34.2) &mdash; <code>prompt-core.sh</code> emits <code>log_event(user_prompt, realm, 0)</code> on every UserPromptSubmit; <code>stop-core.sh</code> emits <code>log_event(assistant_response, realm, 0|2)</code> on every Stop (outcome 2 when <code>HAS_ERROR=true</code>). Combined with <code>remember</code>/<code>forget</code> (wired since Phase&nbsp;1), every category of agent activity is now captured in the EventTape automatically.</li>
+          <li><strong><code>consolidation_pass</code> auto-fires at session boundaries</strong> (v5.34.2) &mdash; <code>stop-core.sh</code> and <code>pre-compact-hook.sh</code> both launch <code>nohup chitta consolidation_pass</code> detached from hook timeout. Sequitur rules and HypothesisMarket are always fresh before context is discarded. Log: <code>$MIND/.cec_consolidation.log</code>.</li>
+          <li><strong><code>cec-status</code> aggregator</strong> (v5.34.3) &mdash; <code>scripts/cec-status.sh</code> (symlinked to <code>~/.claude/bin/cec-status</code>). Runs four CEC queries in parallel and prints: failure pattern count, HypothesisMarket rule count + top uncertain probes (Wilson CI), RefutationLedger live/refuted counts, InterventionStore active/shadow policy counts. <code>--json</code> flag available.</li>
+          <li><strong>CEC tools added to <code>chitta --help</code></strong> (v5.34.4) &mdash; four new help categories: <em>CEC events</em>, <em>CEC recall</em>, <em>CEC market</em>, <em>CEC exec</em>. All 14 CEC tool names now visible in <code>chitta --help</code>.</li>
+          <li><strong><code>log_event_ex</code> and <code>log_decision</code> fully wired into CLI</strong> (v5.34.5) &mdash; both tools were missing from four registration sites: <code>ToolResult</code> handler implementations, handler declarations, RPC registration, and the <code>TOOL_SPECS</code>/<code>KNOWN_TOOLS</code> dispatch array. All 14 CEC tools now respond to <code>chitta &lt;tool&gt; --help</code>.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.34.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.33.0&ndash;5.34.0</span>
         <span class="version-date">May 19, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added &mdash; Causal Episode Compiler: Phases 9&ndash;10</h4>
