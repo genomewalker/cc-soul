@@ -2,6 +2,63 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.29.0] - 2026-05-19
+
+### Added — Causal Episode Compiler (CEC) — Phases 1–5
+
+Embedding-free agentic memory substrate that indexes state transitions
+`(tool, entity, outcome)` rather than content. Runs in parallel with the
+existing HNSW/BM25/HDC recall lanes, which are untouched.
+
+**Phase 1 — Event Tape + CDAWG (v5.25.0)**
+- `EventTape`: append-only log of `(tool_id, entity_key, outcome_class, session_id, ts_ms)`.
+  Entity canonicalization is deterministic (file paths → repo-relative, URLs → hostname,
+  freeform → first 40 chars lowercased).
+- `CdawgOrgan`: online Compact Directed Acyclic Word Graph over packed u64 symbols
+  `(tool_id << 40 | outcome_class << 32 | entity_key)`. Ephemeral — rebuilt from
+  EventTape at every daemon load.
+- `EventTape` serialized in `FullSnapshot` (V13 → V14 migration); existing memories
+  receive a synthetic `legacy` event for warm-start.
+- New CLI/MCP tools: `log_event`, `recall_last_action`, `recall_failure_pattern`,
+  `recall_causal`.
+
+**Phase 2 — TD(λ) + PMI Causal Antecedents + Roaring (v5.26.0)**
+- `CdawgState.endpos` upgraded from `Vec<u32>` to `RoaringBitmap` (O(1) cardinality
+  for PMI denominator).
+- `push_td_credit()`: backward eligibility traces over last 16 events, δ=+0.1 success /
+  −0.2 fail, γ=0.9 decay. Skips synthetic `legacy`/`remember` events.
+- `recall_causal_antecedent`: returns PMI-ranked predecessor patterns —
+  `log(count(X,Y) × N / count(X) / count(Y))`.
+
+**Phase 3 — Surprisal-Gated Writes + Involuntary Injection (v5.27.0)**
+- `put_memory` computes PPM surprisal before logging the event. If
+  `surprisal > 2.0 nats`, the memory's `decay_rate` is halved (surprising
+  memories burn in harder).
+- `hooks/prompt-core.sh`: if `recall_failure_pattern` finds a pattern with
+  `fail_ratio > 0.7 && fail_count ≥ 3`, a one-line `⚠ CEC:` warning is
+  prepended to `SYSTEM_MSG` at every turn start (involuntary injection).
+
+**Phase 4 — HDC as Heteroassociative Binder (v5.28.0)**
+- `EpisodeHdcStore`: each CEC event encoded as
+  `bind(R_tool, t) XOR bind(R_entity, e) XOR bind(R_outcome, o)`.
+- `recall_hdcbind(known_role, known_val, query_role)`: XOR-unbind query —
+  given e.g. `outcome=fail`, returns most associated tools by Hamming distance
+  against the codebook.
+- Ephemeral — rebuilt from EventTape at daemon load. Per-role `EpBundle`
+  bit-count accumulators, not serialized.
+
+**Phase 5 — Sequitur Grammar + Procedural KG Promotion (v5.29.0)**
+- `sequitur.rs`: `run_sequitur()` counts all bigrams (consecutive symbol pairs)
+  in the EventTape with frequency ≥ 5 (RePair-style grammar induction).
+- `consolidation_pass()`: promotes rules to the triplet KG as four predicates:
+  `compresses`, `avg_outcome`, `support`, `tape_range`. Subjects use the scheme
+  `rule:tool(entity,outcome)→tool(entity,outcome)`.
+- Dedup: `triplet_store.query_subject()` check prevents re-inserting on repeated runs.
+- Auto-triggers every 500 events inside `log_event()`.
+- `consolidation_pass --preview true --k N`: dry run showing top-N rules.
+- On the live 57K-memory instance: 215 procedural rules promoted on first run,
+  queryable via `chitta query --subject "rule:..."`.
+
 ## [5.21.68] - 2026-05-18
 
 ### Fixed — Pre-embed All Medium-Frequency Write Handlers
