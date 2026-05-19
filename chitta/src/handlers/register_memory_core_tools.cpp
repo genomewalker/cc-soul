@@ -451,6 +451,16 @@ void FieldRpcHandler::register_memory_core_tools() {
         }},{"required",{"tool","entity"}}}}
     });
     handlers_["recall_causal_antecedent"] = [this](const json& p) { return tool_recall_causal_antecedent(p); };
+
+    tools_.push_back({{"name","recall_hdcbind"},{"description","Heteroassociative HDC query: given known_role=known_val, infer query_role. Roles: tool, entity, outcome."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"known_role", {{"type","string"}}},
+            {"known_val",  {{"type","string"}}},
+            {"query_role", {{"type","string"}}},
+            {"k",          {{"type","integer"}}}
+        }},{"required",{"known_role","known_val","query_role"}}}}
+    });
+    handlers_["recall_hdcbind"] = [this](const json& p) { return tool_recall_hdcbind(p); };
 }
 
 } // namespace chitta

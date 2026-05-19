@@ -107,3 +107,4 @@
     ToolResult tool_recall_last_action(const json& params);
     ToolResult tool_recall_failure_pattern(const json& params);
     ToolResult tool_recall_causal_antecedent(const json& params);
+    ToolResult tool_recall_hdcbind(const json& params);

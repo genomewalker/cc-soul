@@ -827,4 +827,29 @@ ToolResult FieldRpcHandler::tool_recall_causal_antecedent(const json& params) {
     return ToolResult::ok(ss.str(), {{"antecedents", out}});
 }
 
+ToolResult FieldRpcHandler::tool_recall_hdcbind(const json& params) {
+    std::string known_role = params.value("known_role", "");
+    std::string known_val  = params.value("known_val", "");
+    std::string query_role = params.value("query_role", "");
+    size_t k               = static_cast<size_t>(params.value("k", 5));
+    if (known_role.empty() || known_val.empty() || query_role.empty())
+        return ToolResult::error("known_role, known_val, and query_role are required");
+    std::string raw = field_store_->recall_hdcbind_json(known_role, known_val, query_role, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    json arr = parsed.is_array() ? parsed : json::array();
+    std::ostringstream ss;
+    ss << "HDC bind query: given " << known_role << "=" << known_val
+       << ", infer " << query_role << ":\n";
+    json out = json::array();
+    for (const auto& p : arr) {
+        ss << "  " << p.value("content", "") << "\n";
+        json item;
+        item["name"]       = p.value("name", "");
+        item["similarity"] = p.value("similarity", 0.0f);
+        item["content"]    = p.value("content", "");
+        out.push_back(std::move(item));
+    }
+    return ToolResult::ok(ss.str(), {{"results", out}});
+}
+
 } // namespace chitta
