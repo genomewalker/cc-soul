@@ -804,6 +804,10 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"tool",   "Tool name to query from", true,  nullptr},
       {"entity", "Entity to query from",    true,  nullptr},
       {"k",      "Max states to return",    false, "5"}}},
+    {"executor_flush", "Promote shadow CEC policies past the 20-event/lift>0.15 gate and demote policies whose source rule is refuted. Reports promoted/demoted ids and store stats.",
+     {}},
+    {"list_policies", "List CEC intervention policies. Shows id, source rule, kind, shadow event count, Q-lift, and fire count.",
+     {{"active_only", "If true, show only active (promoted) policies", false, "false"}}},
 };
 
 // Build set of known tools from specs
