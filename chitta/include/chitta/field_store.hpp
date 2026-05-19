@@ -85,6 +85,8 @@ int   cf_recall_last_action(struct CfHandle* h, const char* tool, const char* en
     size_t k, CfRecallHit* buf, size_t buf_cap, size_t* written);
 char* cf_recall_failure_pattern(struct CfHandle* h, size_t k);
 char* cf_recall_causal_antecedent(struct CfHandle* h, const char* tool, const char* entity, size_t k);
+char* cf_recall_hdcbind(struct CfHandle* h, const char* known_role, const char* known_val,
+                        const char* query_role, size_t k);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -725,6 +727,18 @@ public:
                                               const std::string& entity,
                                               size_t k) {
         char* raw = cf_recall_causal_antecedent(handle_, tool.c_str(), entity.c_str(), k);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string recall_hdcbind_json(const std::string& known_role,
+                                    const std::string& known_val,
+                                    const std::string& query_role,
+                                    size_t k) {
+        char* raw = cf_recall_hdcbind(handle_, known_role.c_str(), known_val.c_str(),
+                                      query_role.c_str(), k);
         if (!raw) return "[]";
         std::string result(raw);
         cf_free_string(raw);

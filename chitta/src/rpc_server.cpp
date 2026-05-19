@@ -785,6 +785,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"tool", "Tool name", true, nullptr},
       {"entity", "Entity name", true, nullptr},
       {"k", "Max results", false, "5"}}},
+    {"recall_hdcbind", "Heteroassociative HDC query: given known_role=known_val, infer query_role. Roles: tool, entity, outcome.",
+     {{"known_role", "Known role (tool|entity|outcome)", true, nullptr},
+      {"known_val",  "Value for the known role", true, nullptr},
+      {"query_role", "Role to infer (tool|entity|outcome)", true, nullptr},
+      {"k", "Max results", false, "5"}}},
 };
 
 // Build set of known tools from specs
