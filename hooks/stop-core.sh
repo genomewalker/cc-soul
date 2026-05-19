@@ -379,6 +379,11 @@ daemon_available || exit 0
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
+# CEC: log assistant_response event (fire-and-forget)
+_cec_resp_outcome=$([ "${HAS_ERROR:-false}" = "true" ] && echo 2 || echo 0)
+timeout 0.5 "$CHITTA_BIN" log_event --tool "assistant_response" \
+    --entity "$REALM" --outcome "$_cec_resp_outcome" --ts_ms "$(date +%s%3N)" >/dev/null 2>&1 &
+
 # ===========================================
 # EVENT-BASED CHECKPOINT: Save on errors or milestones
 # ===========================================
