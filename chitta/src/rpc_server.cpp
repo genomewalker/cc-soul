@@ -843,6 +843,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"k", "Max rules to return", false, "10"}}},
     {"queue_experiments", "CEC Phase 14 Self-directed experimentation: file OpenTask interventions for the k most uncertain Sequitur rules (probe_value > 0.4). Skips rules with refutation_ratio >= 0.3 (adversarial gate). Also triggered automatically by consolidation_pass when turiya_status reports high_uncertainty.",
      {{"k", "Max experiments to queue", false, "5"}}},
+    {"witness_memory", "CEC Phase 17 candidate promotion: provide an outcome-witness to promote a candidate-band memory to established. Witnesses: correction|outcome|hit_rate_delta. Open-weight-generated writes start in candidate band until witnessed.",
+     {{"memory_id",    "Memory ID to promote",                   true,  ""},
+      {"witness_kind", "Type: correction|outcome|hit_rate_delta", true,  ""}}},
+    {"reconcile_pass", "CEC Phase 17 R0 reconcile operator: scan all assoc_edges for MemoryKind legality violations and content contradictions. Model-free and deterministic. Reports illegal_edges, contradictions, unresolved counts.",
+     {}},
+    {"harvest_scope", "CEC Phase 17 open-weight harvest targeting: derive scope from current Turīya anomalies + router miss patterns. Output JSON used by scripts/harvest_ow.py for demand-driven extraction.",
+     {}},
     {"routed_recall", "CEC Phase 16 CPU-native query router: dispatches to cheapest lane (exact/fuzzy/temporal/causal/hybrid) without an LLM call. Returns needs_disambiguation with named unbound slots when the typed grammar cannot fully bind the request.",
      {{"subject",       "Exact triplet subject — compiles to relational lookup",    false, ""},
       {"predicate",     "Exact triplet predicate",                                  false, ""},
@@ -959,6 +966,7 @@ void print_usage(const char* prog) {
               << "  CEC experiment: queue_experiments\n"
               << "  CEC phase15: fep_status\n"
               << "  CEC phase16: routed_recall\n"
+              << "  CEC phase17: witness_memory, reconcile_pass, harvest_scope\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

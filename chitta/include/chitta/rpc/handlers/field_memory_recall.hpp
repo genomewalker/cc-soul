@@ -124,3 +124,6 @@
     ToolResult tool_queue_experiments(const json& params);
     ToolResult tool_fep_status(const json& params);
     ToolResult tool_routed_recall(const json& params);
+    ToolResult tool_witness_memory(const json& params);
+    ToolResult tool_reconcile_pass(const json& params);
+    ToolResult tool_harvest_scope(const json& params);
