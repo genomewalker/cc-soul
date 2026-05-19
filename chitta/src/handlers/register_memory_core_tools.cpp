@@ -522,6 +522,7 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["hypothesis_probes"] = [this](const json& p) { return tool_hypothesis_probes(p); };
     handlers_["turiya_status"]     = [this](const json& p) { return tool_turiya_status(p); };
+    handlers_["tape_stats"]        = [this](const json& p) { return tool_tape_stats(p); };
 
     tools_.push_back({{"name","log_event_ex"},{"description","Log a CEC event with regret-shaping telemetry (token_cost, latency_ms, retry_count). Updates Q-values with utility = outcome_reward - 0.001*token_cost - 0.00001*latency_ms - 0.1*retry_count."},
         {"inputSchema",{{"type","object"},{"properties",{

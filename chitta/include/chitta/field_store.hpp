@@ -105,6 +105,7 @@ char* cf_recall_true_counterfactual(struct CfHandle* h, const char* tool,
                                     const char* entity, uint8_t outcome, size_t k);
 char* cf_hypothesis_probes(struct CfHandle* h, size_t k);
 char* cf_turiya_status(const struct CfHandle* h);
+char* cf_tape_stats(const struct CfHandle* h);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -856,6 +857,14 @@ public:
     std::string turiya_status_json() {
         char* raw = cf_turiya_status(handle_);
         if (!raw) return R"({"status":"no_data"})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string tape_stats_json() {
+        char* raw = cf_tape_stats(handle_);
+        if (!raw) return R"({"events":0})";
         std::string result(raw);
         cf_free_string(raw);
         return result;
