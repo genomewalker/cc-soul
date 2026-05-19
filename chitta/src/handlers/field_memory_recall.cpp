@@ -768,6 +768,34 @@ ToolResult FieldRpcHandler::tool_log_event(const json& params) {
     return ToolResult::ok("event logged");
 }
 
+ToolResult FieldRpcHandler::tool_log_event_ex(const json& params) {
+    std::string tool   = params.value("tool", "");
+    std::string entity = params.value("entity", "");
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    uint8_t  outcome     = static_cast<uint8_t>(params.value("outcome", 0));
+    uint64_t session     = static_cast<uint64_t>(params.value("session_id", 0));
+    int64_t  ts_ms       = static_cast<int64_t>(params.value("ts_ms", 0));
+    uint32_t token_cost  = static_cast<uint32_t>(params.value("token_cost", 0));
+    uint32_t latency_ms  = static_cast<uint32_t>(params.value("latency_ms", 0));
+    uint8_t  retry_count = static_cast<uint8_t>(params.value("retry_count", 0));
+    field_store_->log_event_ex(tool, entity, outcome, session, ts_ms, token_cost, latency_ms, retry_count);
+    return ToolResult::ok("event logged");
+}
+
+ToolResult FieldRpcHandler::tool_log_decision(const json& params) {
+    std::string chosen_tool   = params.value("chosen_tool", "");
+    std::string chosen_entity = params.value("chosen_entity", "");
+    if (chosen_tool.empty() || chosen_entity.empty())
+        return ToolResult::error("chosen_tool and chosen_entity are required");
+    uint8_t  chosen_outcome   = static_cast<uint8_t>(params.value("chosen_outcome", 0));
+    std::string rejected_json = params.value("rejected_json", "[]");
+    float confidence_delta    = params.value("confidence_delta", 0.0f);
+    int64_t ts_ms             = static_cast<int64_t>(params.value("ts_ms", 0));
+    field_store_->log_decision(chosen_tool, chosen_entity, chosen_outcome, rejected_json, confidence_delta, ts_ms);
+    return ToolResult::ok("decision logged");
+}
+
 ToolResult FieldRpcHandler::tool_recall_last_action(const json& params) {
     std::string tool   = params.value("tool", "");
     std::string entity = params.value("entity", "");
