@@ -1,9 +1,24 @@
 // field_memory_recall RPC handlers — bodies for declarations in
 // chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
+#include <ctime>
 #include "chitta/speech_act.hpp"
 #include "chitta/ssl_gloss.hpp"
 
 #include "../../include/chitta/rpc/field_handler.hpp"
+
+namespace {
+// Parse "YYYY-MM-DD" → Unix epoch ms, or 0 on failure.
+int64_t parse_date_ms(const std::string& s) {
+    if (s.size() < 10) return 0;
+    std::tm t{};
+    t.tm_year = std::stoi(s.substr(0, 4)) - 1900;
+    t.tm_mon  = std::stoi(s.substr(5, 2)) - 1;
+    t.tm_mday = std::stoi(s.substr(8, 2));
+    t.tm_isdst = -1;
+    std::time_t epoch = timegm(&t);
+    return epoch < 0 ? 0 : static_cast<int64_t>(epoch) * 1000;
+}
+} // namespace
 
 namespace chitta {
 
@@ -42,7 +57,13 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         embedding = embed_ssl_aware(content);
     }
 
-    uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
+    int64_t authored_at_ms = 0;
+    if (params.contains("valid_from")) {
+        std::string vf = params.value("valid_from", "");
+        if (!vf.empty()) authored_at_ms = parse_date_ms(vf);
+    }
+    uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate,
+                                         authored_at_ms);
 
     // Phase 3: for SSL memories, create a pure-NL alias memory so the gloss
     // gets its own embedding in NL space (higher cosine vs natural-language queries).
@@ -275,8 +296,16 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     ss << ":\n";
     for (const auto& r : results_json) {
         int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
-        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
-           << r.value("text", "").substr(0, 400) << "\n";
+        ss << "[" << pct << "%] [" << r.value("type", "?") << "]";
+        int64_t ts = r.value("ts_ms", int64_t(0));
+        if (ts > 0) {
+            std::time_t t = static_cast<std::time_t>(ts / 1000);
+            std::tm* tm = std::gmtime(&t);
+            char buf[16];
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d", tm);
+            ss << " (on: " << buf << ")";
+        }
+        ss << " " << r.value("text", "").substr(0, 400) << "\n";
     }
 
     auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
