@@ -521,6 +521,32 @@ void FieldRpcHandler::register_memory_core_tools() {
         }}}}
     });
     handlers_["hypothesis_probes"] = [this](const json& p) { return tool_hypothesis_probes(p); };
+
+    tools_.push_back({{"name","log_event_ex"},{"description","Log a CEC event with regret-shaping telemetry (token_cost, latency_ms, retry_count). Updates Q-values with utility = outcome_reward - 0.001*token_cost - 0.00001*latency_ms - 0.1*retry_count."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",        {{"type","string"}}},
+            {"entity",      {{"type","string"}}},
+            {"outcome",     {{"type","integer"},{"description","0=success 1=fail 2=error 3=partial"}}},
+            {"session_id",  {{"type","integer"}}},
+            {"ts_ms",       {{"type","integer"}}},
+            {"token_cost",  {{"type","integer"},{"description","Tokens consumed (0=unknown)"}}},
+            {"latency_ms",  {{"type","integer"},{"description","Wall-clock ms (0=unknown)"}}},
+            {"retry_count", {{"type","integer"},{"description","Retries before this outcome"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["log_event_ex"] = [this](const json& p) { return tool_log_event_ex(p); };
+
+    tools_.push_back({{"name","log_decision"},{"description","Log a decision point to the DecisionTape: chosen action + alternatives considered and rejected. Enables recall_true_counterfactual."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"chosen_tool",      {{"type","string"}}},
+            {"chosen_entity",    {{"type","string"}}},
+            {"chosen_outcome",   {{"type","integer"},{"description","0=success 1=fail 2=error 3=partial"}}},
+            {"rejected_json",    {{"type","string"},{"description","JSON array of [sym_u64, rejection_reason_u8] pairs"}}},
+            {"confidence_delta", {{"type","number"},{"description","chosen_confidence - best_alternative_confidence"}}},
+            {"ts_ms",            {{"type","integer"}}}
+        }},{"required",{"chosen_tool","chosen_entity"}}}}
+    });
+    handlers_["log_decision"] = [this](const json& p) { return tool_log_decision(p); };
 }
 
 } // namespace chitta
