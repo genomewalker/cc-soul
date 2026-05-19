@@ -403,6 +403,7 @@ private:
                 {"text",       h.content},
                 {"realm",      h.realm},
                 {"confidence", h.confidence},
+                {"ts_ms",      h.ts_ms},
             };
             if (h.affect_valence != 0.0f || h.affect_arousal != 0.0f) {
                 entry["affect"] = {

@@ -3,24 +3,27 @@
 LongMemEval Benchmark Runner for cc-soul
 arXiv:2410.10813 — ICLR 2025
 
+Uses the exact judge prompts from the paper's evaluate_qa.py with gpt-4o-mini.
+Produces hypothesis JSONL compatible with their evaluate_qa.py for independent re-scoring.
+
 Dataset structure (per item):
   question_id, question_type, question, answer, question_date,
   haystack_dates, haystack_session_ids, haystack_sessions, answer_session_ids
-
 Each haystack_sessions entry is a list of turns: [{role, content, has_answer}, …]
+
 question_type: single-session-user | single-session-assistant | single-session-preference
                | multi-session | temporal-reasoning | knowledge-update
 
-Ingest: remember() each turn → recall(question) → Haiku synthesize → Haiku judge
-
 Usage:
-  python3 scripts/benchmark_longmemeval.py                         # oracle, all 500
+  python3 scripts/benchmark_longmemeval.py                             # oracle, all 500
   python3 scripts/benchmark_longmemeval.py --dataset longmemeval_s --limit 50
-  python3 scripts/benchmark_longmemeval.py --dry-run --limit 5
+  python3 scripts/benchmark_longmemeval.py --judge-model gpt-4o --limit 20
+  OPENAI_API_KEY=sk-... python3 scripts/benchmark_longmemeval.py
 """
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -30,21 +33,6 @@ from pathlib import Path
 from typing import Optional
 
 CHITTA = Path.home() / ".claude/bin/chitta"
-
-def _ensure_api_key():
-    """Load ANTHROPIC_API_KEY from ~/.claude/config.json if not already set."""
-    import os
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return
-    try:
-        cfg = json.loads((Path.home() / ".claude/config.json").read_text())
-        key = cfg.get("primaryApiKey", "")
-        if key:
-            os.environ["ANTHROPIC_API_KEY"] = key
-    except Exception:
-        pass
-
-_ensure_api_key()
 DATA_DIR = Path("/projects/caeg/scratch/kbd606/tmp")
 RESULTS_DIR = Path(__file__).parent.parent / "benchmarks" / "results"
 HF_BASE = "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main"
@@ -60,13 +48,155 @@ QUESTION_TYPES = [
     "multi-session", "temporal-reasoning", "knowledge-update",
 ]
 
-JUDGE_SYSTEM = (
-    "You are an answer judge. Given a question, a gold answer, and a system answer, "
-    "output JSON only: {\"correct\": true|false, \"reason\": \"one sentence\"}. "
-    "Be lenient on phrasing; focus on factual match. "
-    "For knowledge-update questions, the newest answer is correct. "
-    "If the gold answer is N/A or none, correct means the system said it doesn't know."
-)
+
+# ── exact judge prompts from LongMemEval evaluate_qa.py ───────────────────────
+
+def get_anscheck_prompt(task: str, question: str, answer: str, response: str,
+                        abstention: bool = False) -> str:
+    if abstention:
+        return (
+            "I will give you an unanswerable question, an explanation, and a response from a model. "
+            "Please answer yes if the model correctly identifies the question as unanswerable. "
+            "The model could say that the information is incomplete, or some other information is given "
+            "but the asked information is not.\n\n"
+            f"Question: {question}\n\nExplanation: {answer}\n\nModel Response: {response}\n\n"
+            "Does the model correctly identify the question as unanswerable? Answer yes or no only."
+        )
+    if task in ("single-session-user", "single-session-assistant", "multi-session"):
+        tmpl = (
+            "I will give you a question, a correct answer, and a response from a model. "
+            "Please answer yes if the response contains the correct answer. Otherwise, answer no. "
+            "If the response is equivalent to the correct answer or contains all the intermediate "
+            "steps to get the correct answer, you should also answer yes. If the response only "
+            "contains a subset of the information required by the answer, answer no. "
+            "\n\nQuestion: {q}\n\nCorrect Answer: {a}\n\nModel Response: {r}\n\n"
+            "Is the model response correct? Answer yes or no only."
+        )
+    elif task == "temporal-reasoning":
+        tmpl = (
+            "I will give you a question, a correct answer, and a response from a model. "
+            "Please answer yes if the response contains the correct answer. Otherwise, answer no. "
+            "If the response is equivalent to the correct answer or contains all the intermediate "
+            "steps to get the correct answer, you should also answer yes. If the response only "
+            "contains a subset of the information required by the answer, answer no. "
+            "In addition, do not penalize off-by-one errors for the number of days. "
+            "If the question asks for the number of days/weeks/months, etc., and the model makes "
+            "off-by-one errors (e.g., predicting 19 days when the answer is 18), the model's "
+            "response is still correct. "
+            "\n\nQuestion: {q}\n\nCorrect Answer: {a}\n\nModel Response: {r}\n\n"
+            "Is the model response correct? Answer yes or no only."
+        )
+    elif task == "knowledge-update":
+        tmpl = (
+            "I will give you a question, a correct answer, and a response from a model. "
+            "Please answer yes if the response contains the correct answer. Otherwise, answer no. "
+            "If the response contains some previous information along with an updated answer, "
+            "the response should be considered as correct as long as the updated answer is the "
+            "required answer.\n\nQuestion: {q}\n\nCorrect Answer: {a}\n\nModel Response: {r}\n\n"
+            "Is the model response correct? Answer yes or no only."
+        )
+    elif task == "single-session-preference":
+        tmpl = (
+            "I will give you a question, a rubric for desired personalized response, and a response "
+            "from a model. Please answer yes if the response satisfies the desired response. "
+            "Otherwise, answer no. The model does not need to reflect all the points in the rubric. "
+            "The response is correct as long as it recalls and utilizes the user's personal "
+            "information correctly.\n\nQuestion: {q}\n\nRubric: {a}\n\nModel Response: {r}\n\n"
+            "Is the model response correct? Answer yes or no only."
+        )
+    else:
+        raise NotImplementedError(f"Unknown task type: {task}")
+    return tmpl.format(q=question, a=answer, r=response)
+
+
+# ── OpenAI judge ──────────────────────────────────────────────────────────────
+
+_openai_client = None
+_openai_available: Optional[bool] = None
+
+
+def _get_openai_client(model: str):
+    global _openai_client, _openai_available
+    if _openai_available is False:
+        return None
+    if _openai_client is None:
+        key = os.environ.get("OPENAI_API_KEY", "")
+        if not key:
+            _openai_available = False
+            return None
+        try:
+            from openai import OpenAI
+            _openai_client = OpenAI(api_key=key)
+            _openai_available = True
+        except Exception:
+            _openai_available = False
+    return _openai_client
+
+
+def judge_with_openai(task: str, question: str, gold: str, hypothesis: str,
+                      model: str, abstention: bool = False) -> Optional[bool]:
+    client = _get_openai_client(model)
+    if client is None:
+        return None
+    prompt = get_anscheck_prompt(task, question, gold, hypothesis, abstention)
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            n=1, temperature=0, max_tokens=10,
+        )
+        text = resp.choices[0].message.content.strip().lower()
+        return "yes" in text
+    except Exception as e:
+        print(f"  [openai error] {e}", file=sys.stderr)
+        return None
+
+
+_codex_cli: Optional[str] = None
+
+def _find_codex_cli() -> Optional[str]:
+    global _codex_cli
+    if _codex_cli is not None:
+        return _codex_cli or None
+    for candidate in ["codex", str(Path.home() / ".local/bin/codex")]:
+        try:
+            r = subprocess.run([candidate, "--version"], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                _codex_cli = candidate
+                return candidate
+        except Exception:
+            pass
+    _codex_cli = ""
+    return None
+
+
+def judge_with_codex(task: str, question: str, gold: str, hypothesis: str,
+                     abstention: bool = False) -> Optional[bool]:
+    """Judge using `codex exec` non-interactive mode — no chitta socket contention."""
+    cli = _find_codex_cli()
+    if not cli:
+        return None
+    prompt = get_anscheck_prompt(task, question, gold, hypothesis, abstention)
+    try:
+        r = subprocess.run(
+            [cli, "exec", "--"],
+            input=prompt, capture_output=True, text=True, timeout=60,
+        )
+        text = r.stdout.strip().lower()
+        if "yes" in text:
+            return True
+        if "no" in text:
+            return False
+    except Exception:
+        pass
+    return None
+
+
+def judge_heuristic(gold: str, hypothesis: str) -> bool:
+    """Token-F1 fallback (≥50% overlap)."""
+    g = set(gold.lower().split())
+    h = set(hypothesis.lower().split())
+    return len(g & h) / max(len(g), 1) >= 0.5
 
 
 # ── data download ─────────────────────────────────────────────────────────────
@@ -75,21 +205,21 @@ def ensure_data(dataset: str) -> Path:
     path, url = DATASETS[dataset]
     if path.exists() and path.stat().st_size > 1000:
         return path
-    print(f"Downloading {dataset} from HuggingFace… ({url})")
+    print(f"Downloading {dataset}…")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": "cc-soul-benchmark"})
     with urllib.request.urlopen(req, timeout=300) as r, open(path, "wb") as f:
         total = int(r.headers.get("Content-Length", 0))
         downloaded = 0
         while True:
-            chunk = r.read(1 << 20)  # 1MB
+            chunk = r.read(1 << 20)
             if not chunk:
                 break
             f.write(chunk)
             downloaded += len(chunk)
             if total:
-                print(f"\r  {downloaded / total:.0%}", end="", flush=True)
-    print(f"\r  {path.stat().st_size // 1024 // 1024}MB saved to {path}")
+                print(f"\r  {downloaded/total:.0%}", end="", flush=True)
+    print(f"\r  {path.stat().st_size // 1024 // 1024}MB → {path}")
     return path
 
 
@@ -103,8 +233,7 @@ def _rpc(tool: str, arguments: dict, timeout: int = 30) -> Optional[dict]:
     })
     try:
         r = subprocess.run(
-            [str(CHITTA)],
-            input=req, capture_output=True, text=True, timeout=timeout,
+            [str(CHITTA)], input=req, capture_output=True, text=True, timeout=timeout,
         )
         for line in r.stdout.splitlines():
             if line.startswith("{"):
@@ -134,102 +263,58 @@ def recall(query: str, realm: str, limit: int = 10) -> str:
 
 
 def forget_realm(realm: str):
-    tag = realm.replace("/", "-")
-    _rpc("forget", {"query": realm, "tag": tag, "cascade": "false"}, timeout=30)
+    _rpc("forget", {"query": realm, "tag": realm.replace("/", "-"), "cascade": "false"}, timeout=30)
 
 
-# ── LLM helpers ───────────────────────────────────────────────────────────────
-
-_haiku_available: Optional[bool] = None
-
-def _haiku(system: str, user: str, max_tokens: int = 200) -> Optional[str]:
-    global _haiku_available
-    if _haiku_available is False:
-        return None
-    try:
-        import anthropic
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        _haiku_available = True
-        return resp.content[0].text.strip()
-    except Exception as e:
-        msg = str(e)
-        if "credit balance" in msg or "billing" in msg.lower() or "insufficient" in msg.lower():
-            if _haiku_available is None:
-                print("\n  [warn] Haiku unavailable (credits); falling back to heuristics", flush=True)
-            _haiku_available = False
-        return None
-
-
-def synthesize(question: str, hits: str) -> str:
-    """Return LLM answer, or best-effort extract from hits when Haiku unavailable."""
-    if not hits.strip():
-        return "I don't know"
-    result = _haiku(
-        "Answer using ONLY the memory excerpts provided. "
-        "If the answer isn't there, say 'I don't know'. One sentence max.",
-        f"Memories:\n{hits[:2000]}\n\nQuestion: {question}",
-        max_tokens=150,
-    )
-    if result is not None:
-        return result
-    # Heuristic fallback: return first substantive content line (skip "Found N results" header)
-    skip_prefixes = ("Found ", "No results", "Error", "[warn", "[rpc")
+def extract_answer(hits: str) -> str:
+    """Return best-effort answer from recall hits."""
+    skip = ("Found ", "No results", "Error", "[warn", "[rpc")
     for line in hits.splitlines():
         line = line.strip()
-        if line and not any(line.startswith(p) for p in skip_prefixes):
-            return line[:200]
+        if line and not any(line.startswith(p) for p in skip):
+            return line[:300]
     return "I don't know"
-
-
-def judge_answer(question: str, gold: str, system_answer: str) -> bool:
-    raw = _haiku(
-        JUDGE_SYSTEM,
-        f"Question: {question}\nGold: {gold}\nSystem: {system_answer}",
-        max_tokens=150,
-    )
-    if raw is not None:
-        try:
-            return bool(json.loads(raw).get("correct", False))
-        except Exception:
-            pass
-    # Fallback: token overlap ≥ 50%
-    g = set(gold.lower().split())
-    s = set(system_answer.lower().split())
-    return len(g & s) / max(len(g), 1) >= 0.5
 
 
 # ── main loop ─────────────────────────────────────────────────────────────────
 
-def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool):
+def run(dataset: str, limit: int, keep_data: bool, dry_run: bool,
+        verbose: bool, judge_model: str):
     path = ensure_data(dataset)
     with open(path) as f:
         items = json.load(f)
     if limit:
         items = items[:limit]
+
     print(f"Loaded {len(items)} questions from {dataset}")
+    using_openai = bool(os.environ.get("OPENAI_API_KEY"))
+    using_codex = not using_openai and bool(_find_codex_cli())
+    if using_openai:
+        judge_mode = f"{judge_model} (LongMemEval exact prompts)"
+    elif using_codex:
+        judge_mode = "codex exec (LongMemEval exact prompts)"
+    else:
+        judge_mode = "token-F1 heuristic"
+    print(f"Judge: {judge_mode}")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     scores: dict[str, list[bool]] = {qt: [] for qt in QUESTION_TYPES}
     latencies: list[float] = []
     rows: list[dict] = []
+    hypotheses: list[dict] = []  # LongMemEval-format JSONL for their evaluate_qa.py
 
     for idx, item in enumerate(items):
-        qid = item["question_id"]
-        question = item["question"]
-        gold = item["answer"]
-        qtype = item["question_type"]
-        dates = item.get("haystack_dates", [])
-        sessions = item.get("haystack_sessions", [])
-        realm = f"lme/{qid}"
+        qid       = item["question_id"]
+        question  = item["question"]
+        gold      = item["answer"]
+        qtype     = item["question_type"]
+        dates     = item.get("haystack_dates", [])
+        sessions  = item.get("haystack_sessions", [])
+        abstention = "_abs" in qid
+        realm     = f"lme/{qid}"
 
-        print(f"[{idx+1}/{len(items)}] {qtype} — {question[:65]}…", end="")
+        print(f"[{idx+1}/{len(items)}] {qtype} — {question[:65]}…", end="", flush=True)
 
         if dry_run:
             print()
@@ -244,8 +329,8 @@ def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool)
                 content = turn.get("content", "").strip()
                 if not content:
                     continue
-                text = f"[{turn['role']}] {content}"
-                remember(text, realm=realm, tags=tags, valid_from=date)
+                remember(f"[{turn['role']}] {content}",
+                         realm=realm, tags=tags, valid_from=date)
                 turns_ingested += 1
 
         # --- Recall ---
@@ -254,20 +339,32 @@ def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool)
         latency_ms = (time.perf_counter() - t0) * 1000
         latencies.append(latency_ms)
 
-        # --- Synthesize + judge ---
-        answer = synthesize(question, hits)
-        correct = judge_answer(question, gold, answer)
+        hypothesis = extract_answer(hits)
+
+        # --- Judge: OpenAI → codex → token-F1 ---
+        if using_openai:
+            correct = judge_with_openai(qtype, question, gold, hypothesis,
+                                        model=judge_model, abstention=abstention)
+        else:
+            correct = None
+        if correct is None:
+            correct = judge_with_codex(qtype, question, gold, hypothesis,
+                                       abstention=abstention)
+        if correct is None:
+            correct = judge_heuristic(gold, hypothesis)
+
         scores.setdefault(qtype, []).append(correct)
+        hypotheses.append({"question_id": qid, "hypothesis": hypothesis})
 
         print(f"  {'✓' if correct else '✗'}  {latency_ms:.0f}ms  turns={turns_ingested}")
         if verbose:
-            print(f"  answer: {answer[:100]}")
-            print(f"  gold:   {gold[:100]}")
+            print(f"  hyp:  {hypothesis[:100]}")
+            print(f"  gold: {gold[:100]}")
 
         rows.append({
             "qid": qid, "qtype": qtype, "correct": correct,
             "latency_ms": round(latency_ms),
-            "answer": answer[:250], "gold": gold[:250],
+            "hypothesis": hypothesis[:250], "gold": gold[:250],
         })
 
         if not keep_data:
@@ -291,6 +388,7 @@ def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool)
 
     print(f"\n{'='*60}")
     print(f"  LongMemEval — {dataset}  ({git_sha})")
+    print(f"  Judge: {judge_mode}")
     print(f"  Overall: {overall:.1%}  ({total_correct}/{total_q})")
     print(f"  p50={p50:.0f}ms  p95={p95:.0f}ms")
     print(f"{'='*60}")
@@ -299,13 +397,18 @@ def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool)
         if res:
             print(f"  {qt:35s} {sum(res)/len(res):.1%}  ({sum(res)}/{len(res)})")
 
-    # ── Markdown ──────────────────────────────────────────────────────────────
+    # ── Write outputs ─────────────────────────────────────────────────────────
     out = RESULTS_DIR / f"longmemeval-{git_sha}.md"
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    hyp_out = RESULTS_DIR / f"longmemeval-{git_sha}.hyp.jsonl"
+
+    # Hypothesis JSONL (compatible with their evaluate_qa.py)
+    hyp_out.write_text("\n".join(json.dumps(h) for h in hypotheses) + "\n")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
     md = [
         f"# LongMemEval — {git_sha}",
         f"",
-        f"**Dataset**: `{dataset}`  **Date**: {now}  **n**: {total_q}",
+        f"**Dataset**: `{dataset}`  **Judge**: `{judge_mode}`  **Date**: {now}  **n**: {total_q}",
         f"",
         "| model | overall | p50_ms | p95_ms |",
         "|---|---|---|---|",
@@ -321,17 +424,19 @@ def run(dataset: str, limit: int, keep_data: bool, dry_run: bool, verbose: bool)
         if res:
             md.append(f"| {qt} | {sum(res)/len(res):.1%} | {len(res)} |")
     md += ["", "## Per-question", ""]
-    md.append("| qid | type | ✓ | ms | answer | gold |")
+    md.append("| qid | type | ✓ | ms | hypothesis | gold |")
     md.append("|---|---|---|---|---|---|")
     for r in rows:
-        a = r["answer"].replace("|", "\\|").replace("\n", " ")[:80]
+        h = r["hypothesis"].replace("|", "\\|").replace("\n", " ")[:80]
         g = r["gold"].replace("|", "\\|").replace("\n", " ")[:80]
-        md.append(f"| {r['qid']} | {r['qtype']} | {'✓' if r['correct'] else '✗'} | {r['latency_ms']} | {a} | {g} |")
-    out.write_text("\n".join(md) + "\n")
+        md.append(f"| {r['qid']} | {r['qtype']} | {'✓' if r['correct'] else '✗'} | {r['latency_ms']} | {h} | {g} |")
 
-    raw = out.with_suffix(".json")
-    raw.write_text(json.dumps({"dataset": dataset, "sha": git_sha, "rows": rows}, indent=2))
-    print(f"\nResults → {out}")
+    out.write_text("\n".join(md) + "\n")
+    (out.with_suffix(".json")).write_text(
+        json.dumps({"dataset": dataset, "sha": git_sha, "judge": judge_mode, "rows": rows}, indent=2))
+
+    print(f"\nResults  → {out}")
+    print(f"Hyp JSONL → {hyp_out}  (re-score: python evaluate_qa.py gpt-4o-mini {hyp_out} {path})")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -341,16 +446,22 @@ def main():
     ap.add_argument("--dataset", default="longmemeval_oracle",
                     choices=list(DATASETS), metavar="DATASET",
                     help=f"One of: {', '.join(DATASETS)} (default: longmemeval_oracle)")
-    ap.add_argument("--limit",     type=int, default=0,    help="Max questions (0=all)")
-    ap.add_argument("--keep-data", action="store_true",    help="Keep ingested turns after each question")
-    ap.add_argument("--dry-run",   action="store_true",    help="Inspect questions without running")
-    ap.add_argument("--verbose",   "-v", action="store_true")
+    ap.add_argument("--limit",       type=int, default=0,
+                    help="Max questions (0=all)")
+    ap.add_argument("--judge-model", default="gpt-4o-mini",
+                    help="OpenAI model for judging (default: gpt-4o-mini)")
+    ap.add_argument("--keep-data",   action="store_true",
+                    help="Keep ingested turns after each question")
+    ap.add_argument("--dry-run",     action="store_true",
+                    help="Inspect questions without running")
+    ap.add_argument("--verbose", "-v", action="store_true")
     args = ap.parse_args()
 
     if not CHITTA.exists():
         sys.exit(f"chitta not found at {CHITTA}")
 
-    run(args.dataset, args.limit, args.keep_data, args.dry_run, args.verbose)
+    run(args.dataset, args.limit, args.keep_data, args.dry_run,
+        args.verbose, args.judge_model)
 
 
 if __name__ == "__main__":
