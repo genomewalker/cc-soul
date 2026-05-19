@@ -798,6 +798,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"consolidation_pass", "Run Sequitur grammar consolidation: promote frequent bigrams to triplet KG. Use --preview 1 for dry run.",
      {{"preview", "If 1, dry run — show rules without writing", false, "0"},
       {"k",       "Rules to show in preview", false, "5"}}},
+    {"refutation_stats", "Show Sequitur rules being falsified: antecedent appears but expected consequent does not. Reports live/refuted counts and top-k by refutation ratio.",
+     {{"k", "Max rules to show", false, "10"}}},
+    {"recall_motif_value", "Top-k CDAWG motif states from (tool, entity) ranked by Q-value. Answers: which action sequences have highest expected success rate from this context?",
+     {{"tool",   "Tool name to query from", true,  nullptr},
+      {"entity", "Entity to query from",    true,  nullptr},
+      {"k",      "Max states to return",    false, "5"}}},
 };
 
 // Build set of known tools from specs

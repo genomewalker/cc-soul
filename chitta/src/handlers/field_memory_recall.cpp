@@ -902,4 +902,30 @@ ToolResult FieldRpcHandler::tool_consolidation_pass(const json& params) {
     return ToolResult::ok(msg, {{"result", out}});
 }
 
+ToolResult FieldRpcHandler::tool_refutation_stats(const json& params) {
+    size_t k = static_cast<size_t>(params.value("k", 10));
+    std::string stats = field_store_->refutation_stats_json(k);
+    return ToolResult::ok(stats, {{"stats", stats}});
+}
+
+ToolResult FieldRpcHandler::tool_recall_motif_value(const json& params) {
+    std::string tool   = params.value("tool",   "");
+    std::string entity = params.value("entity", "");
+    size_t k           = static_cast<size_t>(params.value("k", 5));
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    std::string raw = field_store_->recall_motif_value_json(tool, entity, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_array() && !parsed.empty()) {
+        ss << "Top-" << parsed.size() << " motif states from " << tool << "(" << entity << "):\n";
+        for (const auto& h : parsed) {
+            ss << "  " << h.value("content", "") << "\n";
+        }
+    } else {
+        ss << "No motif data yet for " << tool << "(" << entity << ") — accumulate more events.";
+    }
+    return ToolResult::ok(ss.str(), {{"hits", parsed.is_array() ? parsed : json::array()}});
+}
+
 } // namespace chitta

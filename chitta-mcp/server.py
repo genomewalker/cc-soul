@@ -202,7 +202,8 @@ ADVANCED_TOOLS = {
     "why_active", "what_superseded", "show_conflicts",
     # CEC: Event tape + CDAWG + Sequitur (Phase 1-6)
     "log_event", "recall_last_action", "recall_failure_pattern", "recall_causal_antecedent",
-    "recall_hdcbind", "consolidation_pass", "recall_counterfactual",
+    "recall_hdcbind", "consolidation_pass", "recall_counterfactual", "refutation_stats",
+    "recall_motif_value",
 }
 
 # Combined set of tools to hide from listing (but still callable)
