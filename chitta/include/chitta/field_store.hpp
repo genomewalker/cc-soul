@@ -75,6 +75,8 @@ int cf_recall_session(struct CfHandle* h,
     CfSessionHit* hits_buf, size_t hits_cap, size_t* hits_written,
     char** session_ids_json_out);
 int cf_recall_spreading(struct CfHandle* h, const char* query, size_t k, const char* realm, char* out_json, size_t out_json_len);
+int cf_recall_hdc(struct CfHandle* h, const char* query, const char* realm,
+    size_t k, CfRecallHit* buf, size_t buf_cap, size_t* written);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -666,6 +668,19 @@ public:
         size_t written = 0;
         int r = cf_recall_keyword(handle_, query.c_str(), k, buf, MAX_HITS, &written);
         if (r != 0) throw std::runtime_error(last_error());
+        return hits_to_results(buf, written);
+    }
+
+    /// HDC (hyperdimensional) recall — best-effort, returns empty on error.
+    std::vector<FieldRecallHit> recall_hdc(const std::string& query, size_t k,
+                                           const std::string& realm = "") {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+        int r = cf_recall_hdc(handle_, query.c_str(),
+                              realm.empty() ? nullptr : realm.c_str(),
+                              k, buf, MAX_HITS, &written);
+        if (r != 0) return {};
         return hits_to_results(buf, written);
     }
 
