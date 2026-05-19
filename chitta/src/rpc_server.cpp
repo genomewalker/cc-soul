@@ -833,6 +833,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"k",       "Max results",                        false, "5"}}},
     {"hypothesis_probes", "Top-k Sequitur rules by Wilson probe_value (expected info gain). Highest = most uncertain — best candidates for deliberate disambiguation.",
      {{"k", "Max rules to return", false, "10"}}},
+    {"turiya_status", "CEC Phase 11 Turīya witness: read-only health vector across all CEC organs. Reports CDAWG growth, Sequitur rule churn, Q-value variance, refutation pressure, and hypothesis uncertainty. Diagnoses: healthy|stale|q_collapse|refutation_flood|high_uncertainty.",
+     {}},
 };
 
 // Build set of known tools from specs
@@ -935,6 +937,7 @@ void print_usage(const char* prog) {
               << "               recall_counterfactual, recall_true_counterfactual, recall_motif_value\n"
               << "  CEC market:  hypothesis_probes, refutation_stats\n"
               << "  CEC exec:    executor_flush, list_policies, consolidation_pass\n"
+              << "  CEC witness: turiya_status\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

@@ -1042,4 +1042,33 @@ ToolResult FieldRpcHandler::tool_hypothesis_probes(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_turiya_status(const json& /*params*/) {
+    std::string raw = field_store_->turiya_status_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "turiya_status: diagnosis=" << parsed.value("diagnosis", "unknown")
+           << " trend=" << parsed.value("trend", "unknown")
+           << " samples=" << parsed.value("samples", 0) << "\n";
+        if (parsed.contains("latest")) {
+            const auto& l = parsed["latest"];
+            ss << "  cdawg_states=" << l.value("cdawg_states", 0)
+               << " tape_events=" << l.value("tape_events", 0)
+               << " tracked_rules=" << l.value("tracked_rules", 0)
+               << " refuted_rules=" << l.value("refuted_rules", 0) << "\n"
+               << "  hypotheses=" << l.value("hypotheses", 0)
+               << " mean_probe=" << l.value("mean_probe_value", 0.0)
+               << " q_variance=" << l.value("q_variance", 0.0) << "\n"
+               << "  delta_states=" << l.value("delta_states", 0)
+               << " delta_events=" << l.value("delta_events", 0);
+        }
+        if (parsed.contains("recent_diagnoses")) {
+            ss << "\n  recent=" << parsed["recent_diagnoses"].dump();
+        }
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta

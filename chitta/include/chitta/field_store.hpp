@@ -104,6 +104,7 @@ int   cf_log_decision(struct CfHandle* h, const char* chosen_tool, const char* c
 char* cf_recall_true_counterfactual(struct CfHandle* h, const char* tool,
                                     const char* entity, uint8_t outcome, size_t k);
 char* cf_hypothesis_probes(struct CfHandle* h, size_t k);
+char* cf_turiya_status(const struct CfHandle* h);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -847,6 +848,14 @@ public:
     std::string hypothesis_probes_json(size_t k = 10) {
         char* raw = cf_hypothesis_probes(handle_, k);
         if (!raw) return "{}";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string turiya_status_json() {
+        char* raw = cf_turiya_status(handle_);
+        if (!raw) return R"({"status":"no_data"})";
         std::string result(raw);
         cf_free_string(raw);
         return result;
