@@ -1094,4 +1094,24 @@ ToolResult FieldRpcHandler::tool_tape_stats(const json& /*params*/) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_verbalize_rules(const json& params) {
+    size_t k = static_cast<size_t>(params.value("k", 10));
+    std::string raw = field_store_->verbalize_rules_json(k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        auto rules = parsed.value("rules", json::array());
+        ss << "verbalize_rules: " << rules.size() << " rules\n";
+        for (const auto& r : rules) {
+            ss << "  [rule_" << r.value("rule_id", 0)
+               << " ×" << r.value("support", 0)
+               << " " << r.value("avg_outcome", "?") << "]\n"
+               << "  " << r.value("text", "") << "\n";
+        }
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 } // namespace chitta
