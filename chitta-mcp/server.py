@@ -205,6 +205,7 @@ ADVANCED_TOOLS = {
     "recall_hdcbind", "consolidation_pass", "recall_counterfactual", "refutation_stats",
     "recall_motif_value", "executor_flush", "list_policies",
     "recall_true_counterfactual", "hypothesis_probes", "turiya_status", "tape_stats",
+    "verbalize_rules",
 }
 
 # Combined set of tools to hide from listing (but still callable)

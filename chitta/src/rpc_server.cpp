@@ -837,6 +837,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"tape_stats", "CEC Phase 12 EventTape statistics: event count, tombstoned events (temporal compression), unique sessions, tools, entities, and failure events.",
      {}},
+    {"verbalize_rules", "CEC Phase 13 Verbalization: convert top-k Sequitur rules to natural language using a deterministic template. No LLM. Shows what the agent has learned as readable heuristics.",
+     {{"k", "Max rules to return", false, "10"}}},
 };
 
 // Build set of known tools from specs
@@ -939,7 +941,7 @@ void print_usage(const char* prog) {
               << "               recall_counterfactual, recall_true_counterfactual, recall_motif_value\n"
               << "  CEC market:  hypothesis_probes, refutation_stats\n"
               << "  CEC exec:    executor_flush, list_policies, consolidation_pass\n"
-              << "  CEC witness: turiya_status, tape_stats\n"
+              << "  CEC witness: turiya_status, tape_stats, verbalize_rules\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
