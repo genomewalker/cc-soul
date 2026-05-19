@@ -504,6 +504,23 @@ void FieldRpcHandler::register_memory_core_tools() {
         }}}}
     });
     handlers_["list_policies"] = [this](const json& p) { return tool_list_policies(p); };
+
+    tools_.push_back({{"name","recall_true_counterfactual"},{"description","Return decision points where (tool, entity) was explicitly considered and rejected. Uses the DecisionTape (Phase 10), not CDAWG sibling inference. Requires prior log_event_ex or log_decision calls."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",    {{"type","string"}}},
+            {"entity",  {{"type","string"}}},
+            {"outcome", {{"type","integer"},{"description","0=success 1=fail 2=error (default 0)"}}},
+            {"k",       {{"type","integer"},{"description","Max results (default 5)"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["recall_true_counterfactual"] = [this](const json& p) { return tool_recall_true_counterfactual(p); };
+
+    tools_.push_back({{"name","hypothesis_probes"},{"description","Top-k Sequitur rules ranked by expected information gain (Wilson probe_value). Maximized at p_hat=0.5 — rules the system is most uncertain about. Run consolidation_pass first to populate."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"k", {{"type","integer"},{"description","Max rules to return (default 10)"}}}
+        }}}}
+    });
+    handlers_["hypothesis_probes"] = [this](const json& p) { return tool_hypothesis_probes(p); };
 }
 
 } // namespace chitta

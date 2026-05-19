@@ -808,6 +808,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"list_policies", "List CEC intervention policies. Shows id, source rule, kind, shadow event count, Q-lift, and fire count.",
      {{"active_only", "If true, show only active (promoted) policies", false, "false"}}},
+    {"recall_true_counterfactual", "Return DecisionTape entries where (tool, entity) was explicitly rejected. True counterfactual data vs CDAWG sibling inference.",
+     {{"tool",    "Tool name",                          true,  nullptr},
+      {"entity",  "Entity name",                        true,  nullptr},
+      {"outcome", "Outcome class (0=success, default)", false, "0"},
+      {"k",       "Max results",                        false, "5"}}},
+    {"hypothesis_probes", "Top-k Sequitur rules by Wilson probe_value (expected info gain). Highest = most uncertain — best candidates for deliberate disambiguation.",
+     {{"k", "Max rules to return", false, "10"}}},
 };
 
 // Build set of known tools from specs
