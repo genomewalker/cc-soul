@@ -1,6 +1,7 @@
 // field_memory_recall RPC handlers — bodies for declarations in
 // chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
 #include <ctime>
+#include <iomanip>
 #include "chitta/speech_act.hpp"
 #include "chitta/ssl_gloss.hpp"
 
@@ -1065,6 +1066,28 @@ ToolResult FieldRpcHandler::tool_turiya_status(const json& /*params*/) {
         if (parsed.contains("recent_diagnoses")) {
             ss << "\n  recent=" << parsed["recent_diagnoses"].dump();
         }
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_tape_stats(const json& /*params*/) {
+    std::string raw = field_store_->tape_stats_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        long long events   = parsed.value("events", 0);
+        long long tomb     = parsed.value("tombstoned_total", 0);
+        long long total    = events + tomb;
+        float ratio = total > 0 ? (float)tomb / total * 100.0f : 0.0f;
+        ss << "tape_stats: events=" << events
+           << " tombstoned=" << tomb
+           << " compression=" << std::fixed << std::setprecision(1) << ratio << "%"
+           << " sessions=" << parsed.value("sessions", 0)
+           << " tools=" << parsed.value("tool_count", 0)
+           << " entities=" << parsed.value("entity_count", 0)
+           << " failures=" << parsed.value("failure_events", 0);
     } else {
         ss << raw;
     }

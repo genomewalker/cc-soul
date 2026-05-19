@@ -119,3 +119,4 @@
     ToolResult tool_recall_true_counterfactual(const json& params);
     ToolResult tool_hypothesis_probes(const json& params);
     ToolResult tool_turiya_status(const json& params);
+    ToolResult tool_tape_stats(const json& params);
