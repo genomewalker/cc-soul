@@ -764,6 +764,27 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"query", "Search query", true, nullptr},
       {"limit", "Max results", false, "20"},
       {"realm", "Filter by realm", false, nullptr}}},
+
+    // CEC: Event tape + CDAWG
+    {"log_event", "Log a structured action event to the CEC tape and CDAWG",
+     {{"tool", "Tool name (e.g. Edit, Bash)", true, nullptr},
+      {"entity", "Entity acted on (file, URL, command)", true, nullptr},
+      {"outcome", "0=success 1=fail 2=error 3=partial", false, "0"},
+      {"session_id", "Session ID (optional)", false, "0"},
+      {"ts_ms", "Timestamp ms (0=now)", false, "0"}}},
+
+    {"recall_last_action", "Return last k occurrences of (tool, entity) from the CEC event tape",
+     {{"tool", "Tool name", true, nullptr},
+      {"entity", "Entity name", true, nullptr},
+      {"k", "Max results", false, "5"}}},
+
+    {"recall_failure_pattern", "Return top-k CDAWG states with high failure rates",
+     {{"k", "Max results", false, "5"}}},
+
+    {"recall_causal_antecedent", "PMI-ranked causal antecedents: what actions typically precede (tool, entity)?",
+     {{"tool", "Tool name", true, nullptr},
+      {"entity", "Entity name", true, nullptr},
+      {"k", "Max results", false, "5"}}},
 };
 
 // Build set of known tools from specs

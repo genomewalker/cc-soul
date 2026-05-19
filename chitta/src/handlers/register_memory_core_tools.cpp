@@ -414,6 +414,43 @@ void FieldRpcHandler::register_memory_core_tools() {
     handlers_["expand_query"] = [this](const json& p) { return tool_expand_query(p); };
 
     // Anticipation/Habit/Profile/Goal/Calibration
+
+    // ── CEC: Event tape + CDAWG ──────────────────────────────────────────────
+    tools_.push_back({{"name","log_event"},{"description","Log a structured action event to the CEC tape and CDAWG (tool, entity, outcome: 0=success 1=fail 2=error 3=partial)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",       {{"type","string"}}},
+            {"entity",     {{"type","string"}}},
+            {"outcome",    {{"type","integer"}}},
+            {"session_id", {{"type","integer"}}},
+            {"ts_ms",      {{"type","integer"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["log_event"] = [this](const json& p) { return tool_log_event(p); };
+
+    tools_.push_back({{"name","recall_last_action"},{"description","Return last k occurrences of (tool, entity) from the CEC event tape"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",   {{"type","string"}}},
+            {"entity", {{"type","string"}}},
+            {"k",      {{"type","integer"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["recall_last_action"] = [this](const json& p) { return tool_recall_last_action(p); };
+
+    tools_.push_back({{"name","recall_failure_pattern"},{"description","Return top-k CDAWG states with high failure rates (fail_ratio > 0.6, fail_count >= 3)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"k", {{"type","integer"}}}
+        }}}}
+    });
+    handlers_["recall_failure_pattern"] = [this](const json& p) { return tool_recall_failure_pattern(p); };
+
+    tools_.push_back({{"name","recall_causal_antecedent"},{"description","PMI-ranked causal antecedents: what actions typically precede (tool, entity)?"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",   {{"type","string"}}},
+            {"entity", {{"type","string"}}},
+            {"k",      {{"type","integer"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["recall_causal_antecedent"] = [this](const json& p) { return tool_recall_causal_antecedent(p); };
 }
 
 } // namespace chitta

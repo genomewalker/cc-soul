@@ -766,6 +766,21 @@ fi
 # 8. Anticipations (lowest priority)
 [[ -n "$ANTICIPATIONS" ]] && _append "$ANTICIPATIONS"
 
+# 9. CEC: Involuntary failure-pattern injection (Phase 3)
+# If the CDAWG has a state with fail_ratio > 0.7 and fail_count >= 3,
+# inject a one-line warning into systemMessage so it cannot be ignored.
+CEC_WARN=""
+if command -v jq &>/dev/null; then
+    _cec_raw=$(timeout 1 "$CHITTA_BIN" recall_failure_pattern --k 1 --json 2>/dev/null || true)
+    if [[ -n "$_cec_raw" ]]; then
+        _cec_ratio=$(echo "$_cec_raw" | jq -r '.patterns[0].fail_ratio // 0' 2>/dev/null || echo "0")
+        _cec_count=$(echo "$_cec_raw" | jq -r '.patterns[0].fail_count // 0' 2>/dev/null || echo "0")
+        if awk "BEGIN{exit !($_cec_ratio > 0.7 && $_cec_count >= 3)}" 2>/dev/null; then
+            _cec_content=$(echo "$_cec_raw" | jq -r '.patterns[0].content // ""' 2>/dev/null | cut -c1-200 || true)
+            [[ -n "$_cec_content" ]] && CEC_WARN="⚠ CEC: ${_cec_content}"
+        fi
+    fi
+fi
 
 # ===========================================
 # EMIT: Structured JSON hookSpecificOutput
@@ -784,6 +799,7 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         SYSTEM_MSG=""
         [[ -n "$CACHE_WARN" ]] && SYSTEM_MSG="${CACHE_WARN}"
         [[ -n "$SESSION_WARN" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${SESSION_WARN}"
+        [[ -n "$CEC_WARN" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${CEC_WARN}"
         if [[ -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"CORRECTION"* ]]; then
             SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${LEARNING_HINTS}"
         fi
