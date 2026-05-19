@@ -852,6 +852,25 @@ ToolResult FieldRpcHandler::tool_recall_hdcbind(const json& params) {
     return ToolResult::ok(ss.str(), {{"results", out}});
 }
 
+ToolResult FieldRpcHandler::tool_recall_counterfactual(const json& params) {
+    std::string tool   = params.value("tool", "");
+    std::string entity = params.value("entity", "");
+    uint8_t outcome    = static_cast<uint8_t>(params.value("outcome", 1));
+    size_t k           = static_cast<size_t>(params.value("k", 5));
+    if (tool.empty() || entity.empty())
+        return ToolResult::error("tool and entity are required");
+    std::string raw = field_store_->recall_counterfactual_json(tool, entity, outcome, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    json arr = parsed.is_array() ? parsed : json::array();
+    std::ostringstream ss;
+    ss << "Counterfactual alternatives for " << tool << "(" << entity << ") outcome="
+       << (int)outcome << ":\n";
+    for (const auto& p : arr) {
+        ss << "  " << p.value("content", "") << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"alternatives", arr}});
+}
+
 ToolResult FieldRpcHandler::tool_consolidation_pass(const json& params) {
     bool preview_only = params.value("preview", false);
     if (preview_only) {

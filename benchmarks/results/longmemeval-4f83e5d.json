@@ -1,0 +1,31 @@
+{
+  "dataset": "longmemeval_oracle",
+  "sha": "4f83e5d",
+  "judge": "codex exec (LongMemEval exact prompts)",
+  "rows": [
+    {
+      "qid": "gpt4_2655b836",
+      "qtype": "temporal-reasoning",
+      "correct": true,
+      "latency_ms": 461,
+      "hypothesis": "[6%] [result] [user] I've been doing some research and found a local detailer with great reviews. I was thinking of taking my car there, but I'm also considering other options. By the way, I recently had an issue with my car's GPS system on 3/22, and",
+      "gold": "GPS system not functioning correctly"
+    },
+    {
+      "qid": "gpt4_2487a7cb",
+      "qtype": "temporal-reasoning",
+      "correct": false,
+      "latency_ms": 1244,
+      "hypothesis": "[10%] [episode] [assistant] Data visualization is a crucial step in data analysis, and Python is an excellent choice for it. Here are some top-notch resources to help you learn data visualization in Python:",
+      "gold": "'Data Analysis using Python' webinar"
+    },
+    {
+      "qid": "gpt4_76048e76",
+      "qtype": "temporal-reasoning",
+      "correct": true,
+      "latency_ms": 753,
+      "hypothesis": "[9%] [result] [user] By the way, speaking of bikes, I'm glad I got my bike repaired back in mid-February. The gears were acting up, and I couldn't shift properly, but the bike shop fixed it for me. It's been running smoothly ever since. Anyway, back ",
+      "gold": "bike"
+    }
+  ]
+}

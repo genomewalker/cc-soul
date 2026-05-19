@@ -466,6 +466,16 @@ void FieldRpcHandler::register_memory_core_tools() {
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
     handlers_["consolidation_pass"] = [this](const json& p) { return tool_consolidation_pass(p); };
+
+    tools_.push_back({{"name","recall_counterfactual"},{"description","CDAWG sibling-edge counterfactual: what alternative tool/entity would have had a lower failure rate in this same context?"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"tool",    {{"type","string"}}},
+            {"entity",  {{"type","string"}}},
+            {"outcome", {{"type","integer"},{"description","0=success 1=fail 2=error 3=partial (default 1)"}}},
+            {"k",       {{"type","integer"}}}
+        }},{"required",{"tool","entity"}}}}
+    });
+    handlers_["recall_counterfactual"] = [this](const json& p) { return tool_recall_counterfactual(p); };
 }
 
 } // namespace chitta
