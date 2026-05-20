@@ -201,7 +201,8 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
                               ollama_bin: str = "ollama",
                               soul_anchor: bool = False,
                               chitta_bin: str = "chitta",
-                              base_url: str = "http://localhost:11434") -> int:
+                              base_url: str = "http://localhost:11434",
+                              source_model: str = "") -> int:
     """vocab_geometry for a local GGUF model via Ollama embeddings API.
 
     Reads the vocabulary from the GGUF header (no tensor data loaded), then
@@ -305,14 +306,16 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
             "direction": direction.tolist(),
             "top_tokens": top_toks,
             "provenance": "ow_distilled",
-            "source_model": ollama_model,
+            "source_model": source_model or ollama_model,
         })
 
+    _src = source_model or ollama_model
     with open(output_path, "w") as f:
         json.dump({
             "mode": "vocab_geometry",
             "n_directions": len(results),
-            "source_model": ollama_model,
+            "source_model": _src,
+            "embed_model": ollama_model,
             "gguf_path": gguf_path,
             "embed_dim": int(E.shape[1]),
             "vocab_size": len(tokens),
@@ -873,6 +876,10 @@ def main():
                         "neighbourhood rather than generic model geometry")
     p.add_argument("--chitta-bin", default="chitta",
                    help="chitta binary name or path (default: chitta)")
+    p.add_argument("--source-model", default="",
+                   help="(vocab_geometry --gguf) canonical name of the model being harvested "
+                        "(defaults to --ollama-model, but that is the embed model). "
+                        "Pass the actual model tag, e.g. gemma4:26b.")
     p.add_argument("--augment-seqs", default="",
                    help="(vocab_geometry --model, bio models) FASTA or plain-text file "
                         "of sequences (one per line). Mean-pooled contextual embeddings "
@@ -898,7 +905,8 @@ def main():
             rc = mode_vocab_geometry_gguf(
                 args.gguf, tag, scope, args.output, budget, args.ollama_bin,
                 soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin,
-                base_url=args.ollama_base_url)
+                base_url=args.ollama_base_url,
+                source_model=args.source_model or tag)
         elif ollama_tag:
             gguf = _ollama_find_gguf(ollama_tag, args.ollama_bin)
             if not gguf:
@@ -910,7 +918,8 @@ def main():
             rc = mode_vocab_geometry_gguf(
                 gguf, ollama_tag, scope, args.output, budget, args.ollama_bin,
                 soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin,
-                base_url=args.ollama_base_url)
+                base_url=args.ollama_base_url,
+                source_model=args.source_model or ollama_tag)
         else:
             if not args.model:
                 p.error("either --model or --ollama-model (or --gguf) is required")

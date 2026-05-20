@@ -90,6 +90,7 @@ harvest_one() {
     "$PYBIN" "$HARVEST" \
         --gguf "$gguf" \
         --ollama-model "$EMBED_MODEL" \
+        --source-model "$model" \
         --ollama-base-url "$GPU_URL" \
         --mode vocab_geometry \
         --provenance ow_distilled \
