@@ -1053,4 +1053,47 @@ if [[ -n "${SESSION_ID:-}" ]]; then
     fi
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION-END DECISION SUMMARY
+# Extract all [DECISION]/[SOLUTION]/[CORRECTION] markers from this session's
+# transcript and store a consolidated summary. Fires once per session on the
+# final turn (guarded by summary-written marker file).
+SESSION_SUMMARY_FILE="${MIND_PATH}/.session_summary_written_${SESSION_ID}"
+if [[ -n "${SESSION_ID:-}" && -n "${TRANSCRIPT_PATH:-}" && -f "$TRANSCRIPT_PATH" \
+      && ! -f "$SESSION_SUMMARY_FILE" && "${TURN_INDEX:-0}" -ge 5 ]]; then
+    _decisions=$(python3 - <<'PYEOF' 2>/dev/null
+import json, sys, re, os
+path = os.environ.get("TRANSCRIPT_PATH", "")
+if not path or not os.path.exists(path): sys.exit(0)
+lines = open(path).readlines()[-600:]
+hits = []
+for line in lines:
+    try:
+        d = json.loads(line)
+        role = d.get("role","")
+        content = ""
+        if isinstance(d.get("content"), str):
+            content = d["content"]
+        elif isinstance(d.get("content"), list):
+            content = " ".join(b.get("text","") for b in d["content"] if isinstance(b,dict))
+        if not content: continue
+        for m in re.finditer(r'\[(DECISION|SOLUTION|CORRECTION|MILESTONE)\]\s*([^\n]{10,200})', content):
+            hits.append(f"[{m.group(1)}] {m.group(2).strip()}")
+    except: pass
+if hits:
+    print("\n".join(hits[:12]))
+PYEOF
+    )
+    if [[ -n "$_decisions" ]]; then
+        _realm_json=$(printf '%s' "${REALM:-brahman}" | jq -Rs .)
+        _content_json=$(printf '[session-summary:%s] %s' "${SESSION_ID:0:8}" "$_decisions" | jq -Rs .)
+        queue_write "remember" \
+            "{\"content\":$_content_json,\"category\":\"decision\",\"realm\":$_realm_json,\"tags\":[\"session-summary\",\"auto-summary\"],\"visibility\":1}" \
+            2>/dev/null || true
+        touch "$SESSION_SUMMARY_FILE"
+        echo "[soul] session summary stored (${#_decisions} chars, ${TURN_INDEX} turns)" >&2
+    fi
+fi
+# ═══════════════════════════════════════════════════════════════════════════
+
 exit 0

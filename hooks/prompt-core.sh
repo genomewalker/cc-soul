@@ -462,6 +462,18 @@ if [[ ! -f "$LAST_STORE_FILE" ]]; then
     echo "$TURN_INDEX" > "$LAST_STORE_FILE"
 fi
 last_store_turn=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo "$TURN_INDEX")
+
+# If post-bash-hook auto-stored a milestone recently, credit it as a store
+AUTO_STORE_TS_FILE="${MIND_PATH}/.last_auto_store_ts"
+if [[ -f "$AUTO_STORE_TS_FILE" ]]; then
+    _auto_ts=$(cat "$AUTO_STORE_TS_FILE" 2>/dev/null || echo 0)
+    _age=$(( $(date +%s) - _auto_ts ))
+    if [[ $_age -lt 120 ]]; then
+        echo "$TURN_INDEX" > "$LAST_STORE_FILE"
+        last_store_turn=$TURN_INDEX
+    fi
+fi
+
 turns_since_store=$((TURN_INDEX - last_store_turn))
 if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[DISCIPLINE] $turns_since_store turns without storing — consider remember/learn_correction/learn_milestone"
