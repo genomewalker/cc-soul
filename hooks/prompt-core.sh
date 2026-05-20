@@ -389,7 +389,7 @@ _regex_belief=0
 _regex_milestone=0
 _regex_frustration=0
 
-echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|first.*then\b|before.*not after\b|kill.*before\b|binary.*first\b)" \
+echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|before.*not after\b)" \
     && _regex_correction=1 || true
 echo "$QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)" \
     && _regex_preference=1 || true
