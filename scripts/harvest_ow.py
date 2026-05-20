@@ -104,19 +104,24 @@ def gguf_read_vocab(gguf_path: str) -> list[str]:
 
 # ── Ollama embedding API ───────────────────────────────────────────────────────
 
-def _ollama_ensure_running(ollama_bin: str = "ollama") -> bool:
+def _ollama_ensure_running(ollama_bin: str = "ollama",
+                           base_url: str = "http://localhost:11434") -> bool:
     try:
-        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+        urllib.request.urlopen(f"{base_url}/api/tags", timeout=5)
         return True
     except Exception:
         pass
+    # Only try to start a local server when using localhost
+    if "localhost" not in base_url and "127.0.0.1" not in base_url:
+        print(f"[harvest] remote Ollama at {base_url} not reachable", file=sys.stderr)
+        return False
     print("[harvest] starting ollama serve ...", flush=True)
     subprocess.Popen([ollama_bin, "serve"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(20):
         time.sleep(2)
         try:
-            urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+            urllib.request.urlopen(f"{base_url}/api/tags", timeout=2)
             print("[harvest] ollama ready", flush=True)
             return True
         except Exception:
@@ -138,15 +143,16 @@ def _ollama_find_gguf(model_tag: str, ollama_bin: str = "ollama") -> str | None:
     return None
 
 
-def _ollama_embed_batch(model_tag: str, texts: list[str]) -> list[list[float]] | None:
+def _ollama_embed_batch(model_tag: str, texts: list[str],
+                        base_url: str = "http://localhost:11434") -> list[list[float]] | None:
     payload = json.dumps({"model": model_tag, "input": texts}).encode()
     req = urllib.request.Request(
-        "http://localhost:11434/api/embed",
+        f"{base_url}/api/embed",
         data=payload, method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.load(resp)
             return data.get("embeddings") or data.get("embedding")
     except Exception as e:
@@ -194,7 +200,8 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
                               output_path: str, budget: int,
                               ollama_bin: str = "ollama",
                               soul_anchor: bool = False,
-                              chitta_bin: str = "chitta") -> int:
+                              chitta_bin: str = "chitta",
+                              base_url: str = "http://localhost:11434") -> int:
     """vocab_geometry for a local GGUF model via Ollama embeddings API.
 
     Reads the vocabulary from the GGUF header (no tensor data loaded), then
@@ -212,7 +219,7 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
     tokens = gguf_read_vocab(gguf_path)
     print(f"[harvest] GGUF vocab size: {len(tokens)}", flush=True)
 
-    if not _ollama_ensure_running(ollama_bin):
+    if not _ollama_ensure_running(ollama_bin, base_url=base_url):
         print("Error: could not start Ollama server.", file=sys.stderr)
         return 1
 
@@ -233,7 +240,7 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
     valid_tokens: list[str] = []
     for i in range(0, len(sampled), batch_size):
         batch = sampled[i:i+batch_size]
-        embs = _ollama_embed_batch(ollama_model, batch)
+        embs = _ollama_embed_batch(ollama_model, batch, base_url=base_url)
         if embs is None:
             continue
         for tok, emb in zip(batch, embs):
@@ -258,7 +265,7 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
             print(f"[harvest] soul-anchor: embedding {len(soul_texts)} memories ...", flush=True)
             for i in range(0, len(soul_texts), batch_size):
                 batch = soul_texts[i:i+batch_size]
-                embs = _ollama_embed_batch(ollama_model, batch)
+                embs = _ollama_embed_batch(ollama_model, batch, base_url=base_url)
                 if embs is None:
                     continue
                 for text, emb in zip(batch, embs):
@@ -803,7 +810,8 @@ def main():
             tag = ollama_tag or Path(args.gguf).parent.parent.name
             rc = mode_vocab_geometry_gguf(
                 args.gguf, tag, scope, args.output, budget, args.ollama_bin,
-                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin)
+                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin,
+                base_url=args.ollama_base_url)
         elif ollama_tag:
             gguf = _ollama_find_gguf(ollama_tag, args.ollama_bin)
             if not gguf:
@@ -814,7 +822,8 @@ def main():
             print(f"[harvest] found GGUF: {gguf}", flush=True)
             rc = mode_vocab_geometry_gguf(
                 gguf, ollama_tag, scope, args.output, budget, args.ollama_bin,
-                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin)
+                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin,
+                base_url=args.ollama_base_url)
         else:
             if not args.model:
                 p.error("either --model or --ollama-model (or --gguf) is required")
