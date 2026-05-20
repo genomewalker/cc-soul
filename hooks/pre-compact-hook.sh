@@ -24,12 +24,6 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 # Clear 65% compact sentinel so the next session (same or new id) can block again
 [[ -n "$REAL_SESSION_ID" ]] && rm -f "${MIND_PATH}/.compact_advised_${REAL_SESSION_ID}" 2>/dev/null || true
-# Clear read-dedup cache and soul-injection sentinels — compaction evicts context,
-# so previously-read file content is gone and re-reads must be allowed.
-[[ -n "$REAL_SESSION_ID" ]] && rm -f \
-    "${MIND_PATH}/.read_cache_${REAL_SESSION_ID}" \
-    "${MIND_PATH}/.soul_injected_${REAL_SESSION_ID}_"* \
-    2>/dev/null || true
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
@@ -340,14 +334,6 @@ if [[ -n "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$DISTILL_SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
     queue_write "distill_trigger" "{\"session_id\":\"$DISTILL_SESSION_ID\"}"
     echo "[distill] Triggered for $DISTILL_SESSION_ID" >&2
-fi
-
-# CEC: run consolidation_pass before compaction so Sequitur rules + HypothesisMarket
-# are fresh when the compacted context is restored.
-if [[ -x "$CHITTA_BIN" ]]; then
-    _cec_log="${CHITTA_DB_PATH:-$HOME/.claude/mind}/.cec_consolidation.log"
-    nohup "$CHITTA_BIN" consolidation_pass >"$_cec_log" 2>&1 &
-    echo "[cec] consolidation_pass launched pre-compact (pid $!)" >&2
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
