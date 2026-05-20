@@ -176,14 +176,35 @@ def _ollama_chat(model_tag: str, system: str, user: str, max_tokens: int = 384,
         return ""
 
 
+def _fetch_soul_memories(chitta_bin: str, n: int = 200) -> list[str]:
+    """Return up to n memory texts from chitta for soul-anchored seeding."""
+    try:
+        r = subprocess.run(
+            [chitta_bin, "recall", "--query", ".", "--limit", str(n), "--text-only"],
+            capture_output=True, text=True, timeout=30,
+        )
+        texts = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        return texts[:n]
+    except Exception as e:
+        print(f"[harvest] soul-anchor: could not fetch memories: {e}", flush=True)
+        return []
+
+
 def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
                               output_path: str, budget: int,
-                              ollama_bin: str = "ollama") -> int:
+                              ollama_bin: str = "ollama",
+                              soul_anchor: bool = False,
+                              chitta_bin: str = "chitta") -> int:
     """vocab_geometry for a local GGUF model via Ollama embeddings API.
 
     Reads the vocabulary from the GGUF header (no tensor data loaded), then
     queries Ollama /api/embed for batches of sampled tokens, assembles the
     embedding matrix E, and runs the same PCA pipeline as the HuggingFace path.
+
+    With --soul-anchor: existing soul memories are embedded and injected into
+    the matrix before SVD so the resulting directions span the semantic
+    neighbourhood of the mind's current content — a targeted constellation
+    rather than generic model geometry.
     """
     import numpy as np
 
@@ -222,6 +243,36 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
         if (i // batch_size + 1) % 10 == 0:
             print(f"[harvest] {len(rows)}/{len(sampled)} embeddings collected", flush=True)
 
+    # ── Soul-anchor: embed existing memories and inject into the matrix ──────
+    # The soul's existing content defines a constellation in model embedding
+    # space. By including those vectors before SVD, the principal directions
+    # are biased toward the semantic neighbourhood the mind already occupies —
+    # rather than generic model geometry.
+    soul_row_count = 0
+    if soul_anchor:
+        _cbin = os.path.expanduser(f"~/.claude/bin/{chitta_bin}") \
+            if not os.path.isabs(chitta_bin) else chitta_bin
+        print(f"[harvest] soul-anchor: fetching memories from {_cbin} ...", flush=True)
+        soul_texts = _fetch_soul_memories(_cbin, n=min(400, budget * 4))
+        if soul_texts:
+            print(f"[harvest] soul-anchor: embedding {len(soul_texts)} memories ...", flush=True)
+            for i in range(0, len(soul_texts), batch_size):
+                batch = soul_texts[i:i+batch_size]
+                embs = _ollama_embed_batch(ollama_model, batch)
+                if embs is None:
+                    continue
+                for text, emb in zip(batch, embs):
+                    if emb:
+                        # Weight soul vectors 3× to bias SVD toward mind content
+                        rows.extend([emb, emb, emb])
+                        valid_tokens.extend([f"[soul]", f"[soul]", f"[soul]"])
+                        soul_row_count += 1
+            print(f"[harvest] soul-anchor: injected {soul_row_count} memory vectors "
+                  f"(3× weight) into embedding matrix", flush=True)
+        else:
+            print("[harvest] soul-anchor: no memories returned, using random sampling only",
+                  flush=True)
+
     if not rows:
         print("Error: no embeddings returned from Ollama.", file=sys.stderr)
         return 1
@@ -241,7 +292,7 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
         scores = E_norm @ direction
         top_idx = scores.argsort()[-8:][::-1]
         top_toks = [valid_tokens[j] for j in top_idx
-                    if valid_tokens[j].strip()][:5]
+                    if valid_tokens[j].strip() and valid_tokens[j] != "[soul]"][:5]
         results.append({
             "feature_id": i,
             "direction": direction.tolist(),
@@ -259,6 +310,8 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
             "embed_dim": int(E.shape[1]),
             "vocab_size": len(tokens),
             "sampled_tokens": len(valid_tokens),
+            "soul_anchored": soul_anchor,
+            "soul_memory_vectors": soul_row_count,
             "directions": results,
         }, f, indent=2)
     print(f"[harvest] wrote {len(results)} semantic directions → {output_path}", flush=True)
@@ -725,6 +778,12 @@ def main():
                    help="Path to ollama binary (default: ollama in PATH)")
     p.add_argument("--ollama-base-url", default="http://localhost:11434",
                    help="Ollama API base URL (default: http://localhost:11434)")
+    p.add_argument("--soul-anchor", action="store_true",
+                   help="(vocab_geometry) embed existing soul memories via Ollama and inject "
+                        "them into the SVD matrix — directions span the mind's semantic "
+                        "neighbourhood rather than generic model geometry")
+    p.add_argument("--chitta-bin", default="chitta",
+                   help="chitta binary name or path (default: chitta)")
     p.add_argument("--ingest", action="store_true",
                    help="Push output summary to chitta memory after completion")
     args = p.parse_args()
@@ -743,9 +802,9 @@ def main():
         if args.gguf:
             tag = ollama_tag or Path(args.gguf).parent.parent.name
             rc = mode_vocab_geometry_gguf(
-                args.gguf, tag, scope, args.output, budget, args.ollama_bin)
+                args.gguf, tag, scope, args.output, budget, args.ollama_bin,
+                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin)
         elif ollama_tag:
-            # Auto-locate GGUF from Ollama model store
             gguf = _ollama_find_gguf(ollama_tag, args.ollama_bin)
             if not gguf:
                 print(f"Error: could not find GGUF for Ollama model '{ollama_tag}'. "
@@ -754,7 +813,8 @@ def main():
                 return 1
             print(f"[harvest] found GGUF: {gguf}", flush=True)
             rc = mode_vocab_geometry_gguf(
-                gguf, ollama_tag, scope, args.output, budget, args.ollama_bin)
+                gguf, ollama_tag, scope, args.output, budget, args.ollama_bin,
+                soul_anchor=args.soul_anchor, chitta_bin=args.chitta_bin)
         else:
             if not args.model:
                 p.error("either --model or --ollama-model (or --gguf) is required")
