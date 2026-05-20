@@ -32,6 +32,8 @@ GPU_URL="${GPU_URL:-http://dandygpun01fl:11434}"
 EMBED_MODEL="${EMBED_MODEL:-qwen2.5:32b}"
 SOUL_ANCHOR="${SOUL_ANCHOR:-0}"
 SCOPE="${SCOPE:-$OUT_DIR/harvest_targets.json}"
+MODEL_STRIDE="${MODEL_STRIDE:-1}"   # process every Nth model
+MODEL_OFFSET="${MODEL_OFFSET:-0}"   # starting index (0-based)
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -40,6 +42,8 @@ while [[ $# -gt 0 ]]; do
         --gpu-url)        GPU_URL="$2"; shift 2 ;;
         --out)            OUT_DIR="$2"; shift 2 ;;
         --embed-model)    EMBED_MODEL="$2"; shift 2 ;;
+        --stride)         MODEL_STRIDE="$2"; shift 2 ;;
+        --offset)         MODEL_OFFSET="$2"; shift 2 ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -107,10 +111,13 @@ mapfile -t MODELS < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
 echo "[harvest-all] found ${#MODELS[@]} Ollama models"
 
 # Harvest sequentially (each uses GPU embed — parallelising would OOM the GPU)
+# With --stride N --offset K: process models at indices K, K+N, K+2N, ...
 DONE=0
 FAILED=0
-for model in "${MODELS[@]}"; do
-    harvest_one "$model" && DONE=$((DONE+1)) || FAILED=$((FAILED+1))
+for idx in "${!MODELS[@]}"; do
+    [[ $(( (idx - MODEL_OFFSET) % MODEL_STRIDE )) -ne 0 ]] && continue
+    [[ $idx -lt $MODEL_OFFSET ]] && continue
+    harvest_one "${MODELS[$idx]}" && DONE=$((DONE+1)) || FAILED=$((FAILED+1))
 done
 
 echo "[harvest-all] harvest complete: $DONE done, $FAILED failed"
