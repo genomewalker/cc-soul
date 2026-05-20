@@ -52,9 +52,179 @@ Usage:
 
 import argparse
 import json
+import struct
 import sys
 import os
+import urllib.request
+import subprocess
+import time
 from pathlib import Path
+
+
+# ── GGUF header-only vocab reader ─────────────────────────────────────────────
+# Parses only the KV metadata section of a GGUF file (no tensor data loaded).
+# Returns the tokenizer.ggml.tokens list without ever touching the tensor bytes.
+
+_GGUF_MAGIC = 0x46554747  # "GGUF"
+_GGUF_TYPES = {0:"u8",1:"i8",2:"u16",3:"i16",4:"u32",5:"i32",
+               6:"f32",7:"bool",8:"str",9:"arr",10:"u64",11:"i64",12:"f64"}
+
+def _gguf_read_str(f) -> str:
+    (n,) = struct.unpack("<Q", f.read(8))
+    return f.read(n).decode("utf-8", errors="replace")
+
+def _gguf_read_val(f, vtype: int):
+    if vtype == 8:   return _gguf_read_str(f)
+    if vtype == 9:   # array
+        (et,) = struct.unpack("<I", f.read(4))
+        (cnt,) = struct.unpack("<Q", f.read(8))
+        return [_gguf_read_val(f, et) for _ in range(cnt)]
+    sizes = {0:1,1:1,2:2,3:2,4:4,5:4,6:4,7:1,10:8,11:8,12:8}
+    fmts  = {0:"B",1:"b",2:"H",3:"h",4:"I",5:"i",6:"f",7:"?",10:"Q",11:"q",12:"d"}
+    n = sizes[vtype]
+    (v,) = struct.unpack("<" + fmts[vtype], f.read(n))
+    return v
+
+def gguf_read_vocab(gguf_path: str) -> list[str]:
+    """Read tokenizer.ggml.tokens from a GGUF file without loading tensors."""
+    with open(gguf_path, "rb") as f:
+        magic, ver = struct.unpack("<II", f.read(8))
+        if magic != _GGUF_MAGIC:
+            raise ValueError(f"Not a GGUF file: {gguf_path}")
+        (n_tensors, n_kv) = struct.unpack("<QQ", f.read(16))
+        kv: dict = {}
+        for _ in range(n_kv):
+            key = _gguf_read_str(f)
+            (vtype,) = struct.unpack("<I", f.read(4))
+            val = _gguf_read_val(f, vtype)
+            kv[key] = val
+    tokens = kv.get("tokenizer.ggml.tokens", [])
+    return [t if isinstance(t, str) else str(t) for t in tokens]
+
+
+# ── Ollama embedding API ───────────────────────────────────────────────────────
+
+def _ollama_ensure_running(ollama_bin: str = "ollama") -> bool:
+    try:
+        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+        return True
+    except Exception:
+        pass
+    print("[harvest] starting ollama serve ...", flush=True)
+    subprocess.Popen([ollama_bin, "serve"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(20):
+        time.sleep(2)
+        try:
+            urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+            print("[harvest] ollama ready", flush=True)
+            return True
+        except Exception:
+            pass
+    return False
+
+def _ollama_embed_batch(model_tag: str, texts: list[str]) -> list[list[float]] | None:
+    payload = json.dumps({"model": model_tag, "input": texts}).encode()
+    req = urllib.request.Request(
+        "http://localhost:11434/api/embed",
+        data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.load(resp)
+            return data.get("embeddings") or data.get("embedding")
+    except Exception as e:
+        print(f"[harvest] ollama embed error: {e}", flush=True)
+        return None
+
+
+def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
+                              output_path: str, budget: int) -> int:
+    """vocab_geometry for a local GGUF model via Ollama embeddings API.
+
+    Reads the vocabulary from the GGUF header (no tensor data loaded), then
+    queries Ollama /api/embed for batches of sampled tokens, assembles the
+    embedding matrix E, and runs the same PCA pipeline as the HuggingFace path.
+    """
+    import numpy as np
+
+    print(f"[harvest] reading GGUF vocab from {gguf_path} ...", flush=True)
+    tokens = gguf_read_vocab(gguf_path)
+    print(f"[harvest] GGUF vocab size: {len(tokens)}", flush=True)
+
+    if not _ollama_ensure_running():
+        print("Error: could not start Ollama server.", file=sys.stderr)
+        return 1
+
+    # Sample up to 8192 tokens for the embedding matrix
+    import random
+    rng = random.Random(42)
+    sample_size = min(8192, budget * 32, len(tokens))
+    sampled = rng.sample(tokens, sample_size)
+    # Always include common words to anchor the geometry
+    anchors = ["the","of","and","in","to","is","that","it","was","he",
+               "she","they","we","you","for","on","are","with","as","at"]
+    sampled = list(dict.fromkeys(anchors + sampled))[:sample_size]
+
+    print(f"[harvest] querying Ollama/{ollama_model} embeddings for {len(sampled)} tokens ...",
+          flush=True)
+    batch_size = 64
+    rows: list[list[float]] = []
+    valid_tokens: list[str] = []
+    for i in range(0, len(sampled), batch_size):
+        batch = sampled[i:i+batch_size]
+        embs = _ollama_embed_batch(ollama_model, batch)
+        if embs is None:
+            continue
+        for tok, emb in zip(batch, embs):
+            if emb:
+                rows.append(emb)
+                valid_tokens.append(tok)
+        if (i // batch_size + 1) % 10 == 0:
+            print(f"[harvest] {len(rows)}/{len(sampled)} embeddings collected", flush=True)
+
+    if not rows:
+        print("Error: no embeddings returned from Ollama.", file=sys.stderr)
+        return 1
+
+    E = np.array(rows, dtype=np.float32)
+    print(f"[harvest] embedding matrix: {E.shape}", flush=True)
+
+    norms = np.linalg.norm(E, axis=1, keepdims=True)
+    E_norm = E / (norms + 1e-9)
+
+    n_components = min(256, budget, E_norm.shape[0], E_norm.shape[1])
+    _, _, Vt = np.linalg.svd(E_norm, full_matrices=False)
+    directions = Vt[:n_components]
+
+    results = []
+    for i, direction in enumerate(directions):
+        scores = E_norm @ direction
+        top_idx = scores.argsort()[-8:][::-1]
+        top_toks = [valid_tokens[j] for j in top_idx
+                    if valid_tokens[j].strip()][:5]
+        results.append({
+            "feature_id": i,
+            "direction": direction.tolist(),
+            "top_tokens": top_toks,
+            "provenance": "ow_distilled",
+            "source_model": ollama_model,
+        })
+
+    with open(output_path, "w") as f:
+        json.dump({
+            "mode": "vocab_geometry",
+            "n_directions": len(results),
+            "source_model": ollama_model,
+            "gguf_path": gguf_path,
+            "embed_dim": int(E.shape[1]),
+            "vocab_size": len(tokens),
+            "sampled_tokens": len(valid_tokens),
+            "directions": results,
+        }, f, indent=2)
+    print(f"[harvest] wrote {len(results)} semantic directions → {output_path}", flush=True)
+    return 0
 
 
 def load_scope(scope_path: str) -> dict:
@@ -437,11 +607,11 @@ def _ingest(output_path: str, provenance: str) -> None:
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", required=True, help="HuggingFace model name or local path")
+    p.add_argument("--model", default="",
+                   help="HuggingFace model name or local path (not needed with --gguf)")
     p.add_argument("--mode", required=True,
                    choices=["vocab_geometry", "triplet_extract", "feature_dict"])
     p.add_argument("--provenance", default="ow_distilled",
@@ -453,9 +623,18 @@ def main():
     p.add_argument("--output", default="harvest_out.json", help="Output file path")
     p.add_argument("--n-features", type=int, default=128,
                    help="(feature_dict) number of dictionary features to learn (default: 128)")
+    p.add_argument("--gguf", default="",
+                   help="(vocab_geometry) path to local GGUF blob; uses Ollama API for embeddings")
+    p.add_argument("--ollama-model", default="",
+                   help="(vocab_geometry --gguf) Ollama model tag, e.g. gemma4:26b")
+    p.add_argument("--ollama-bin", default="ollama",
+                   help="Path to ollama binary (default: ollama in PATH)")
     p.add_argument("--ingest", action="store_true",
                    help="Push output summary to chitta memory after completion")
     args = p.parse_args()
+
+    if not args.model and not args.gguf:
+        p.error("either --model or --gguf is required")
 
     scope = load_scope(args.scope)
     budget = scope.get("harvest_budget_items", 100)
@@ -463,11 +642,20 @@ def main():
           flush=True)
 
     if args.mode == "vocab_geometry":
-        rc = mode_vocab_geometry(args.model, scope, args.output, budget)
+        if args.gguf:
+            ollama_tag = args.ollama_model or Path(args.gguf).parent.parent.name
+            rc = mode_vocab_geometry_gguf(
+                args.gguf, ollama_tag, scope, args.output, budget)
+        else:
+            rc = mode_vocab_geometry(args.model, scope, args.output, budget)
     elif args.mode == "triplet_extract":
+        if not args.model:
+            p.error("--model is required for triplet_extract")
         rc = mode_triplet_extract(
             args.model, args.corpus, scope, args.output, args.provenance, budget)
     elif args.mode == "feature_dict":
+        if not args.model:
+            p.error("--model is required for feature_dict")
         rc = mode_feature_dict(
             args.model, args.corpus, scope, args.output, args.n_features, budget)
     else:
@@ -479,7 +667,5 @@ def main():
         _ingest(args.output, args.provenance)
 
     return rc
-
-
 if __name__ == "__main__":
     sys.exit(main())
