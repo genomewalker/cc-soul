@@ -123,6 +123,21 @@ def _ollama_ensure_running(ollama_bin: str = "ollama") -> bool:
             pass
     return False
 
+def _ollama_find_gguf(model_tag: str, ollama_bin: str = "ollama") -> str | None:
+    """Locate the local GGUF blob for an Ollama model via `ollama show --modelfile`."""
+    try:
+        r = subprocess.run([ollama_bin, "show", "--modelfile", model_tag],
+                           capture_output=True, text=True, timeout=15)
+        for line in r.stdout.splitlines():
+            if line.startswith("FROM "):
+                path = line[5:].strip()
+                if Path(path).exists():
+                    return path
+    except Exception:
+        pass
+    return None
+
+
 def _ollama_embed_batch(model_tag: str, texts: list[str]) -> list[list[float]] | None:
     payload = json.dumps({"model": model_tag, "input": texts}).encode()
     req = urllib.request.Request(
@@ -139,8 +154,31 @@ def _ollama_embed_batch(model_tag: str, texts: list[str]) -> list[list[float]] |
         return None
 
 
+def _ollama_chat(model_tag: str, system: str, user: str, max_tokens: int = 384,
+                 base_url: str = "http://localhost:11434") -> str:
+    """Call Ollama /api/chat and return the assistant message text."""
+    payload = json.dumps({
+        "model": model_tag,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user",   "content": user}],
+        "stream": False,
+        "options": {"num_predict": max_tokens, "temperature": 0},
+    }).encode()
+    req = urllib.request.Request(
+        f"{base_url}/api/chat", data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.load(resp).get("message", {}).get("content", "")
+    except Exception as e:
+        print(f"[harvest] ollama chat error: {e}", flush=True)
+        return ""
+
+
 def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
-                              output_path: str, budget: int) -> int:
+                              output_path: str, budget: int,
+                              ollama_bin: str = "ollama") -> int:
     """vocab_geometry for a local GGUF model via Ollama embeddings API.
 
     Reads the vocabulary from the GGUF header (no tensor data loaded), then
@@ -153,7 +191,7 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
     tokens = gguf_read_vocab(gguf_path)
     print(f"[harvest] GGUF vocab size: {len(tokens)}", flush=True)
 
-    if not _ollama_ensure_running():
+    if not _ollama_ensure_running(ollama_bin):
         print("Error: could not start Ollama server.", file=sys.stderr)
         return 1
 
@@ -408,6 +446,62 @@ def mode_triplet_extract(model_name: str, corpus_path: str, scope: dict,
     return 0
 
 
+def mode_triplet_extract_ollama(ollama_model: str, corpus_path: str, scope: dict,
+                                output_path: str, provenance: str, budget: int,
+                                ollama_bin: str = "ollama",
+                                base_url: str = "http://localhost:11434") -> int:
+    """Generate (S,P,O) triplets from a domain corpus via Ollama /api/chat.
+
+    Drop-in replacement for mode_triplet_extract — no transformers/torch required.
+    """
+    if not corpus_path or not Path(corpus_path).exists():
+        print(f"Error: corpus not found: {corpus_path}", file=sys.stderr)
+        return 1
+
+    if not _ollama_ensure_running(ollama_bin):
+        print("Error: could not start Ollama server.", file=sys.stderr)
+        return 1
+
+    target_patterns = [m.get("pattern", "") for m in scope.get("top_router_misses", [])]
+    focus = ", ".join(target_patterns[:5]) if target_patterns else "general factual knowledge"
+
+    corpus = Path(corpus_path).read_text(encoding="utf-8", errors="replace")
+    chunk_size = 600
+    chunks = [corpus[i:i+chunk_size].strip()
+              for i in range(0, len(corpus), chunk_size)
+              if corpus[i:i+chunk_size].strip()]
+
+    print(f"[harvest] triplet_extract via Ollama/{ollama_model}, "
+          f"{min(len(chunks), budget)} chunks (focus: {focus})", flush=True)
+
+    results = []
+    for i, chunk in enumerate(chunks[:budget]):
+        user_msg = _TRIPLET_USER_TMPL.format(focus=focus, chunk=chunk)
+        out = _ollama_chat(ollama_model, _TRIPLET_SYSTEM, user_msg, base_url=base_url)
+        for line in out.strip().splitlines():
+            line = line.strip().lstrip("- ").strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                t = json.loads(line)
+                if all(k in t for k in ("subject", "predicate", "object")):
+                    t["provenance"] = provenance
+                    t["source_model"] = ollama_model
+                    t.setdefault("confidence", 0.6)
+                    results.append(t)
+            except json.JSONDecodeError:
+                pass
+        if (i + 1) % 10 == 0:
+            print(f"[harvest] {i+1}/{min(len(chunks), budget)} chunks, "
+                  f"{len(results)} triplets", flush=True)
+
+    with open(output_path, "w") as f:
+        for r in results:
+            f.write(json.dumps(r) + "\n")
+    print(f"[harvest] wrote {len(results)} triplets → {output_path}", flush=True)
+    return 0
+
+
 # ── Mode: feature_dict ────────────────────────────────────────────────────────
 
 def _probe_sentences(scope: dict) -> list[str]:
@@ -629,6 +723,8 @@ def main():
                    help="(vocab_geometry --gguf) Ollama model tag, e.g. gemma4:26b")
     p.add_argument("--ollama-bin", default="ollama",
                    help="Path to ollama binary (default: ollama in PATH)")
+    p.add_argument("--ollama-base-url", default="http://localhost:11434",
+                   help="Ollama API base URL (default: http://localhost:11434)")
     p.add_argument("--ingest", action="store_true",
                    help="Push output summary to chitta memory after completion")
     args = p.parse_args()
@@ -641,19 +737,44 @@ def main():
     print(f"[harvest] scope: diagnosis={scope.get('turiya_diagnosis','unknown')} budget={budget}",
           flush=True)
 
+    ollama_tag = args.ollama_model  # non-empty → Ollama path
+
     if args.mode == "vocab_geometry":
         if args.gguf:
-            ollama_tag = args.ollama_model or Path(args.gguf).parent.parent.name
+            tag = ollama_tag or Path(args.gguf).parent.parent.name
             rc = mode_vocab_geometry_gguf(
-                args.gguf, ollama_tag, scope, args.output, budget)
+                args.gguf, tag, scope, args.output, budget, args.ollama_bin)
+        elif ollama_tag:
+            # Auto-locate GGUF from Ollama model store
+            gguf = _ollama_find_gguf(ollama_tag, args.ollama_bin)
+            if not gguf:
+                print(f"Error: could not find GGUF for Ollama model '{ollama_tag}'. "
+                      f"Run `ollama pull {ollama_tag}` first, or pass --gguf explicitly.",
+                      file=sys.stderr)
+                return 1
+            print(f"[harvest] found GGUF: {gguf}", flush=True)
+            rc = mode_vocab_geometry_gguf(
+                gguf, ollama_tag, scope, args.output, budget, args.ollama_bin)
         else:
+            if not args.model:
+                p.error("either --model or --ollama-model (or --gguf) is required")
             rc = mode_vocab_geometry(args.model, scope, args.output, budget)
     elif args.mode == "triplet_extract":
-        if not args.model:
-            p.error("--model is required for triplet_extract")
-        rc = mode_triplet_extract(
-            args.model, args.corpus, scope, args.output, args.provenance, budget)
+        if ollama_tag:
+            rc = mode_triplet_extract_ollama(
+                ollama_tag, args.corpus, scope, args.output, args.provenance,
+                budget, args.ollama_bin, args.ollama_base_url)
+        else:
+            if not args.model:
+                p.error("--model or --ollama-model is required for triplet_extract")
+            rc = mode_triplet_extract(
+                args.model, args.corpus, scope, args.output, args.provenance, budget)
     elif args.mode == "feature_dict":
+        if ollama_tag:
+            print("Note: feature_dict requires internal model activations — "
+                  "Ollama API does not expose these. Use --model for this mode.",
+                  file=sys.stderr)
+            return 1
         if not args.model:
             p.error("--model is required for feature_dict")
         rc = mode_feature_dict(
