@@ -6,8 +6,15 @@ Run after each constellation rebuild:
     --input /path/to/constellation.json \
     --output docs/constellation-data.json
 """
-import argparse, json, sys
+import argparse, json, re, sys
 from pathlib import Path
+
+
+def clean_token(t: str) -> str:
+    """Strip BPE/SentencePiece prefix chars and normalize for display."""
+    t = t.lstrip("Ġ▁Ċ").strip()
+    t = re.sub(r"[\x00-\x1f\x7f]", "", t)  # remove control chars
+    return t
 
 
 def main() -> int:
@@ -21,9 +28,13 @@ def main() -> int:
 
     dirs = []
     for d in c.get("directions", []):
+        raw_tokens = d["top_tokens"][:8]
+        clean_tokens = [t for t in (clean_token(t) for t in raw_tokens) if t][:6]
+        if not clean_tokens:
+            continue
         dirs.append({
             "id":               d["feature_id"],
-            "tokens":           d["top_tokens"][:6],
+            "tokens":           clean_tokens,
             "consensus":        round(d.get("consensus_score", 0), 3),
             "n_models":         d.get("n_supporting_models", 1),
             "models":           d.get("supporting_models", []),
