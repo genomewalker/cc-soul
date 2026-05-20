@@ -176,8 +176,8 @@
   <div class="stat-row reveal" id="stat-row">
     <div class="stat-box"><div class="val" id="stat-dirs">—</div><div class="lbl">directions</div></div>
     <div class="stat-box"><div class="val" id="stat-models">—</div><div class="lbl">source models</div></div>
-    <div class="stat-box"><div class="val" id="stat-consensus">—</div><div class="lbl">cross-model directions</div></div>
-    <div class="stat-box"><div class="val" id="stat-bio">—</div><div class="lbl">bio-model directions</div></div>
+    <div class="stat-box"><div class="val" id="stat-consensus">—</div><div class="lbl">cross-model (≥2)</div></div>
+    <div class="stat-box"><div class="val" id="stat-unique">—</div><div class="lbl">unique to one model</div></div>
   </div>
 
   <div class="controls reveal">
@@ -185,6 +185,7 @@
     <button class="ctrl-btn active" data-color="consensus" onclick="setColor('consensus',this)">color: consensus</button>
     <button class="ctrl-btn" data-color="family" onclick="setColor('family',this)">color: model family</button>
     <button class="ctrl-btn" id="btn-links" onclick="toggleLinks(this)">show links</button>
+    <button class="ctrl-btn" id="btn-filter" onclick="toggleFilter(this)">show cross-model only</button>
     <button class="ctrl-btn" onclick="resetZoom()">reset view</button>
   </div>
 
@@ -290,6 +291,20 @@ function toggleLinks(btn) {
   svg.selectAll(".c-link").style("display", showLinks ? null : "none");
 }
 
+let filterCrossModel = false;
+function toggleFilter(btn) {
+  filterCrossModel = !filterCrossModel;
+  btn.classList.toggle('active', filterCrossModel);
+  svg.selectAll(".c-node")
+    .style("display", d => filterCrossModel && d.n_models < 2 ? "none" : null);
+  svg.selectAll(".c-link")
+    .style("display", d => {
+      if (!showLinks) return "none";
+      if (filterCrossModel && (d.source.n_models < 2 || d.target.n_models < 2)) return "none";
+      return null;
+    });
+}
+
 function resetZoom() { svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity); }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -311,6 +326,7 @@ function init(data) {
   const nodes = data.directions;
   const nModels = data.n_input_models || data.source_models?.length || 0;
   const nConsensus = nodes.filter(d => d.n_models >= 2).length;
+  const nUnique = nodes.filter(d => d.n_models < 2).length;
   const nBio = nodes.filter(d => d.models.some(m =>
     ["esm","dnabert","nucleotide","prot_t5"].some(k => m.toLowerCase().includes(k))
   )).length;
@@ -318,7 +334,7 @@ function init(data) {
   document.getElementById("stat-dirs").textContent    = nodes.length;
   document.getElementById("stat-models").textContent  = nModels;
   document.getElementById("stat-consensus").textContent = nConsensus;
-  document.getElementById("stat-bio").textContent     = nBio;
+  document.getElementById("stat-unique").textContent   = nUnique;
 
   // Build Jaccard edges for top 3 tokens between nodes (cheap proxy for semantic proximity)
   const edges = [];
