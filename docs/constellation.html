@@ -204,15 +204,21 @@
   <div style="margin-top:var(--space-8)" class="reveal">
     <h2 class="heading-section" style="margin-bottom:var(--space-5)">What is the constellation?</h2>
     <p style="max-width:660px;line-height:1.8;color:var(--ash-300)">
-      Each node is a <strong style="color:var(--lotus-200)">semantic direction</strong> — a unit vector in the HDC
-      embedding space that represents a principal axis of meaning, extracted via SVD from the token
-      embedding matrices of open-weight language models. Directions agreed on by multiple model families
-      carry higher consensus and are seeded first into the codebook.
+      Each <strong style="color:var(--lotus-200)">node</strong> is a semantic direction — a principal axis of meaning
+      extracted via SVD from the token embedding matrices of open-weight language models. Its label shows
+      the most representative tokens for that concept. Directions shared by multiple model families
+      (brighter nodes) have higher consensus and are seeded first into the codebook.
+    </p>
+    <p style="max-width:660px;line-height:1.8;color:var(--ash-300);margin-top:var(--space-4)">
+      <strong style="color:var(--lotus-200)">Edges</strong> connect directions whose top tokens overlap (Jaccard ≥ 0.34) —
+      they represent the same concept seen from different angles. The layout is a 2D force-directed
+      projection of this similarity graph, <em>not</em> a projection of the actual high-dimensional vector geometry.
+      Use <em>show cross-model only</em> to hide single-model directions and see the shared semantic skeleton.
     </p>
     <p style="max-width:660px;line-height:1.8;color:var(--ash-300);margin-top:var(--space-4)">
       When chitta stores a memory, its tokens are projected onto the nearest codebook directions to form
       a binary <strong style="color:var(--lotus-200)">hypervector</strong>. Recall queries follow the same path —
-      the Hamming distance between hypervectors is what makes "CRISPR" find "endonuclease" without
+      Hamming distance between hypervectors is what makes "CRISPR" find "endonuclease" without
       keyword overlap. The constellation is the coordinate system that makes this possible before any
       memories exist.
     </p>
@@ -406,7 +412,7 @@ function init(data) {
     });
     node.selectAll("text").attr("opacity", d => {
       if (!q) return 0.7;
-      return d.tokens.some(t => t.toLowerCase().replace(/^[Ġ▁]/,"").includes(q)) ? 1 : 0.1;
+      return d.tokens.some(t => t.toLowerCase().includes(q)) ? 1 : 0.1;
     });
   });
 

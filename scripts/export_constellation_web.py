@@ -28,8 +28,8 @@ def main() -> int:
 
     dirs = []
     for d in c.get("directions", []):
-        raw_tokens = d["top_tokens"][:8]
-        clean_tokens = [t for t in (clean_token(t) for t in raw_tokens) if t][:6]
+        raw_tokens = d["top_tokens"][:16]
+        clean_tokens = [t for t in (clean_token(t) for t in raw_tokens) if t][:12]
         if not clean_tokens:
             continue
         dirs.append({
