@@ -40,10 +40,16 @@ def load_geometry(path: str) -> dict | None:
         return None
 
 
+def _normalize_token(t: str) -> str:
+    """Strip BPE/SentencePiece prefix chars so cross-family tokens cluster."""
+    t = t.lstrip("Ġ▁Ċ")  # GPT-2/RoBERTa Ġ, SentencePiece ▁, newline Ċ
+    return t.lower().strip()
+
+
 def token_overlap_score(toks_a: list[str], toks_b: list[str]) -> float:
     """Jaccard similarity between two top-token lists."""
-    a, b = set(t.lower().strip() for t in toks_a if t.strip()), \
-           set(t.lower().strip() for t in toks_b if t.strip())
+    a = {_normalize_token(t) for t in toks_a if _normalize_token(t)}
+    b = {_normalize_token(t) for t in toks_b if _normalize_token(t)}
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)

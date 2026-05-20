@@ -298,9 +298,9 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
     results = []
     for i, direction in enumerate(directions):
         scores = E_norm @ direction
-        top_idx = scores.argsort()[-8:][::-1]
+        top_idx = scores.argsort()[-20:][::-1]
         top_toks = [valid_tokens[j] for j in top_idx
-                    if valid_tokens[j].strip() and valid_tokens[j] != "[soul]"][:5]
+                    if valid_tokens[j].strip() and valid_tokens[j] != "[soul]"][:16]
         results.append({
             "feature_id": i,
             "direction": direction.tolist(),
@@ -473,10 +473,10 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
     results = []
     for i, direction in enumerate(directions):
         scores = E_norm @ direction
-        top_idx = np.argsort(scores)[-8:][::-1]
+        top_idx = np.argsort(scores)[-20:][::-1]
         # For bio models with tiny vocab, include all token IDs in range
         top_tokens = [t for j in top_idx
-                      if j < vocab_size and (t := _decode_token(int(j)))][:5]
+                      if j < vocab_size and (t := _decode_token(int(j)))][:16]
         results.append({
             "feature_id": i,
             "direction": direction.tolist(),
@@ -801,8 +801,8 @@ def mode_feature_dict(model_name: str, corpus_path: str, scope: dict,
     for i, feat_dir in enumerate(dictionary):
         feat_norm = feat_dir / (np.linalg.norm(feat_dir) + 1e-9)
         scores = E_norm @ feat_norm
-        top_idx = np.argsort(scores)[-8:][::-1]
-        top_tokens = [t for j in top_idx if (t := _decode_token(int(j)))][:5]
+        top_idx = np.argsort(scores)[-20:][::-1]
+        top_tokens = [t for j in top_idx if (t := _decode_token(int(j)))][:16]
         freq = float(np.mean(np.abs(A_norm @ feat_norm) > 0.1))
         features.append({
             "feature_id": i,
