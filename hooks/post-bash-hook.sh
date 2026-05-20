@@ -25,12 +25,6 @@ command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
 output=$(echo "$STDIN_DATA" | jq -r '.tool_result.stdout // empty' | head -c 500)
 stderr=$(echo "$STDIN_DATA" | jq -r '.tool_result.stderr // empty' | head -c 500)
 
-# CEC: log bash event to EventTape + CDAWG (fire-and-forget, non-blocking)
-_cec_outcome=$([ "$exit_code" = "0" ] && echo 0 || echo 1)
-_cec_entity=$(echo "$command" | awk '{print $1}' | sed 's|.*/||' | head -c 80)
-[[ -n "$_cec_entity" ]] && timeout 0.5 "$CHITTA_BIN" log_event --tool "bash" \
-    --entity "$_cec_entity" --outcome "$_cec_outcome" --ts_ms "$(date +%s%3N)" >/dev/null 2>&1 &
-
 # Normalize command to first word (basename only)
 normalize_cmd() {
     echo "$1" | awk '{print $1}' | sed 's|.*/||'
@@ -129,6 +123,60 @@ import sys,json; d=json.load(sys.stdin)
         fi
     fi
     # ── End task ledger ──────────────────────────────────────────────────────
+
+    # ── Auto-store milestone: significant state-changing events ──────────────
+    # Detects git commit, successful build, test pass, SLURM submit —
+    # stores a category:milestone memory so sessions never silently lose state.
+    _milestone_title=""
+    _milestone_content=""
+    _combined_out="${output}${stderr}"
+
+    if echo "$command" | grep -qE '^\s*git\s+commit(\s|$)'; then
+        _msg=$(echo "$command" | grep -oE -- "-m\s+['\"]?[^'\"]+['\"]?" | sed "s/-m\s*['\"]//;s/['\"]$//" | head -c 120)
+        [[ -z "$_msg" ]] && _msg=$(echo "$output" | grep -oE '\[.+\]' | head -1)
+        _milestone_title="git commit: ${_msg:-committed}"
+        _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        _hash=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+        _milestone_content="branch:$_branch commit:$_hash cmd:${command:0:200}"
+
+    elif echo "$command" | grep -qE '(cargo\s+(build|test|install)|cmake\s+--build|make\b)' \
+         && ! echo "$_combined_out" | grep -qiE '(error\[E[0-9]|undefined reference|FAILED|ld: )'; then
+        _proj=$(basename "$(pwd)")
+        if echo "$command" | grep -q "test"; then
+            _passed=$(echo "$_combined_out" | grep -oE '[0-9]+ passed' | tail -1)
+            _milestone_title="tests passed: $_proj ${_passed}"
+        else
+            _milestone_title="build succeeded: $_proj"
+        fi
+        _milestone_content="cmd:${command:0:200} cwd:$(pwd)"
+
+    elif echo "$command" | grep -qE '^\s*(sbatch|srun)\s' \
+         && echo "$_combined_out" | grep -qE 'Submitted batch job [0-9]+'; then
+        _job_id=$(echo "$_combined_out" | grep -oE 'Submitted batch job [0-9]+' | grep -oE '[0-9]+$')
+        _milestone_title="SLURM job submitted: job_id=$_job_id"
+        _milestone_content="cmd:${command:0:200} job_id:$_job_id cwd:$(pwd)"
+
+    elif echo "$command" | grep -qE '(pytest|python.*-m\s+pytest|Rscript.*test)' \
+         && echo "$_combined_out" | grep -qE '[0-9]+ passed'; then
+        _passed=$(echo "$_combined_out" | grep -oE '[0-9]+ passed' | tail -1)
+        _milestone_title="tests passed: $_passed"
+        _milestone_content="cmd:${command:0:200} cwd:$(pwd)"
+    fi
+
+    if [[ -n "$_milestone_title" ]]; then
+        _realm=""
+        _cwd=$(pwd 2>/dev/null || echo "")
+        [[ "$_cwd" == *"/repos/"* ]] && _realm=$(echo "$_cwd" | grep -oE '/repos/[^/]+' | sed 's|/repos/||')
+        _title_json=$(printf '%s' "$_milestone_title" | jq -Rs .)
+        _content_json=$(printf '%s' "$_milestone_content" | jq -Rs .)
+        _realm_json=$(printf '%s' "$_realm" | jq -Rs .)
+        queue_write "remember" \
+            "{\"title\":$_title_json,\"content\":$_content_json,\"category\":\"milestone\",\"realm\":$_realm_json,\"tags\":[\"auto-milestone\"],\"visibility\":1}" \
+            2>/dev/null || true
+        # Signal to prompt-core.sh that storage happened this turn
+        echo "$(date +%s)" > "$MIND_PATH/.last_auto_store_ts" 2>/dev/null || true
+    fi
+    # ── End milestone auto-store ──────────────────────────────────────────────
 
     # Read previous command if exists
     if [[ -f "$LAST_CMD_FILE" ]]; then

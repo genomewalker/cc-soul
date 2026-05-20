@@ -32,6 +32,19 @@ QueueProcessor::QueueProcessor(FieldStore& field_store,
 {}
 
 void QueueProcessor::start() {
+    // Recover from crash: if a .processing file exists, rename it back to queue
+    // so the items are reprocessed rather than lost.
+    std::string processing_path = queue_path_ + ".processing";
+    if (std::ifstream(processing_path).good()) {
+        // Append recovered items to any existing queue file
+        std::ifstream src(processing_path, std::ios::binary);
+        std::ofstream dst(queue_path_, std::ios::binary | std::ios::app);
+        dst << src.rdbuf();
+        src.close();
+        dst.close();
+        std::remove(processing_path.c_str());
+        std::cerr << "[queue] crash recovery: re-queued items from " << processing_path << "\n";
+    }
     thread_ = std::thread([this]() { run(); });
 }
 
@@ -122,10 +135,10 @@ void QueueProcessor::run() {
             }
         }
 
-        // Remove processed file
-        std::remove(processing_path.c_str());
-
-        if (lines.empty()) continue;
+        if (lines.empty()) {
+            std::remove(processing_path.c_str());
+            continue;
+        }
 
         // Process each queued request — all writes go to chitta-field
         for (const auto& line : lines) {
@@ -483,7 +496,10 @@ void QueueProcessor::run() {
             }
         }
 
-        if (verbose_mode && !lines.empty()) {
+        // Remove after successful processing — crash before this leaves .processing for recovery
+        std::remove(processing_path.c_str());
+
+        if (verbose_mode) {
             std::cerr << "[queue] Processed " << lines.size() << " items, total=" << queue_count_ << "\n";
         }
     }
