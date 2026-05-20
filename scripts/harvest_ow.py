@@ -354,32 +354,111 @@ def _import_stack(extras: list[str] = []) -> tuple:
 
 # ── Mode: vocab_geometry ──────────────────────────────────────────────────────
 
-def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: int) -> int:
+def _extract_embedding_matrix(model, torch) -> "np.ndarray | None":
+    """Extract static token embedding matrix from any HuggingFace model.
+
+    Tries common attribute paths across causal LM, BERT, ESM, T5, and
+    encoder-decoder architectures. Returns float32 numpy array (vocab, d).
+    """
+    import numpy as np
+    candidates = [
+        lambda m: m.get_input_embeddings().weight,
+        lambda m: m.embeddings.word_embeddings.weight,
+        lambda m: m.shared.weight,          # T5 / mT5
+        lambda m: m.encoder.embed_tokens.weight,
+        lambda m: m.model.embed_tokens.weight,
+        lambda m: m.transformer.wte.weight,
+    ]
+    for fn in candidates:
+        try:
+            w = fn(model)
+            if w is not None:
+                return w.detach().float().numpy()
+        except (AttributeError, TypeError):
+            continue
+    return None
+
+
+def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: int,
+                        augment_seqs: str = "") -> int:
     """Extract top semantic direction clusters from embedding matrix E.
 
-    No forward passes — only reads the embedding weight matrix, normalises it,
-    runs randomised SVD on a 8192-token sample, and finds top-5 tokens per
-    principal direction. Pure numpy; no GPU needed.
+    Works with causal LMs, BERT/ESM encoders, T5, and protein/DNA models.
+
+    For small-vocab models (protein/DNA, vocab ≤ 256): uses ALL tokens
+    and augments with mean-pooled contextual embeddings from example
+    sequences if --augment-seqs is provided (path to a FASTA or plain
+    text file, one sequence per line).
     """
     m = _import_stack()
     torch, np = m["torch"], m["np"]
     AutoTokenizer, AutoModel = m["AutoTokenizer"], m["AutoModel"]
 
     print(f"[harvest] loading {model_name} for vocab_geometry ...", flush=True)
-    tok = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16)
-    E = model.get_input_embeddings().weight.detach().float().numpy()  # (vocab, d)
-    del model
-    print(f"[harvest] embedding matrix shape: {E.shape}", flush=True)
+    tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    try:
+        model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16,
+                                          trust_remote_code=True)
+    except Exception:
+        model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
 
+    E_raw = _extract_embedding_matrix(model, torch)
+    if E_raw is None:
+        print(f"Error: could not extract embedding matrix from {model_name}",
+              file=sys.stderr)
+        return 1
+    print(f"[harvest] static embedding matrix: {E_raw.shape}", flush=True)
+
+    rows = list(E_raw)
+    vocab_size = E_raw.shape[0]
+    is_small_vocab = vocab_size <= 512  # protein/DNA models
+
+    # For small-vocab bio models: augment with contextual embeddings from
+    # example sequences — captures evolutionary/structural information that
+    # static token embeddings alone miss.
+    if is_small_vocab and augment_seqs and Path(augment_seqs).exists():
+        print(f"[harvest] small vocab ({vocab_size}) — augmenting with contextual "
+              f"embeddings from {augment_seqs} ...", flush=True)
+        seqs = []
+        with open(augment_seqs) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith(">"):  # skip FASTA headers
+                    seqs.append(line[:512])   # cap length
+        if seqs:
+            model.eval()
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = model.to(device)
+            with torch.no_grad():
+                for seq in seqs[:min(500, budget * 5)]:
+                    try:
+                        enc = tok(seq, return_tensors="pt", truncation=True,
+                                  max_length=512).to(device)
+                        out = model(**enc)
+                        # mean-pool last hidden state
+                        vec = out.last_hidden_state.mean(dim=1).squeeze()
+                        rows.append(vec.cpu().float().numpy())
+                    except Exception:
+                        continue
+            print(f"[harvest] augmented to {len(rows)} vectors", flush=True)
+        model = model.cpu()
+
+    del model
+
+    E = np.array(rows, dtype=np.float32)
     norms = np.linalg.norm(E, axis=1, keepdims=True)
     E_norm = E / (norms + 1e-9)
 
-    n_components = min(256, budget, E_norm.shape[0], E_norm.shape[1])
-    sample_size = min(8192, E_norm.shape[0])
-    rng = np.random.default_rng(42)
-    idx = rng.choice(E_norm.shape[0], sample_size, replace=False)
-    _, _, Vt = np.linalg.svd(E_norm[idx], full_matrices=False)
+    # For small vocab, use all rows; otherwise sample up to 8192.
+    if is_small_vocab:
+        sample_idx = np.arange(len(rows))
+    else:
+        sample_size = min(8192, len(rows))
+        rng = np.random.default_rng(42)
+        sample_idx = rng.choice(len(rows), sample_size, replace=False)
+
+    n_components = min(256, budget, len(sample_idx), E_norm.shape[1])
+    _, _, Vt = np.linalg.svd(E_norm[sample_idx], full_matrices=False)
     directions = Vt[:n_components]
 
     def _decode_token(tid: int) -> str:
@@ -392,7 +471,9 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
     for i, direction in enumerate(directions):
         scores = E_norm @ direction
         top_idx = np.argsort(scores)[-8:][::-1]
-        top_tokens = [t for j in top_idx if (t := _decode_token(int(j)))][:5]
+        # For bio models with tiny vocab, include all token IDs in range
+        top_tokens = [t for j in top_idx
+                      if j < vocab_size and (t := _decode_token(int(j)))][:5]
         results.append({
             "feature_id": i,
             "direction": direction.tolist(),
@@ -409,7 +490,8 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
             "n_directions": len(results),
             "source_model": model_name,
             "embed_dim": int(E.shape[1]),
-            "vocab_size": int(E.shape[0]),
+            "vocab_size": vocab_size,
+            "augmented_vectors": len(rows) - vocab_size,
             "directions": results,
         }, f, indent=2)
     print(f"[harvest] wrote {len(results)} semantic directions → {output_path}", flush=True)
@@ -791,6 +873,11 @@ def main():
                         "neighbourhood rather than generic model geometry")
     p.add_argument("--chitta-bin", default="chitta",
                    help="chitta binary name or path (default: chitta)")
+    p.add_argument("--augment-seqs", default="",
+                   help="(vocab_geometry --model, bio models) FASTA or plain-text file "
+                        "of sequences (one per line). Mean-pooled contextual embeddings "
+                        "are added to the SVD matrix — critical for protein/DNA models "
+                        "with small static vocabularies (ESM-2, DNABERT, NT).")
     p.add_argument("--ingest", action="store_true",
                    help="Push output summary to chitta memory after completion")
     args = p.parse_args()
@@ -827,7 +914,8 @@ def main():
         else:
             if not args.model:
                 p.error("either --model or --ollama-model (or --gguf) is required")
-            rc = mode_vocab_geometry(args.model, scope, args.output, budget)
+            rc = mode_vocab_geometry(args.model, scope, args.output, budget,
+                                      augment_seqs=args.augment_seqs)
     elif args.mode == "triplet_extract":
         if ollama_tag:
             rc = mode_triplet_extract_ollama(
