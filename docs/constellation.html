@@ -11,83 +11,48 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <style>
-#constellation-wrap {
+/* ── Viz container ─────────────────────────────────────────────────────────── */
+#viz-outer {
   position: relative;
-  width: 100%;
-  height: 72vh;
-  min-height: 480px;
-  background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(157,178,217,0.06) 0%, transparent 70%),
+  background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(157,178,217,0.05) 0%, transparent 70%),
               var(--bg-gradient);
   border: 1px solid rgba(157,178,217,0.08);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  cursor: grab;
+  margin-bottom: var(--space-4);
+  user-select: none;
 }
-#constellation-wrap:active { cursor: grabbing; }
-#constellation-svg { width: 100%; height: 100%; display: block; }
+#viz-svg { width: 100%; display: block; }
+#bipartite-canvas { width: 100%; display: none; }
 
-.c-node circle {
-  transition: r 0.2s, opacity 0.2s;
-  cursor: pointer;
+/* ── Mode bar ──────────────────────────────────────────────────────────────── */
+.mode-bar {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-3); margin-bottom: var(--space-4);
 }
-.c-node text {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  fill: var(--ash-300);
-  pointer-events: none;
-  opacity: 0.7;
-  transition: opacity 0.2s;
-}
-.c-node:hover circle { opacity: 1; }
-.c-node:hover text { opacity: 1; }
-.c-link { stroke-opacity: 0.15; }
-
-#detail-panel {
-  position: absolute;
-  bottom: var(--space-4);
-  left: var(--space-4);
-  right: var(--space-4);
-  max-width: 380px;
-  background: rgba(11,11,16,0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+.mode-btn {
+  font-family: var(--font-mono); font-size: 12px;
+  padding: 6px 16px;
+  background: rgba(157,178,217,0.05);
   border: 1px solid rgba(157,178,217,0.12);
-  border-radius: var(--radius-md);
-  padding: var(--space-4) var(--space-5);
-  display: none;
-  pointer-events: none;
+  border-radius: var(--radius-sm);
+  color: var(--ash-300); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-#detail-panel.visible { display: block; }
-#detail-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.token-chip {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: rgba(157,178,217,0.08);
-  border: 1px solid rgba(157,178,217,0.15);
-  border-radius: 4px;
-  padding: 2px 8px;
+.mode-btn.active {
+  background: rgba(157,178,217,0.13);
+  border-color: rgba(157,178,217,0.35);
   color: var(--aura-300);
 }
-#detail-models { margin-top: 8px; font-size: 11px; color: var(--ash-300); opacity: 0.6; line-height: 1.5; }
+.mode-btn:hover:not(.active) { background: rgba(157,178,217,0.08); }
 
-.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: var(--space-4); font-size: 12px; font-family: var(--font-mono); color: var(--ash-300); }
-.legend-item { display: flex; align-items: center; gap: 6px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-
-.controls {
-  display: flex; flex-wrap: wrap; gap: var(--space-3);
-  margin-bottom: var(--space-4);
-  align-items: center;
-}
 .ctrl-btn {
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-family: var(--font-mono); font-size: 12px;
   padding: 6px 14px;
-  background: rgba(157,178,217,0.06);
-  border: 1px solid rgba(157,178,217,0.15);
+  background: rgba(157,178,217,0.05);
+  border: 1px solid rgba(157,178,217,0.12);
   border-radius: var(--radius-sm);
-  color: var(--ash-300);
-  cursor: pointer;
+  color: var(--ash-300); cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 .ctrl-btn:hover, .ctrl-btn.active {
@@ -95,44 +60,111 @@
   border-color: rgba(157,178,217,0.3);
   color: var(--aura-300);
 }
-.ctrl-search {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 6px 14px;
+.ctrl-sep {
+  width: 1px; height: 22px;
+  background: rgba(157,178,217,0.12);
+  margin: 0 2px;
+}
+
+/* ── Probe bar ─────────────────────────────────────────────────────────────── */
+#probe-bar {
+  padding: 10px 14px 10px;
+  background: rgba(8,8,12,0.7);
+  border-top: 1px solid rgba(157,178,217,0.08);
+  display: flex; flex-direction: column; gap: 8px;
+}
+#probe-row { display: flex; align-items: center; gap: 10px; }
+#probe-input {
+  font-family: var(--font-mono); font-size: 12px;
+  padding: 5px 12px;
   background: rgba(157,178,217,0.04);
   border: 1px solid rgba(157,178,217,0.12);
   border-radius: var(--radius-sm);
-  color: var(--lotus-200);
-  outline: none;
-  width: 200px;
+  color: var(--lotus-200); outline: none; width: 220px;
 }
-.ctrl-search::placeholder { color: var(--ash-300); opacity: 0.4; }
-.ctrl-search:focus { border-color: rgba(157,178,217,0.3); }
+#probe-input::placeholder { color: var(--ash-300); opacity: 0.35; }
+#probe-input:focus { border-color: rgba(157,178,217,0.3); }
+#probe-label { font-family: var(--font-mono); font-size: 11px; color: var(--ash-300); opacity: 0.4; }
+#hv-strip {
+  display: flex; flex-wrap: wrap; gap: 1px;
+  max-height: 28px; overflow: hidden;
+}
+.hv-cell {
+  width: 5px; height: 5px; border-radius: 1px;
+  background: rgba(157,178,217,0.08);
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.hv-cell.active { background: var(--aura-300); }
+.hv-cell.partial { background: rgba(157,178,217,0.35); }
 
+/* ── Detail panel (shared) ─────────────────────────────────────────────────── */
+#detail-panel {
+  position: absolute; top: 12px; right: 12px;
+  width: 280px;
+  background: rgba(10,10,16,0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(157,178,217,0.12);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  pointer-events: none;
+  opacity: 0; transition: opacity 0.2s;
+}
+#detail-panel.visible { opacity: 1; }
+#detail-id { font-family: var(--font-mono); font-size: 10px; color: var(--ash-300); opacity: 0.45; }
+#detail-title { font-family: var(--font-display); font-size: 1.05rem; color: var(--lotus-200); margin-top: 4px; }
+#detail-tokens { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.token-chip {
+  font-family: var(--font-mono); font-size: 10.5px;
+  background: rgba(157,178,217,0.07);
+  border: 1px solid rgba(157,178,217,0.14);
+  border-radius: 4px; padding: 2px 7px; color: var(--aura-300);
+}
+#detail-models { margin-top: 8px; font-size: 10px; font-family: var(--font-mono); color: var(--ash-300); opacity: 0.5; line-height: 1.6; }
+#detail-hint { margin-top: 8px; font-size: 10px; font-family: var(--font-mono); color: var(--ash-300); opacity: 0.35; }
+
+/* ── Radial breadcrumb ─────────────────────────────────────────────────────── */
+#radial-back {
+  position: absolute; bottom: 54px; left: 12px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ash-300); opacity: 0.5; cursor: pointer;
+  background: rgba(8,8,12,0.6);
+  border: 1px solid rgba(157,178,217,0.1);
+  border-radius: var(--radius-sm); padding: 4px 10px;
+  display: none; transition: opacity 0.15s;
+}
+#radial-back:hover { opacity: 1; }
+
+/* ── Bipartite canvas ──────────────────────────────────────────────────────── */
+#bipartite-svg { width: 100%; display: block; }
+
+/* ── Stats row ─────────────────────────────────────────────────────────────── */
 .stat-row {
   display: flex; flex-wrap: wrap; gap: var(--space-5);
   margin-bottom: var(--space-6);
 }
 .stat-box {
-  flex: 1; min-width: 120px;
+  flex: 1; min-width: 110px;
   background: rgba(157,178,217,0.04);
   border: 1px solid rgba(157,178,217,0.08);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
+  border-radius: var(--radius-md); padding: var(--space-4);
 }
-.stat-box .val {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  color: var(--lotus-200);
-  line-height: 1;
-}
-.stat-box .lbl {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ash-300);
-  opacity: 0.6;
-  margin-top: 4px;
-}
+.stat-box .val { font-family: var(--font-display); font-size: var(--text-2xl); color: var(--lotus-200); line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 11px; color: var(--ash-300); opacity: 0.6; margin-top: 4px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: var(--space-4); font-size: 12px; font-family: var(--font-mono); color: var(--ash-300); }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Radial/galaxy node glows ──────────────────────────────────────────────── */
+.c-node { cursor: pointer; }
+.c-node circle { transition: r 0.2s, opacity 0.15s; }
+.c-node text { font-family: var(--font-mono); font-size: 10px; fill: var(--ash-300); pointer-events: none; opacity: 0.65; transition: opacity 0.15s; }
+.c-node:hover circle { opacity: 1 !important; }
+.c-node:hover text { opacity: 1 !important; }
+.c-link { stroke-opacity: 0.15; pointer-events: none; }
+.c-node.center-node circle { filter: drop-shadow(0 0 8px var(--aura-300)); }
 </style>
 </head>
 <body>
@@ -177,50 +209,73 @@
     <div class="stat-box"><div class="val" id="stat-dirs">—</div><div class="lbl">directions</div></div>
     <div class="stat-box"><div class="val" id="stat-models">—</div><div class="lbl">source models</div></div>
     <div class="stat-box"><div class="val" id="stat-consensus">—</div><div class="lbl">cross-model (≥2)</div></div>
-    <div class="stat-box"><div class="val" id="stat-unique">—</div><div class="lbl">unique to one model</div></div>
+    <div class="stat-box"><div class="val" id="stat-unique">—</div><div class="lbl">single-model</div></div>
   </div>
 
-  <div class="controls reveal">
-    <input class="ctrl-search" id="search" type="text" placeholder="filter by token…" autocomplete="off">
-    <button class="ctrl-btn active" data-color="consensus" onclick="setColor('consensus',this)">color: consensus</button>
-    <button class="ctrl-btn" data-color="family" onclick="setColor('family',this)">color: model family</button>
-    <button class="ctrl-btn" id="btn-links" onclick="toggleLinks(this)">show links</button>
-    <button class="ctrl-btn" id="btn-filter" onclick="toggleFilter(this)">show cross-model only</button>
-    <button class="ctrl-btn" onclick="resetZoom()">reset view</button>
+  <!-- Mode controls -->
+  <div class="mode-bar reveal">
+    <button class="mode-btn active" id="btn-galaxy" onclick="setMode('galaxy')">Galaxy</button>
+    <button class="mode-btn" id="btn-bipartite" onclick="setMode('bipartite')">Token ↔ Direction</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="btn-links" onclick="toggleLinks(this)">edges</button>
+    <button class="ctrl-btn" id="btn-cross" onclick="toggleCrossOnly(this)">cross-model</button>
+    <button class="ctrl-btn" id="btn-color-fam" onclick="toggleColorMode(this)">color: family</button>
+    <button class="ctrl-btn" onclick="resetView()">reset</button>
   </div>
 
-  <div id="constellation-wrap" class="reveal">
-    <svg id="constellation-svg"></svg>
+  <!-- Visualization -->
+  <div id="viz-outer" class="reveal">
+    <!-- Galaxy / Radial SVG -->
+    <svg id="viz-svg" style="height:68vh;min-height:460px"></svg>
+
+    <!-- Bipartite SVG (hidden until mode switch) -->
+    <svg id="bipartite-svg" style="height:68vh;min-height:460px;display:none"></svg>
+
+    <!-- Detail panel -->
     <div id="detail-panel">
-      <div style="font-family:var(--font-mono);font-size:11px;color:var(--ash-300);opacity:0.5" id="detail-id"></div>
-      <div style="font-family:var(--font-display);font-size:1.1rem;color:var(--lotus-200);margin-top:4px" id="detail-title"></div>
+      <div id="detail-id"></div>
+      <div id="detail-title"></div>
       <div id="detail-tokens"></div>
       <div id="detail-models"></div>
+      <div id="detail-hint"></div>
+    </div>
+
+    <!-- Radial back button -->
+    <div id="radial-back" onclick="goGalaxy(true)">← galaxy</div>
+
+    <!-- Probe bar -->
+    <div id="probe-bar">
+      <div id="probe-row">
+        <input id="probe-input" type="text" placeholder="probe: type a concept…" autocomplete="off">
+        <span id="probe-label">hypervector fingerprint</span>
+      </div>
+      <div id="hv-strip"></div>
     </div>
   </div>
 
   <div class="legend reveal" id="legend"></div>
 
   <div style="margin-top:var(--space-8)" class="reveal">
-    <h2 class="heading-section" style="margin-bottom:var(--space-5)">What is the constellation?</h2>
-    <p style="max-width:660px;line-height:1.8;color:var(--ash-300)">
-      Each <strong style="color:var(--lotus-200)">node</strong> is a semantic direction — a principal axis of meaning
-      extracted via SVD from the token embedding matrices of open-weight language models. Its label shows
-      the most representative tokens for that concept. Directions shared by multiple model families
-      (brighter nodes) have higher consensus and are seeded first into the codebook.
-    </p>
-    <p style="max-width:660px;line-height:1.8;color:var(--ash-300);margin-top:var(--space-4)">
-      <strong style="color:var(--lotus-200)">Edges</strong> connect directions whose top tokens overlap (Jaccard ≥ 0.34) —
-      they represent the same concept seen from different angles. The layout is a 2D force-directed
-      projection of this similarity graph, <em>not</em> a projection of the actual high-dimensional vector geometry.
-      Use <em>show cross-model only</em> to hide single-model directions and see the shared semantic skeleton.
-    </p>
-    <p style="max-width:660px;line-height:1.8;color:var(--ash-300);margin-top:var(--space-4)">
-      When chitta stores a memory, its tokens are projected onto the nearest codebook directions to form
-      a binary <strong style="color:var(--lotus-200)">hypervector</strong>. Recall queries follow the same path —
-      Hamming distance between hypervectors is what makes "CRISPR" find "endonuclease" without
-      keyword overlap. The constellation is the coordinate system that makes this possible before any
-      memories exist.
+    <h2 class="heading-section" style="margin-bottom:var(--space-5)">Three ways to explore</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-5);max-width:800px">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--aura-300);margin-bottom:6px">GALAXY</div>
+        <p style="font-size:13px;line-height:1.75;color:var(--ash-300)">Force-directed map of all 512 semantic directions. Click any node to enter Radial mode and orbit its neighbors by similarity. Drag, zoom, filter.</p>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--aura-300);margin-bottom:6px">RADIAL</div>
+        <p style="font-size:13px;line-height:1.75;color:var(--ash-300)">A clicked direction moves to center. All others orbit at a distance proportional to <em>1 − Jaccard</em> — semantically identical directions appear closest. Click empty space or ← to return.</p>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--aura-300);margin-bottom:6px">TOKEN ↔ DIRECTION</div>
+        <p style="font-size:13px;line-height:1.75;color:var(--ash-300)">Bipartite graph: top tokens on the left, directions on the right. Hover a token to highlight every direction that carries it. Hover a direction to reveal its vocabulary.</p>
+      </div>
+    </div>
+    <p style="max-width:660px;line-height:1.8;color:var(--ash-300);margin-top:var(--space-5)">
+      The <strong style="color:var(--lotus-200)">probe bar</strong> at the bottom is always active. Type a concept
+      and every matching direction lights up across all three modes. The 5×5-pixel strip is the actual
+      <strong style="color:var(--lotus-200)">binary hypervector fingerprint</strong> — each cell is one direction;
+      blue = activated, dim = silent. Hamming distance between two such strips is what chitta uses for recall.
     </p>
   </div>
 
@@ -237,22 +292,25 @@
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
-// ── Data + color helpers ──────────────────────────────────────────────────────
+// ── Constants & palette ───────────────────────────────────────────────────────
 const MODEL_FAMILIES = [
-  { key: "qwen",    label: "Qwen",    color: "#7AA2F7" },
-  { key: "gemma",   label: "Gemma",   color: "#9ECE6A" },
-  { key: "llama",   label: "Llama",   color: "#E0AF68" },
-  { key: "mistral", label: "Mistral", color: "#BB9AF7" },
-  { key: "phi",     label: "Phi",     color: "#73DACA" },
-  { key: "deepseek",label: "DeepSeek",color: "#F7768E" },
-  { key: "esm",     label: "ESM-2",   color: "#FF9E64" },
-  { key: "dnabert", label: "DNABERT", color: "#41A6B5" },
-  { key: "nucleotide",label:"Nucl.T", color: "#C0CAF5" },
-  { key: "prot_t5", label: "ProtT5",  color: "#B4F9F8" },
-  { key: "aya",     label: "Aya",     color: "#F7BB6D" },
-  { key: "mixtral", label: "Mixtral", color: "#D196E6" },
-  { key: "jackrong",label: "Jackrong",color: "#9AA5CE" },
+  { key:"qwen",       label:"Qwen",       color:"#7AA2F7" },
+  { key:"gemma",      label:"Gemma",      color:"#9ECE6A" },
+  { key:"llama",      label:"Llama",      color:"#E0AF68" },
+  { key:"mistral",    label:"Mistral",    color:"#BB9AF7" },
+  { key:"phi",        label:"Phi",        color:"#73DACA" },
+  { key:"deepseek",   label:"DeepSeek",   color:"#F7768E" },
+  { key:"esm",        label:"ESM-2",      color:"#FF9E64" },
+  { key:"dnabert",    label:"DNABERT",    color:"#41A6B5" },
+  { key:"nucleotide", label:"Nucl.T",     color:"#C0CAF5" },
+  { key:"prot_t5",    label:"ProtT5",     color:"#B4F9F8" },
+  { key:"aya",        label:"Aya",        color:"#F7BB6D" },
+  { key:"mixtral",    label:"Mixtral",    color:"#D196E6" },
+  { key:"jackrong",   label:"Jackrong",   color:"#9AA5CE" },
 ];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function normTok(t) { return t.toLowerCase().replace(/^[Ġ▁Ċ]+/, "").trim(); }
 
 function dominantFamily(models) {
   const counts = {};
@@ -262,193 +320,448 @@ function dominantFamily(models) {
       if (ml.includes(f.key)) { counts[f.key] = (counts[f.key]||0)+1; break; }
     }
   }
-  let best = null, bestN = 0;
-  for (const [k,n] of Object.entries(counts)) if (n > bestN) { best=k; bestN=n; }
+  let best=null, bestN=0;
+  for (const [k,n] of Object.entries(counts)) if (n>bestN){best=k;bestN=n;}
   return best;
 }
 
 function consensusColor(d) {
-  const t = Math.min(1, d.n_models / 5);
-  return d3.interpolateRgb("#2E3348", "#9DB2D9")(t);
+  const t = Math.min(1, d.n_models/5);
+  return d3.interpolateRgb("#2E3348","#9DB2D9")(t);
 }
-
 function familyColor(d) {
-  const fam = dominantFamily(d.models);
+  const fam = dominantFamily(d.models||[]);
   if (!fam) return "#565F89";
-  return MODEL_FAMILIES.find(f => f.key === fam)?.color || "#565F89";
+  return MODEL_FAMILIES.find(f=>f.key===fam)?.color || "#565F89";
 }
 
 let colorMode = "consensus";
-function nodeColor(d) { return colorMode === "family" ? familyColor(d) : consensusColor(d); }
+function nodeColor(d) { return colorMode==="family" ? familyColor(d) : consensusColor(d); }
+function nodeR(d) { return 3 + (d.n_models||1)*1.2; }
 
-function setColor(mode, btn) {
-  colorMode = mode;
-  document.querySelectorAll('[data-color]').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  svg.selectAll(".c-node circle").attr("fill", d => nodeColor(d));
-  buildLegend();
+function jaccard(toksA, toksB, top=4) {
+  const a = new Set(toksA.slice(0,top).map(normTok).filter(Boolean));
+  const b = new Set(toksB.slice(0,top).map(normTok).filter(Boolean));
+  if (!a.size || !b.size) return 0;
+  const inter = [...a].filter(x=>b.has(x)).length;
+  const union = new Set([...a,...b]).size;
+  return inter/union;
 }
 
-// ── Layout ────────────────────────────────────────────────────────────────────
-let showLinks = false;
-function toggleLinks(btn) {
-  showLinks = !showLinks;
-  btn.classList.toggle('active', showLinks);
-  svg.selectAll(".c-link").style("display", showLinks ? null : "none");
-}
+// ── State ─────────────────────────────────────────────────────────────────────
+let ALL_NODES = [], ALL_EDGES = [];
+let mode = "galaxy";   // "galaxy" | "radial" | "bipartite"
+let radialCenter = null;
+let showLinks = false, crossOnly = false;
+let probeQuery = "";
 
-let filterCrossModel = false;
-function toggleFilter(btn) {
-  filterCrossModel = !filterCrossModel;
-  btn.classList.toggle('active', filterCrossModel);
-  svg.selectAll(".c-node")
-    .style("display", d => filterCrossModel && d.n_models < 2 ? "none" : null);
-  svg.selectAll(".c-link")
-    .style("display", d => {
-      if (!showLinks) return "none";
-      if (filterCrossModel && (d.source.n_models < 2 || d.target.n_models < 2)) return "none";
-      return null;
-    });
-}
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const vizSvgEl  = document.getElementById("viz-svg");
+const biSvgEl   = document.getElementById("bipartite-svg");
+const detPanel  = document.getElementById("detail-panel");
+const radialBtn = document.getElementById("radial-back");
+const probeEl   = document.getElementById("probe-input");
+const hvStrip   = document.getElementById("hv-strip");
 
-function resetZoom() { svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity); }
+// ── Galaxy / Radial (shared SVG) ──────────────────────────────────────────────
+const vizSvg = d3.select(vizSvgEl);
+const zoom = d3.zoom().scaleExtent([0.2,8]).on("zoom",e=>gMain.attr("transform",e.transform));
+vizSvg.call(zoom);
+const gMain = vizSvg.append("g");
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-const wrap = document.getElementById("constellation-wrap");
-const svgEl = document.getElementById("constellation-svg");
-const svg = d3.select(svgEl);
-const zoom = d3.zoom().scaleExtent([0.3, 6]).on("zoom", e => g.attr("transform", e.transform));
-svg.call(zoom);
-const g = svg.append("g");
+let sim, linkSel, nodeSel;
 
-fetch("constellation-data.json")
-  .then(r => r.json())
-  .then(data => init(data))
-  .catch(e => {
-    wrap.innerHTML = `<div style="padding:2rem;font-family:var(--font-mono);color:#F7768E;font-size:13px">Could not load constellation-data.json — ${e.message}</div>`;
-  });
-
-function init(data) {
-  const nodes = data.directions;
-  const nModels = data.n_input_models || data.source_models?.length || 0;
-  const nConsensus = nodes.filter(d => d.n_models >= 2).length;
-  const nUnique = nodes.filter(d => d.n_models < 2).length;
-  const nBio = nodes.filter(d => d.models.some(m =>
-    ["esm","dnabert","nucleotide","prot_t5"].some(k => m.toLowerCase().includes(k))
-  )).length;
-
-  document.getElementById("stat-dirs").textContent    = nodes.length;
-  document.getElementById("stat-models").textContent  = nModels;
-  document.getElementById("stat-consensus").textContent = nConsensus;
-  document.getElementById("stat-unique").textContent   = nUnique;
-
-  // Build Jaccard edges for top 3 tokens between nodes (cheap proxy for semantic proximity)
+function buildEdges(nodes) {
   const edges = [];
-  const TOP = 3;
-  for (let i = 0; i < nodes.length; i++) {
-    const a = new Set(nodes[i].tokens.slice(0,TOP).map(t=>t.toLowerCase().replace(/^[Ġ▁]/,"")));
-    for (let j = i+1; j < nodes.length; j++) {
-      const b = new Set(nodes[j].tokens.slice(0,TOP).map(t=>t.toLowerCase().replace(/^[Ġ▁]/,"")));
-      const inter = [...a].filter(x=>b.has(x)).length;
-      const union = new Set([...a,...b]).size;
-      if (union > 0 && inter/union >= 0.34) edges.push({source: i, target: j, w: inter/union});
+  for (let i=0;i<nodes.length;i++) {
+    for (let j=i+1;j<nodes.length;j++) {
+      const s = jaccard(nodes[i].tokens, nodes[j].tokens);
+      if (s >= 0.30) edges.push({source:i, target:j, w:s});
     }
   }
+  return edges;
+}
 
-  const W = wrap.clientWidth, H = wrap.clientHeight;
-  const sim = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(edges).id((_,i)=>i).distance(60).strength(0.4))
-    .force("charge", d3.forceManyBody().strength(-35))
-    .force("center", d3.forceCenter(W/2, H/2))
-    .force("collision", d3.forceCollide().radius(d => nodeR(d) + 3))
-    .alphaDecay(0.03);
+function initGalaxy(nodes, edges) {
+  const W = vizSvgEl.clientWidth, H = vizSvgEl.clientHeight;
+  gMain.selectAll("*").remove();
 
-  // Links
-  const link = g.append("g").selectAll("line")
+  sim = d3.forceSimulation(nodes)
+    .force("link",  d3.forceLink(edges).id((_,i)=>i).distance(65).strength(0.35))
+    .force("charge",d3.forceManyBody().strength(-40))
+    .force("center",d3.forceCenter(W/2, H/2))
+    .force("collide",d3.forceCollide().radius(d=>nodeR(d)+4))
+    .alphaDecay(0.025);
+
+  linkSel = gMain.append("g").selectAll("line")
     .data(edges).join("line")
     .attr("class","c-link")
-    .attr("stroke","#9DB2D9")
-    .attr("stroke-width", d => d.w * 1.5)
-    .style("display", "none");
+    .attr("stroke","#9DB2D9").attr("stroke-width",d=>d.w*1.4)
+    .style("display","none");
 
-  // Nodes
-  const node = g.append("g").selectAll("g")
-    .data(nodes).join("g")
-    .attr("class","c-node")
+  nodeSel = gMain.append("g").selectAll("g")
+    .data(nodes).join("g").attr("class","c-node")
     .call(d3.drag()
-      .on("start", (e,d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
-      .on("drag",  (e,d) => { d.fx=e.x; d.fy=e.y; })
-      .on("end",   (e,d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+      .on("start",(e,d)=>{ if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x;d.fy=d.y; })
+      .on("drag", (e,d)=>{ d.fx=e.x; d.fy=e.y; })
+      .on("end",  (e,d)=>{ if(!e.active) sim.alphaTarget(0); d.fx=null;d.fy=null; })
     )
-    .on("click", (e,d) => showDetail(d))
-    .on("mouseover", (_,d) => showDetail(d))
-    .on("mouseout", () => {});
+    .on("click",(e,d)=>{ e.stopPropagation(); enterRadial(d, true); })
+    .on("mouseover",(_,d)=>showDetail(d,"Click to explore radially"))
+    .on("mouseout",()=>{});
 
-  node.append("circle")
-    .attr("r", d => nodeR(d))
-    .attr("fill", d => nodeColor(d))
-    .attr("stroke", d => nodeColor(d))
-    .attr("stroke-width", 1)
-    .attr("opacity", d => 0.5 + d.consensus * 0.5);
+  nodeSel.append("circle")
+    .attr("r",d=>nodeR(d)).attr("fill",d=>nodeColor(d))
+    .attr("stroke",d=>nodeColor(d)).attr("stroke-width",1)
+    .attr("opacity",d=>0.45+d.consensus*0.55);
 
-  node.append("text")
-    .attr("dy", d => nodeR(d) + 11)
+  nodeSel.append("text")
+    .attr("dy",d=>nodeR(d)+11).attr("text-anchor","middle")
+    .text(d=>d.tokens[0]||"");
+
+  sim.on("tick",()=>{
+    linkSel.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
+           .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+    nodeSel.attr("transform",d=>`translate(${d.x},${d.y})`);
+  });
+
+  vizSvg.on("click",()=>{}); // reset detail on bg click
+  applyProbeOpacity();
+}
+
+function enterRadial(center, pushHist) {
+  mode = "radial";
+  radialCenter = center;
+  if (pushHist) history.pushState({mode:"radial",id:center.id}, "");
+  radialBtn.style.display = "block";
+
+  const W = vizSvgEl.clientWidth, H = vizSvgEl.clientHeight;
+  const cx = W/2, cy = H/2;
+  const maxR = Math.min(W, H)*0.42;
+
+  if (sim) sim.stop();
+  vizSvg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+
+  gMain.selectAll("*").remove();
+
+  // Compute positions: center=0, others by (1-jaccard)*maxR on circular arc
+  const others = ALL_NODES.filter(n=>n!==center).map(n=>{
+    const s = jaccard(center.tokens, n.tokens);
+    return {node:n, jac:s, dist:(1-s)*maxR};
+  }).sort((a,b)=>b.jac-a.jac);
+
+  const step = (2*Math.PI)/others.length;
+  others.forEach((o,i)=>{
+    const angle = i*step - Math.PI/2;
+    o.node.rx = cx + Math.cos(angle)*o.dist;
+    o.node.ry = cy + Math.sin(angle)*o.dist;
+  });
+  center.rx = cx; center.ry = cy;
+
+  // Draw edges from center to close neighbors
+  const edgeData = others.filter(o=>o.jac>=0.20).map(o=>o.node);
+  gMain.append("g").selectAll("line").data(edgeData).join("line")
+    .attr("class","c-link")
+    .attr("stroke","#9DB2D9").attr("stroke-width",1)
+    .attr("stroke-opacity",d=>jaccard(center.tokens,d.tokens)*0.5)
+    .attr("x1",cx).attr("y1",cy)
+    .attr("x2",d=>d.rx).attr("y2",d=>d.ry);
+
+  // Draw orbit nodes
+  const orbitG = gMain.append("g").selectAll("g")
+    .data(ALL_NODES).join("g").attr("class","c-node")
+    .attr("transform",d=>d===center
+      ? `translate(${cx},${cy})`
+      : `translate(${d.rx},${d.ry})`)
+    .classed("center-node", d=>d===center)
+    .on("click",(e,d)=>{ if(d===center){goGalaxy(true);}else{e.stopPropagation();enterRadial(d,true);} })
+    .on("mouseover",(_,d)=>showDetail(d, d===center ? "Center — click to return" : "Click to re-center"))
+    .on("mouseout",()=>{});
+
+  orbitG.append("circle")
+    .attr("r",d=>d===center ? nodeR(d)*2.2 : nodeR(d))
+    .attr("fill",d=>nodeColor(d))
+    .attr("stroke",d=>d===center ? nodeColor(d) : "none")
+    .attr("stroke-width",2)
+    .attr("opacity",d=>d===center ? 1 : 0.45+d.consensus*0.45);
+
+  orbitG.append("text")
+    .attr("dy",d=>(d===center ? nodeR(d)*2.2 : nodeR(d))+11)
     .attr("text-anchor","middle")
-    .text(d => d.tokens[0] || "");
+    .attr("font-size",d=>d===center ? 12 : 10)
+    .text(d=>d.tokens[0]||"");
 
-  sim.on("tick", () => {
-    link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
-        .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
-    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  // Click on svg background → go back to galaxy
+  vizSvg.on("click",()=>goGalaxy(true));
+  orbitG.on("click",(e,d)=>{ e.stopPropagation(); if(d===center){goGalaxy(true);}else{enterRadial(d,true);} });
+
+  showDetail(center, "Center — click to return");
+  applyProbeOpacity();
+}
+
+function goGalaxy(pushHist) {
+  mode = "galaxy";
+  radialCenter = null;
+  radialBtn.style.display = "none";
+  if (pushHist) history.pushState({mode:"galaxy"}, "");
+  initGalaxy(ALL_NODES, ALL_EDGES);
+  vizSvg.call(zoom);
+  hideDetail();
+}
+
+window.addEventListener("popstate", e=>{
+  if (!e.state) return;
+  if (e.state.mode==="galaxy") goGalaxy(false);
+  else if (e.state.mode==="radial") {
+    const n = ALL_NODES.find(n=>n.id===e.state.id);
+    if (n) enterRadial(n, false);
+  }
+});
+
+// ── Bipartite ─────────────────────────────────────────────────────────────────
+function renderBipartite(nodes) {
+  const biSvg = d3.select(biSvgEl);
+  biSvg.selectAll("*").remove();
+
+  const W = biSvgEl.clientWidth, H = biSvgEl.clientHeight;
+  const PAD = 40, tokX = PAD+80, dirX = W-PAD-12;
+  const MAX_TOKS = 80, MAX_DIRS = Math.min(nodes.length, 160);
+
+  // Count token frequency across all directions
+  const tokFreq = {};
+  for (const d of nodes) {
+    for (const t of (d.tokens||[])) {
+      const nt = normTok(t);
+      if (nt.length > 1) tokFreq[nt] = (tokFreq[nt]||0)+1;
+    }
+  }
+  const topToks = Object.entries(tokFreq)
+    .sort((a,b)=>b[1]-a[1]).slice(0,MAX_TOKS).map(([t])=>t);
+  const topDirs = nodes.slice(0,MAX_DIRS);
+
+  // Build edges: (tokIdx, dirIdx)
+  const biEdges = [];
+  topToks.forEach((tok,ti)=>{
+    topDirs.forEach((dir,di)=>{
+      if ((dir.tokens||[]).some(t=>normTok(t)===tok)) biEdges.push({ti,di});
+    });
   });
 
-  // Search
-  document.getElementById("search").addEventListener("input", function() {
-    const q = this.value.toLowerCase().replace(/^[Ġ▁]/,"");
-    node.selectAll("circle").attr("opacity", d => {
-      if (!q) return 0.5 + d.consensus * 0.5;
-      const hit = d.tokens.some(t => t.toLowerCase().replace(/^[Ġ▁]/,"").includes(q));
-      return hit ? 1 : 0.08;
-    });
-    node.selectAll("text").attr("opacity", d => {
-      if (!q) return 0.7;
-      return d.tokens.some(t => t.toLowerCase().includes(q)) ? 1 : 0.1;
-    });
-  });
+  const tokY  = i => PAD + (i/(topToks.length-1||1))*(H-2*PAD);
+  const dirY  = i => PAD + (i/(topDirs.length-1||1))*(H-2*PAD);
 
+  // Draw bezier edges
+  const edgeG = biSvg.append("g");
+  edgeG.selectAll("path").data(biEdges).join("path")
+    .attr("class","bi-edge")
+    .attr("d",e=>{
+      const y1=tokY(e.ti), y2=dirY(e.di);
+      const mx=(tokX+dirX)/2;
+      return `M${tokX},${y1} C${mx},${y1} ${mx},${y2} ${dirX},${y2}`;
+    })
+    .attr("fill","none").attr("stroke","#9DB2D9").attr("stroke-opacity",0.08)
+    .attr("stroke-width",0.7);
+
+  // Direction circles (right)
+  const dirG = biSvg.append("g");
+  dirG.selectAll("circle").data(topDirs).join("circle")
+    .attr("class","bi-dir")
+    .attr("cx",dirX).attr("cy",(_,i)=>dirY(i))
+    .attr("r",d=>nodeR(d)).attr("fill",d=>nodeColor(d))
+    .attr("opacity",d=>0.5+d.consensus*0.45)
+    .on("mouseover",(evt,d)=>{
+      const di = topDirs.indexOf(d);
+      const myToks = new Set((d.tokens||[]).map(normTok));
+      // Highlight edges
+      edgeG.selectAll(".bi-edge")
+        .attr("stroke-opacity",e=>e.di===di ? 0.7 : 0.04)
+        .attr("stroke-width",e=>e.di===di ? 1.5 : 0.5);
+      // Highlight tokens
+      tokG.selectAll(".bi-tok")
+        .attr("fill-opacity",(_,ti)=>myToks.has(topToks[ti]) ? 1 : 0.15);
+      showDetail(d,"");
+    })
+    .on("mouseout",()=>{
+      edgeG.selectAll(".bi-edge").attr("stroke-opacity",0.08).attr("stroke-width",0.7);
+      tokG.selectAll(".bi-tok").attr("fill-opacity",0.55);
+      hideDetail();
+    });
+
+  // Token labels (left)
+  const tokG = biSvg.append("g");
+  tokG.selectAll("text").data(topToks).join("text")
+    .attr("class","bi-tok")
+    .attr("x",tokX-6).attr("y",(_,i)=>tokY(i)+3.5)
+    .attr("text-anchor","end")
+    .attr("font-family","var(--font-mono)").attr("font-size",9)
+    .attr("fill","var(--ash-300)").attr("fill-opacity",0.55)
+    .text(t=>t)
+    .on("mouseover",(evt,tok)=>{
+      const ti = topToks.indexOf(tok);
+      // Highlight edges for this token
+      edgeG.selectAll(".bi-edge")
+        .attr("stroke-opacity",e=>e.ti===ti ? 0.75 : 0.04)
+        .attr("stroke-width",e=>e.ti===ti ? 1.8 : 0.5);
+      // Highlight connected directions
+      const connDis = new Set(biEdges.filter(e=>e.ti===ti).map(e=>e.di));
+      dirG.selectAll(".bi-dir").attr("opacity",(_,di)=>connDis.has(di)?1:0.12);
+      d3.select(evt.target).attr("fill","var(--aura-300)").attr("fill-opacity",1);
+    })
+    .on("mouseout",()=>{
+      edgeG.selectAll(".bi-edge").attr("stroke-opacity",0.08).attr("stroke-width",0.7);
+      dirG.selectAll(".bi-dir").attr("opacity",d=>0.5+d.consensus*0.45);
+      tokG.selectAll(".bi-tok").attr("fill","var(--ash-300)").attr("fill-opacity",0.55);
+    });
+}
+
+// ── Mode switching ─────────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  document.getElementById("btn-galaxy").classList.toggle("active", m!=="bipartite");
+  document.getElementById("btn-bipartite").classList.toggle("active", m==="bipartite");
+
+  if (m==="bipartite") {
+    vizSvgEl.style.display = "none";
+    biSvgEl.style.display  = "block";
+    radialBtn.style.display = "none";
+    if (sim) sim.stop();
+    renderBipartite(ALL_NODES);
+  } else {
+    vizSvgEl.style.display = "block";
+    biSvgEl.style.display  = "none";
+    goGalaxy(false);
+  }
   buildLegend();
 }
 
-function nodeR(d) { return 3 + d.n_models * 1.2; }
-
-function showDetail(d) {
-  const panel = document.getElementById("detail-panel");
-  document.getElementById("detail-id").textContent = `direction #${d.id}  ·  ${d.n_models} model${d.n_models>1?"s":""}  ·  consensus ${(d.consensus*100).toFixed(0)}%`;
-  document.getElementById("detail-title").textContent = d.tokens.slice(0,4).join("  ·  ");
-  document.getElementById("detail-tokens").innerHTML = d.tokens.map(t =>
-    `<span class="token-chip">${t}</span>`).join("");
-  document.getElementById("detail-models").textContent = d.models.map(m =>
-    m.split("/").pop().split(":")[0]).join("  ·  ");
-  panel.classList.add("visible");
+// ── Controls ──────────────────────────────────────────────────────────────────
+function toggleLinks(btn) {
+  showLinks = !showLinks;
+  btn.classList.toggle("active", showLinks);
+  if (mode!=="bipartite")
+    vizSvg.selectAll(".c-link").style("display", showLinks ? null : "none");
 }
 
+function toggleCrossOnly(btn) {
+  crossOnly = !crossOnly;
+  btn.classList.toggle("active", crossOnly);
+  applyProbeOpacity();
+}
+
+function toggleColorMode(btn) {
+  colorMode = colorMode==="family" ? "consensus" : "family";
+  btn.textContent = colorMode==="family" ? "color: family" : "color: consensus";
+  btn.classList.toggle("active", colorMode==="family");
+  if (mode!=="bipartite") {
+    vizSvg.selectAll(".c-node circle").attr("fill",d=>nodeColor(d)).attr("stroke",d=>nodeColor(d));
+  }
+  buildLegend();
+}
+
+function resetView() {
+  if (mode==="bipartite") { renderBipartite(ALL_NODES); return; }
+  if (mode==="radial") goGalaxy(true);
+  vizSvg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+}
+
+// ── Probe bar ─────────────────────────────────────────────────────────────────
+function buildHvStrip(nodes) {
+  hvStrip.innerHTML = "";
+  nodes.forEach((d,i)=>{
+    const cell = document.createElement("div");
+    cell.className = "hv-cell";
+    cell.dataset.i = i;
+    hvStrip.appendChild(cell);
+  });
+}
+
+function applyProbeOpacity() {
+  const q = probeQuery;
+  const cells = hvStrip.querySelectorAll(".hv-cell");
+
+  ALL_NODES.forEach((d,i)=>{
+    const matches = q ? d.tokens.some(t=>normTok(t).includes(q)||t.toLowerCase().includes(q)) : false;
+    const hidden  = crossOnly && d.n_models<2;
+
+    if (cells[i]) {
+      cells[i].className = "hv-cell" + (matches ? " active" : "");
+    }
+
+    // Galaxy / Radial opacity
+    if (mode!=="bipartite") {
+      if (!q && !crossOnly) {
+        vizSvg.selectAll(".c-node").filter(n=>n===d)
+          .selectAll("circle").attr("opacity", 0.45+d.consensus*0.55)
+          .select(function(){ return this.parentNode; })
+          .style("display", null);
+        return;
+      }
+      const opacity = hidden ? 0 : (q && !matches ? 0.06 : 0.45+d.consensus*0.55);
+      vizSvg.selectAll(".c-node").filter(n=>n===d)
+        .style("display", hidden ? "none" : null)
+        .selectAll("circle").attr("opacity", opacity);
+    }
+  });
+}
+
+probeEl.addEventListener("input", function() {
+  probeQuery = this.value.toLowerCase().replace(/^[Ġ▁Ċ]+/,"").trim();
+  applyProbeOpacity();
+});
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+function showDetail(d, hint) {
+  document.getElementById("detail-id").textContent =
+    `#${d.id}  ·  ${d.n_models} model${d.n_models>1?"s":""}  ·  consensus ${(d.consensus*100).toFixed(0)}%`;
+  document.getElementById("detail-title").textContent = (d.tokens||[]).slice(0,4).join("  ·  ");
+  document.getElementById("detail-tokens").innerHTML = (d.tokens||[]).map(t=>
+    `<span class="token-chip">${t}</span>`).join("");
+  document.getElementById("detail-models").textContent = (d.models||[]).map(m=>
+    m.split("/").pop().split(":")[0]).join("  ·  ");
+  document.getElementById("detail-hint").textContent = hint||"";
+  detPanel.classList.add("visible");
+}
+function hideDetail() { detPanel.classList.remove("visible"); }
+
+// ── Legend ────────────────────────────────────────────────────────────────────
 function buildLegend() {
   const el = document.getElementById("legend");
-  if (colorMode === "consensus") {
+  if (colorMode==="consensus") {
     el.innerHTML = `
-      <span style="opacity:0.5;font-size:11px">node size = model support  ·  </span>
+      <span style="opacity:0.45;font-size:11px">size = model support&ensp;·&ensp;</span>
       <span class="legend-item"><span class="legend-dot" style="background:#2E3348"></span>single model</span>
       <span class="legend-item"><span class="legend-dot" style="background:#6E7FA8"></span>2–3 models</span>
       <span class="legend-item"><span class="legend-dot" style="background:#9DB2D9"></span>4+ models</span>`;
   } else {
-    el.innerHTML = MODEL_FAMILIES.slice(0,8).map(f =>
+    el.innerHTML = MODEL_FAMILIES.slice(0,9).map(f=>
       `<span class="legend-item"><span class="legend-dot" style="background:${f.color}"></span>${f.label}</span>`
-    ).join("") + `<span style="opacity:0.4;font-size:11px">· bio models: ESM-2, DNABERT, NT, ProtT5</span>`;
+    ).join("");
   }
 }
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+fetch("constellation-data.json")
+  .then(r=>r.json())
+  .then(data=>{
+    ALL_NODES = data.directions;
+    ALL_EDGES = buildEdges(ALL_NODES);
+
+    const nConsensus = ALL_NODES.filter(d=>d.n_models>=2).length;
+    document.getElementById("stat-dirs").textContent    = ALL_NODES.length;
+    document.getElementById("stat-models").textContent  = data.n_input_models||data.source_models?.length||"—";
+    document.getElementById("stat-consensus").textContent = nConsensus;
+    document.getElementById("stat-unique").textContent   = ALL_NODES.length - nConsensus;
+
+    buildHvStrip(ALL_NODES);
+    initGalaxy(ALL_NODES, ALL_EDGES);
+    buildLegend();
+  })
+  .catch(e=>{
+    document.getElementById("viz-outer").innerHTML =
+      `<div style="padding:2rem;font-family:var(--font-mono);color:#F7768E;font-size:13px">Could not load constellation-data.json — ${e.message}</div>`;
+  });
 </script>
 <script>
-// Scroll reveal
 const ro = new IntersectionObserver(entries => {
   entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
 }, { threshold: 0.08 });
