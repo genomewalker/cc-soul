@@ -51,14 +51,16 @@ def token_overlap_score(toks_a: list[str], toks_b: list[str]) -> float:
 
 def build_constellation(geometries: list[dict], n_directions: int,
                         min_models: int, overlap_threshold: float) -> list[dict]:
-    """Find cross-model consensus directions via token-overlap clustering.
+    """Build a constellation from all directions across all models.
 
-    Each direction in the constellation must have token support from at least
-    min_models different source models. Directions that multiple models
-    independently identify as principal (same top tokens) are more trustworthy —
-    model-specific artifacts won't appear in all models simultaneously.
+    Strategy: union-with-ranking. ALL directions are included — each model
+    learned something unique. Directions agreed on by multiple models rank
+    higher (higher consensus_score), but single-model directions are not
+    discarded: they represent knowledge only that model captured.
 
-    Returns list of constellation direction dicts.
+    min_models is used only for reporting, not filtering.
+    Clustering merges near-duplicate directions (same concept, different models)
+    so the codebook stays compact rather than repeating the same axis N times.
     """
     # Flatten all directions across all models
     all_dirs: list[dict] = []
@@ -71,14 +73,14 @@ def build_constellation(geometries: list[dict], n_directions: int,
                 "source_model": model,
                 "feature_id":   d["feature_id"],
                 "top_tokens":   d["top_tokens"],
-                "direction":    d.get("direction"),   # may be None for some paths
+                "direction":    d.get("direction"),
             })
 
     print(f"[constellation] {len(all_dirs)} total directions from {len(geometries)} models",
           flush=True)
 
-    # Greedy consensus clustering: for each seed direction, find all directions
-    # across models that have token overlap >= threshold, group them.
+    # Greedy clustering: merge near-duplicate directions (same concept, multiple models).
+    # A cluster may have support from 1 model (unique knowledge) or many (consensus).
     used = set()
     clusters: list[list[dict]] = []
 
@@ -91,22 +93,26 @@ def build_constellation(geometries: list[dict], n_directions: int,
             if j in used:
                 continue
             if cand["source_model"] == seed["source_model"]:
-                continue  # don't cluster same-model directions
+                continue  # don't merge same-model directions
             score = token_overlap_score(seed["top_tokens"], cand["top_tokens"])
             if score >= overlap_threshold:
                 cluster.append(cand)
                 used.add(j)
-        if len(set(d["source_model"] for d in cluster)) >= min_models:
-            clusters.append(cluster)
+        clusters.append(cluster)  # keep ALL clusters — no min_models filter
 
-    print(f"[constellation] {len(clusters)} cross-model consensus clusters "
-          f"(min_models={min_models}, overlap≥{overlap_threshold})", flush=True)
+    n_consensus = sum(1 for c in clusters
+                      if len(set(d["source_model"] for d in c)) >= min_models)
+    print(f"[constellation] {len(clusters)} clusters total: "
+          f"{n_consensus} cross-model (≥{min_models} models), "
+          f"{len(clusters)-n_consensus} unique to one model", flush=True)
 
-    # Sort by number of supporting models × total overlap
+    # Sort: consensus directions first, then unique-model directions.
+    # Within each tier, sort by cluster size (more evidence = more reliable).
     def cluster_score(c: list[dict]) -> float:
         n_models = len(set(d["source_model"] for d in c))
         n_dirs   = len(c)
-        return float(n_models * n_dirs)
+        # +1000 bonus per agreeing model so consensus always outranks uniques
+        return float(n_models * 1000 + n_dirs)
 
     clusters.sort(key=cluster_score, reverse=True)
     clusters = clusters[:n_directions]
