@@ -850,6 +850,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"harvest_scope", "CEC Phase 17 open-weight harvest targeting: derive scope from current Turīya anomalies + router miss patterns. Output JSON used by scripts/harvest_ow.py for demand-driven extraction.",
      {}},
+    {"seed_hdc_geometry", "CEC Phase 17 Part D: seed HDC codebook from vocab_geometry harvest JSON. Binarizes f32 PCA directions from open-weight embedding matrix into HdcVec entries, replacing random hash projections for harvested tokens.",
+     {{"json_path", "Path to qwen2.5-7b_vocab_geometry.json produced by harvest_ow.py --mode vocab_geometry", true, ""}}},
     {"routed_recall", "CEC Phase 16 CPU-native query router: dispatches to cheapest lane (exact/fuzzy/temporal/causal/hybrid) without an LLM call. Returns needs_disambiguation with named unbound slots when the typed grammar cannot fully bind the request.",
      {{"subject",       "Exact triplet subject — compiles to relational lookup",    false, ""},
       {"predicate",     "Exact triplet predicate",                                  false, ""},
@@ -966,7 +968,7 @@ void print_usage(const char* prog) {
               << "  CEC experiment: queue_experiments\n"
               << "  CEC phase15: fep_status\n"
               << "  CEC phase16: routed_recall\n"
-              << "  CEC phase17: witness_memory, reconcile_pass, harvest_scope\n"
+              << "  CEC phase17: witness_memory, reconcile_pass, harvest_scope, seed_hdc_geometry\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

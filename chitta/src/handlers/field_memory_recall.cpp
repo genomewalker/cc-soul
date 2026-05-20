@@ -1246,4 +1246,18 @@ ToolResult FieldRpcHandler::tool_harvest_scope(const json& /*params*/) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_seed_hdc_geometry(const json& params) {
+    std::string path = params.value("json_path", "");
+    if (path.empty()) return ToolResult::error("json_path required");
+    std::string raw = field_store_->seed_hdc_geometry_json(path);
+    auto parsed = json::parse(raw, nullptr, false);
+    if (!parsed.is_object() || !parsed.value("ok", false))
+        return ToolResult::error(parsed.is_object() ? parsed.value("error", raw) : raw);
+    std::ostringstream ss;
+    ss << "seed_hdc_geometry: seeded " << parsed.value("seeded_tokens", 0)
+       << " tokens, codebook_len=" << parsed.value("codebook_len", 0)
+       << "  source=" << parsed.value("source", path);
+    return ToolResult::ok(ss.str(), {{"result", parsed}});
+}
+
 } // namespace chitta

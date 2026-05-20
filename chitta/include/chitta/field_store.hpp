@@ -113,6 +113,7 @@ char* cf_routed_recall(const struct CfHandle* h, const char* request_json);
 char* cf_witness_memory(const struct CfHandle* h, uint64_t memory_id, const char* witness_kind);
 char* cf_reconcile_pass(const struct CfHandle* h);
 char* cf_harvest_scope(const struct CfHandle* h);
+char* cf_seed_hdc_geometry(const struct CfHandle* h, const char* json_path);
 
 // Skill registry FFI
 int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
@@ -927,6 +928,14 @@ public:
 
     std::string harvest_scope_json() {
         char* raw = cf_harvest_scope(handle_);
+        if (!raw) return R"({"error":"unavailable"})";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string seed_hdc_geometry_json(const std::string& json_path) {
+        char* raw = cf_seed_hdc_geometry(handle_, json_path.c_str());
         if (!raw) return R"({"error":"unavailable"})";
         std::string result(raw);
         cf_free_string(raw);

@@ -127,3 +127,4 @@
     ToolResult tool_witness_memory(const json& params);
     ToolResult tool_reconcile_pass(const json& params);
     ToolResult tool_harvest_scope(const json& params);
+    ToolResult tool_seed_hdc_geometry(const json& params);
