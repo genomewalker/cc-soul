@@ -1096,7 +1096,7 @@
           <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1" opacity="0.5"/><circle cx="10" cy="10" r="3" stroke="#CBAF86" stroke-width="1" opacity="0.7"/><line x1="10" y1="3" x2="10" y2="7" stroke="#CBAF86" stroke-width="1"/><line x1="10" y1="13" x2="10" y2="17" stroke="#CBAF86" stroke-width="1"/><line x1="3" y1="10" x2="7" y2="10" stroke="#CBAF86" stroke-width="1"/><line x1="13" y1="10" x2="17" y2="10" stroke="#CBAF86" stroke-width="1"/></svg>
         </div>
         <span class="tools-category-name">Causal Episode Compiler (Phases 1&ndash;17)</span>
-        <span class="tools-category-count">25 tools</span>
+        <span class="tools-category-count">26 tools</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
@@ -1125,6 +1125,7 @@
         <div class="tool-row"><span class="tool-name">witness_memory</span><span class="tool-desc">Promote a candidate-band memory to established on closed-loop signal: user correction, tool-result outcome, or router hit-rate delta. Open-weight-generated writes stay in candidate band until witnessed</span></div>
         <div class="tool-row"><span class="tool-name">reconcile_pass</span><span class="tool-desc">Run R0 reconciler &mdash; scan all assoc_edges for MemoryKind legality violations and candidate&rarr;established laundering. Detect contradictions by (realm, 6-word prefix) grouping. Results logged to triplet KG</span></div>
         <div class="tool-row"><span class="tool-name">harvest_scope</span><span class="tool-desc">Generate demand-driven extraction targets from current Turīya anomalies and router misses &mdash; produces harvest_targets.json consumed by scripts/harvest_ow.py. Never bulk-ingests a static corpus</span></div>
+        <div class="tool-row"><span class="tool-name">seed_hdc_geometry</span><span class="tool-desc">Load vocab_geometry harvest JSON and seed the HDC codebook with binarized f32 directions from an open-weight embedding matrix &mdash; grounds HDC vectors in model semantics without ongoing inference cost</span></div>
       </div>
     </div>
 
