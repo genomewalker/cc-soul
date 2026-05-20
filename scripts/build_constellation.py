@@ -24,17 +24,41 @@ import json
 import os
 import sys
 from pathlib import Path
+import numpy as np
 
 
 def load_geometry(path: str) -> dict | None:
+    """Load a vocab_geometry file — prefers .npz over .json for speed."""
+    npz_path = str(path).replace(".json", "") + ".npz"
+    if path.endswith(".json") and os.path.exists(npz_path):
+        path = npz_path  # always prefer binary
+
     try:
-        with open(path) as f:
-            d = json.load(f)
-        if d.get("mode") not in ("vocab_geometry", "constellation"):
-            return None
-        if not d.get("directions"):
-            return None
-        return d
+        if path.endswith(".npz"):
+            z = np.load(path, allow_pickle=True)
+            meta = json.loads(z["meta"].item().decode() if isinstance(z["meta"].item(), bytes)
+                              else z["meta"].item())
+            if meta.get("mode") not in ("vocab_geometry", "constellation"):
+                return None
+            directions_arr = z["directions"]           # float32[n, d]
+            top_tokens_list = [json.loads(s) for s in z["top_tokens"]]
+            meta["directions"] = [
+                {"feature_id": i,
+                 "direction": directions_arr[i].tolist(),
+                 "top_tokens": top_tokens_list[i],
+                 "provenance": "ow_distilled",
+                 "source_model": meta.get("source_model", "unknown")}
+                for i in range(len(top_tokens_list))
+            ]
+            return meta
+        else:
+            with open(path) as f:
+                d = json.load(f)
+            if d.get("mode") not in ("vocab_geometry", "constellation"):
+                return None
+            if not d.get("directions"):
+                return None
+            return d
     except Exception as e:
         print(f"[constellation] skipping {path}: {e}", file=sys.stderr)
         return None

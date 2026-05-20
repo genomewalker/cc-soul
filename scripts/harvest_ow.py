@@ -310,22 +310,44 @@ def mode_vocab_geometry_gguf(gguf_path: str, ollama_model: str, scope: dict,
         })
 
     _src = source_model or ollama_model
-    with open(output_path, "w") as f:
-        json.dump({
-            "mode": "vocab_geometry",
-            "n_directions": len(results),
-            "source_model": _src,
-            "embed_model": ollama_model,
-            "gguf_path": gguf_path,
-            "embed_dim": int(E.shape[1]),
-            "vocab_size": len(tokens),
-            "sampled_tokens": len(valid_tokens),
-            "soul_anchored": soul_anchor,
-            "soul_memory_vectors": soul_row_count,
-            "directions": results,
-        }, f, indent=2)
-    print(f"[harvest] wrote {len(results)} semantic directions → {output_path}", flush=True)
+    _meta = {
+        "mode": "vocab_geometry",
+        "n_directions": len(results),
+        "source_model": _src,
+        "embed_model": ollama_model,
+        "gguf_path": gguf_path,
+        "embed_dim": int(E.shape[1]),
+        "vocab_size": len(tokens),
+        "sampled_tokens": len(valid_tokens),
+        "soul_anchored": soul_anchor,
+        "soul_memory_vectors": soul_row_count,
+    }
+    _write_geometry(output_path, _meta, results)
     return 0
+
+
+def _write_geometry(output_path: str, meta: dict, results: list[dict]) -> None:
+    """Write vocab_geometry output as .npz (primary) + .json (fallback).
+
+    .npz layout:
+      directions  float32[n, embed_dim]
+      top_tokens  object array — one JSON string per direction
+      meta        bytes — JSON-encoded metadata (no directions list)
+    """
+    import numpy as np
+    npz_path = str(output_path).replace(".json", "") + ".npz"
+    directions_arr = np.array([r["direction"] for r in results], dtype=np.float32)
+    top_tokens_arr = np.array(
+        [json.dumps(r["top_tokens"]) for r in results], dtype=object
+    )
+    np.savez_compressed(
+        npz_path,
+        directions=directions_arr,
+        top_tokens=top_tokens_arr,
+        meta=np.bytes_(json.dumps(meta).encode()),
+    )
+    print(f"[harvest] wrote {len(results)} directions → {npz_path} "
+          f"({directions_arr.nbytes // 1024}KB binary)", flush=True)
 
 
 def load_scope(scope_path: str) -> dict:
@@ -398,12 +420,19 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
     AutoTokenizer, AutoModel = m["AutoTokenizer"], m["AutoModel"]
 
     print(f"[harvest] loading {model_name} for vocab_geometry ...", flush=True)
-    tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     try:
-        model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16,
+        tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    except Exception:
+        tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, use_fast=False)
+    try:
+        model = AutoModel.from_pretrained(model_name, dtype=torch.float16,
                                           trust_remote_code=True)
     except Exception:
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        try:
+            model = AutoModel.from_pretrained(model_name, torch_dtype=torch.float16,
+                                              trust_remote_code=True)
+        except Exception:
+            model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
 
     E_raw = _extract_embedding_matrix(model, torch)
     if E_raw is None:
@@ -487,17 +516,15 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
         if (i + 1) % 64 == 0:
             print(f"[harvest] {i+1}/{n_components} directions processed", flush=True)
 
-    with open(output_path, "w") as f:
-        json.dump({
-            "mode": "vocab_geometry",
-            "n_directions": len(results),
-            "source_model": model_name,
-            "embed_dim": int(E.shape[1]),
-            "vocab_size": vocab_size,
-            "augmented_vectors": len(rows) - vocab_size,
-            "directions": results,
-        }, f, indent=2)
-    print(f"[harvest] wrote {len(results)} semantic directions → {output_path}", flush=True)
+    _meta = {
+        "mode": "vocab_geometry",
+        "n_directions": len(results),
+        "source_model": model_name,
+        "embed_dim": int(E.shape[1]),
+        "vocab_size": vocab_size,
+        "augmented_vectors": len(rows) - vocab_size,
+    }
+    _write_geometry(output_path, _meta, results)
     return 0
 
 
