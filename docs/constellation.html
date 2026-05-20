@@ -312,6 +312,14 @@ const MODEL_FAMILIES = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function normTok(t) { return t.toLowerCase().replace(/^[Ġ▁Ċ]+/, "").trim(); }
 
+function nodeLabel(d) {
+  const t = d.tokens[0] || "";
+  // Dense run of non-ASCII Latin-supplement chars = still-broken mojibake → fall back to id
+  const nonAscii = (t.match(/[\x80-˿]/g) || []).length;
+  if (nonAscii >= 3 && !/[A-Za-z]{3}/.test(t)) return `#${d.id}`;
+  return t;
+}
+
 function dominantFamily(models) {
   const counts = {};
   for (const m of models) {
@@ -417,7 +425,7 @@ function initGalaxy(nodes, edges) {
 
   nodeSel.append("text")
     .attr("dy",d=>nodeR(d)+11).attr("text-anchor","middle")
-    .text(d=>d.tokens[0]||"");
+    .text(d=>nodeLabel(d));
 
   sim.on("tick",()=>{
     linkSel.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
