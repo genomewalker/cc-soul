@@ -142,4 +142,9 @@ echo "[harvest-all] building constellation from ${#GEOM_FILES[@]} geometry files
 echo "[harvest-all] seeding HDC codebook from constellation ..."
 "$CHITTA" seed_hdc_geometry --json_path "$CONST_JSON"
 
+echo "[harvest-all] exporting web data for GitHub Pages ..."
+"$PYBIN" "$SCRIPT_DIR/export_constellation_web.py" \
+    --input "$CONST_JSON" \
+    --output "$SCRIPT_DIR/../docs/constellation-data.json"
+
 echo "[harvest-all] constellation seeded. $(date)"
