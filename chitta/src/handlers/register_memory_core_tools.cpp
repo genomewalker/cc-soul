@@ -24,6 +24,31 @@ void FieldRpcHandler::register_memory_core_tools() {
     handlers_["remember"] = [this](const json& p) { return tool_remember(p); };
 
     tools_.push_back({
+        {"name", "remember_batch"},
+        {"description", "Store multiple memories in a single round-trip (high-throughput bulk ingest)"},
+        {"inputSchema", {{"type", "object"},
+            {"properties", {
+                {"items", {{"type", "array"}, {"description", "Array of memory objects (same fields as remember)"},
+                    {"items", {{"type", "object"}, {"properties", {
+                        {"content", {{"type", "string"}}},
+                        {"realm", {{"type", "string"}}},
+                        {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                        {"valid_from", {{"type", "string"}}},
+                        {"source_session", {{"type", "string"}}},
+                        {"visibility", {{"type", "integer"}}}
+                    }}, {"required", {"content"}}}}}},
+                {"realm", {{"type", "string"}, {"description", "Default realm for all items"}}}
+            }}, {"required", {"items"}}
+        }}
+    });
+    handlers_["remember_batch"] = [this](const json& p) { return tool_remember_batch(p); };
+
+    tools_.push_back({{"name", "flush_embeddings"}, {"description", "Flush the pending embedding queue synchronously — call after remember_batch to ensure HNSW/semantic recall is available immediately. Returns {flushed: N}."},
+        {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+    });
+    handlers_["flush_embeddings"] = [this](const json& p) { return tool_flush_embeddings(p); };
+
+    tools_.push_back({
         {"name", "recall"},
         {"description", "Search memory by semantic similarity with realm filtering"},
         {"inputSchema", {{"type", "object"},
@@ -57,6 +82,7 @@ void FieldRpcHandler::register_memory_core_tools() {
         }}
     });
     handlers_["recall_temporal"] = [this](const json& p) { return tool_recall_temporal(p); };
+    handlers_["recall_temporal_events"] = [this](const json& p) { return tool_recall_temporal_events(p); };
 
     tools_.push_back({{"name","recall_keyword"},{"description","BM25 keyword search"},
         {"inputSchema",{{"type","object"},{"properties",{

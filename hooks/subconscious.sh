@@ -109,7 +109,9 @@ find_stray_daemons() {
         [[ -r "/proc/$pid/cmdline" ]] || continue
         local cmdline
         cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline")
-        if [[ "$cmdline" != *"--path $MIND_PATH"* ]]; then
+        # Only flag daemons with NO --path (would default to same mind path → conflict).
+        # Daemons with a different explicit --path are isolated by design; leave them alone.
+        if [[ "$cmdline" != *"--path "* ]]; then
             stray_pids+="$pid "
         fi
     done

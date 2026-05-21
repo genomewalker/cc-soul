@@ -195,6 +195,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"realm", "Filter by realm", false, nullptr},
       {"include_global", "Include global memories", false, "true"}}},
 
+    {"recall_temporal_events", "Bridge query: find entities active in a time window via EventTape, then recall their memories. Use when you don't know the realm — EventTape discovers which realms had activity.",
+     {{"start", "Start date (ISO8601 or YYYY-MM-DD)", false, nullptr},
+      {"end",   "End date (ISO8601 or YYYY-MM-DD)",   false, nullptr},
+      {"limit", "Max results", false, "20"}}},
+
     {"recall_session", "Session-level recall: groups chunk evidence by source session using noisy-OR aggregation",
      {{"query", "Natural language query", true, nullptr},
       {"limit", "Max sessions to return", false, "10"},

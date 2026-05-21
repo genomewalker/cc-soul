@@ -451,12 +451,15 @@ def mode_vocab_geometry(model_name: str, scope: dict, output_path: str, budget: 
     if is_small_vocab and augment_seqs and Path(augment_seqs).exists():
         print(f"[harvest] small vocab ({vocab_size}) — augmenting with contextual "
               f"embeddings from {augment_seqs} ...", flush=True)
+        max_seqs = min(500, budget * 5)
         seqs = []
         with open(augment_seqs) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith(">"):  # skip FASTA headers
                     seqs.append(line[:512])   # cap length
+                    if len(seqs) >= max_seqs:
+                        break
         if seqs:
             model.eval()
             device = "cuda" if torch.cuda.is_available() else "cpu"

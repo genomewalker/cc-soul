@@ -594,6 +594,21 @@ public:
         return hits_to_results(buf, written);
     }
 
+    /// Bridge query: discover active entities via EventTape, recall their memories.
+    std::vector<FieldRecallHit> recall_temporal_events(
+        int64_t start_ms,
+        int64_t end_ms,
+        size_t  limit
+    ) {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+        int r = cf_recall_temporal_events(handle_, start_ms, end_ms, limit,
+                                          buf, MAX_HITS, &written);
+        if (r != 0) throw std::runtime_error(last_error());
+        return hits_to_results(buf, written);
+    }
+
     /// Artifact recall — find memories associated with a file path.
     std::vector<FieldRecallHit> recall_artifact(
         const std::string& path,
