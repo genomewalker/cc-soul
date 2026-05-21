@@ -1,0 +1,407 @@
+{
+  "dataset": "longmemeval_s",
+  "sha": "caba46a",
+  "judge": "codex exec (LongMemEval exact prompts)",
+  "rows": [
+    {
+      "qid": "e47becba",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 461,
+      "hypothesis": "I don't know.",
+      "gold": "Business Administration"
+    },
+    {
+      "qid": "118b2229",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 472,
+      "hypothesis": "45 minutes each way.",
+      "gold": "45 minutes each way"
+    },
+    {
+      "qid": "51a45a95",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 664,
+      "hypothesis": "In your email inbox.",
+      "gold": "Target"
+    },
+    {
+      "qid": "58bf7951",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 648,
+      "hypothesis": "The Glass Menagerie",
+      "gold": "The Glass Menagerie"
+    },
+    {
+      "qid": "1e043500",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 3680,
+      "hypothesis": "Summer Vibes",
+      "gold": "Summer Vibes"
+    },
+    {
+      "qid": "c5e8278d",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 458,
+      "hypothesis": "Johnson",
+      "gold": "Johnson"
+    },
+    {
+      "qid": "6ade9755",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 430,
+      "hypothesis": "Serenity Yoga",
+      "gold": "Serenity Yoga"
+    },
+    {
+      "qid": "6f9b354f",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1079,
+      "hypothesis": "Light gray.",
+      "gold": "a lighter shade of gray"
+    },
+    {
+      "qid": "58ef2f1c",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 607,
+      "hypothesis": "I don't know.",
+      "gold": "February 14th"
+    },
+    {
+      "qid": "f8c5f88b",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 520,
+      "hypothesis": "A sports store downtown.",
+      "gold": "the sports store downtown"
+    },
+    {
+      "qid": "5d3d2817",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 432,
+      "hypothesis": "Marketing specialist at a small startup.",
+      "gold": "Marketing specialist at a small startup"
+    },
+    {
+      "qid": "7527f7e2",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1236,
+      "hypothesis": "$800",
+      "gold": "$800"
+    },
+    {
+      "qid": "c960da58",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 893,
+      "hypothesis": "20",
+      "gold": "20"
+    },
+    {
+      "qid": "3b6f954b",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1105,
+      "hypothesis": "University of Melbourne",
+      "gold": "University of Melbourne in Australia"
+    },
+    {
+      "qid": "726462e0",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 621,
+      "hypothesis": "10%",
+      "gold": "10%"
+    },
+    {
+      "qid": "94f70d80",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 3989,
+      "hypothesis": "4 hours",
+      "gold": "4 hours"
+    },
+    {
+      "qid": "66f24dbb",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 654,
+      "hypothesis": "A yellow dress and a pair of earrings to match.",
+      "gold": "a yellow dress"
+    },
+    {
+      "qid": "ad7109d1",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 482,
+      "hypothesis": "1 Gbps",
+      "gold": "500 Mbps"
+    },
+    {
+      "qid": "af8d2e46",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1573,
+      "hypothesis": "7",
+      "gold": "7"
+    },
+    {
+      "qid": "dccbc061",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 448,
+      "hypothesis": "I don't know.",
+      "gold": "A staunch atheist"
+    },
+    {
+      "qid": "c8c3f81d",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 462,
+      "hypothesis": "Nike",
+      "gold": "Nike"
+    },
+    {
+      "qid": "8ebdbe50",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 460,
+      "hypothesis": "Data Science",
+      "gold": "Data Science"
+    },
+    {
+      "qid": "6b168ec8",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 431,
+      "hypothesis": "3",
+      "gold": "three"
+    },
+    {
+      "qid": "75499fd8",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 420,
+      "hypothesis": "I don't know.",
+      "gold": "Golden Retriever"
+    },
+    {
+      "qid": "21436231",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1028,
+      "hypothesis": "12",
+      "gold": "12"
+    },
+    {
+      "qid": "95bcc1c8",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1959,
+      "hypothesis": "10",
+      "gold": "10"
+    },
+    {
+      "qid": "0862e8bf",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 979,
+      "hypothesis": "Luna",
+      "gold": "Luna"
+    },
+    {
+      "qid": "853b0a1d",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 432,
+      "hypothesis": "18",
+      "gold": "18"
+    },
+    {
+      "qid": "a06e4cfe",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1139,
+      "hypothesis": "3:1",
+      "gold": "3:1"
+    },
+    {
+      "qid": "37d43f65",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 691,
+      "hypothesis": "16GB",
+      "gold": "16GB"
+    },
+    {
+      "qid": "b86304ba",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 465,
+      "hypothesis": "I don't know.",
+      "gold": "The painting is worth triple what I paid for it."
+    },
+    {
+      "qid": "d52b4f67",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 544,
+      "hypothesis": "Grand Ballroom",
+      "gold": "The Grand Ballroom"
+    },
+    {
+      "qid": "25e5aa4f",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1103,
+      "hypothesis": "UCLA",
+      "gold": "University of California, Los Angeles (UCLA)"
+    },
+    {
+      "qid": "caf9ead2",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 579,
+      "hypothesis": "5 hours",
+      "gold": "5 hours"
+    },
+    {
+      "qid": "8550ddae",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 421,
+      "hypothesis": "I don't know.",
+      "gold": "lavender gin fizz"
+    },
+    {
+      "qid": "60d45044",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 451,
+      "hypothesis": "Japanese short-grain rice",
+      "gold": "Japanese short-grain rice"
+    },
+    {
+      "qid": "3f1e9474",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 533,
+      "hypothesis": "A memory assistant (me).",
+      "gold": "Sarah"
+    },
+    {
+      "qid": "86b68151",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 570,
+      "hypothesis": "IKEA",
+      "gold": "IKEA"
+    },
+    {
+      "qid": "577d4d32",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 425,
+      "hypothesis": "9 PM",
+      "gold": "7 pm"
+    },
+    {
+      "qid": "ec81a493",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 556,
+      "hypothesis": "500",
+      "gold": "500"
+    },
+    {
+      "qid": "15745da0",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 527,
+      "hypothesis": "Three months.",
+      "gold": "three months"
+    },
+    {
+      "qid": "e01b8e2f",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 901,
+      "hypothesis": "Hawaii",
+      "gold": "Hawaii"
+    },
+    {
+      "qid": "bc8a6e93",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 440,
+      "hypothesis": "Lemon blueberry cake",
+      "gold": "a lemon blueberry cake"
+    },
+    {
+      "qid": "ccb36322",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1009,
+      "hypothesis": "Spotify",
+      "gold": "Spotify"
+    },
+    {
+      "qid": "001be529",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 686,
+      "hypothesis": "Over a year.",
+      "gold": "over a year"
+    },
+    {
+      "qid": "b320f3f8",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 584,
+      "hypothesis": "Blue Snaggletooth",
+      "gold": "a blue Snaggletooth"
+    },
+    {
+      "qid": "19b5f2b3",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 1151,
+      "hypothesis": "Two weeks.",
+      "gold": "two weeks"
+    },
+    {
+      "qid": "4fd1909e",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 928,
+      "hypothesis": "Xfinity Center",
+      "gold": "Xfinity Center"
+    },
+    {
+      "qid": "545bd2b5",
+      "qtype": "single-session-user",
+      "correct": true,
+      "latency_ms": 775,
+      "hypothesis": "2 hours",
+      "gold": "2 hours"
+    },
+    {
+      "qid": "8a137a7f",
+      "qtype": "single-session-user",
+      "correct": false,
+      "latency_ms": 896,
+      "hypothesis": "I don't know.",
+      "gold": "Philips LED bulb"
+    }
+  ]
+}

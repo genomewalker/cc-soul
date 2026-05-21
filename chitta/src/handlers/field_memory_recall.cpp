@@ -139,6 +139,78 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
     return ToolResult::ok("Stored memory #" + id_str, result_data);
 }
 
+ToolResult FieldRpcHandler::tool_remember_batch(const json& params) {
+    if (!params.contains("items") || !params["items"].is_array())
+        return ToolResult::error("items array is required");
+
+    if (sandbox::is_sandboxed())
+        return ToolResult::error("remember_batch not available in sandbox mode");
+
+    const auto& items = params["items"];
+    json ids = json::array();
+    int stored = 0;
+
+    for (const auto& item : items) {
+        std::string content = item.value("content", "");
+        if (content.empty()) { ids.push_back(nullptr); continue; }
+
+        std::string kind  = item.value("type", "episode");
+        std::string realm = item.value("realm", params.value("realm", "brahman"));
+        float confidence  = item.value("confidence", 0.8f);
+        float decay_rate  = 0.001f;
+
+        static const std::unordered_set<std::string> code_kinds = {
+            "symbol", "projectessence", "modulestate", "patternstate"
+        };
+        if (code_kinds.count(kind)) decay_rate = 0.0f;
+        if (kind == "episode") {
+            if (auto act = classify_speech_act(content)) kind = *act;
+        }
+
+        std::vector<float> embedding;
+        if (item.contains("_preembedding")) {
+            embedding = item["_preembedding"].get<std::vector<float>>();
+        } else {
+            embedding = embed_ssl_aware(content);
+        }
+
+        int64_t authored_at_ms = 0;
+        if (item.contains("valid_from")) {
+            std::string vf = item.value("valid_from", "");
+            if (!vf.empty()) authored_at_ms = parse_date_ms(vf);
+        }
+
+        uint64_t id = field_store_->remember(kind, realm, content, embedding,
+                                             confidence, decay_rate, authored_at_ms);
+        if (id == 0) { ids.push_back(nullptr); continue; }
+
+        if (item.contains("source_session")) {
+            std::string ss = item.value("source_session", "");
+            if (!ss.empty()) field_store_->set_source_session(id, ss);
+        }
+
+        if (item.contains("tags") && item["tags"].is_array()) {
+            for (const auto& tag : item["tags"]) {
+                if (tag.is_string())
+                    field_store_->add_triplet(std::to_string(id), "tagged",
+                                             tag.get<std::string>());
+            }
+        }
+
+        ids.push_back(std::to_string(id));
+        stored++;
+    }
+
+    return ToolResult::ok("Stored " + std::to_string(stored) + " memories",
+                          {{"ids", ids}, {"stored", stored}});
+}
+
+ToolResult FieldRpcHandler::tool_flush_embeddings(const json& /*params*/) {
+    if (!subconscious_) return ToolResult::ok("ok", {{"flushed", 0}, {"note", "no embedder"}});
+    size_t n = subconscious_->flush_embedding_queue();
+    return ToolResult::ok("Flushed " + std::to_string(n) + " embeddings", {{"flushed", (int)n}});
+}
+
 ToolResult FieldRpcHandler::tool_recall(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");
@@ -375,6 +447,31 @@ ToolResult FieldRpcHandler::tool_recall_temporal(const json& params) {
         ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
     }
     return ToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}, {"realm", realm}});
+}
+
+ToolResult FieldRpcHandler::tool_recall_temporal_events(const json& params) {
+    size_t limit = static_cast<size_t>(params.value("limit", 20));
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t start_ms = 0, end_ms = now_ms;
+    if (params.contains("start")) {
+        auto ts = parse_timestamp_str(params["start"].get<std::string>());
+        if (ts) start_ms = *ts;
+    }
+    if (params.contains("end")) {
+        auto ts = parse_timestamp_str(params["end"].get<std::string>());
+        if (ts) end_ms = *ts;
+    }
+    if (start_ms == 0) start_ms = end_ms - (7LL * 24 * 3600 * 1000);
+
+    auto hits = field_store_->recall_temporal_events(start_ms, end_ms, limit);
+    json results_json = hits_to_results_json(hits);
+    std::ostringstream ss;
+    ss << "Found " << hits.size() << " memories via EventTape entities:\n";
+    for (const auto& r : results_json) {
+        ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
+    }
+    return ToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}});
 }
 
 ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {

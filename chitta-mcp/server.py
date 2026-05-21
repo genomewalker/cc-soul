@@ -131,7 +131,7 @@ ADVANCED_TOOLS = {
     # Research — individual research_* tools replaced by unified `research` gateway
     "research_cycle", "research_store", "research_topics",
     # Recall variants — replaced by unified `recall` with strategy param
-    "recall_by_priority", "recall_temporal", "hybrid_recall", "smart_recall",
+    "recall_by_priority", "recall_temporal", "recall_temporal_events", "hybrid_recall", "smart_recall",
     # Sadhana — individual sadhana_* tools replaced by unified `sadhana` gateway
     "sadhana_checkpoint", "sadhana_list", "sadhana_pause", "sadhana_resume",
     "sadhana_set_goal", "sadhana_set_interval", "sadhana_set_model",

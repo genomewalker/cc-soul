@@ -388,32 +388,48 @@ configure_hooks() {
 }
 
 # Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
+# Only targets the default-path daemon (MIND_PATH-based), not auxiliary daemons.
 stop_daemon() {
-    # Try graceful shutdown via chittad
+    # Try graceful shutdown via chittad (targets only the default socket)
     if [[ -x "$BIN_DIR/chittad" ]]; then
         if "$BIN_DIR/chittad" shutdown 2>/dev/null; then
-            for i in $(seq 1 20); do
-                pgrep -f "chittad daemon" >/dev/null 2>&1 || break
-                sleep 0.5
-            done
+            sleep 2
             return 0
         fi
     fi
 
-    # Fallback: signal daemon directly
-    local daemon_pid=$(pgrep -f "chittad daemon" 2>/dev/null || true)
-    if [[ -n "$daemon_pid" ]]; then
-        echo "[cc-soul] Stopping daemon (pid $daemon_pid)..."
-        kill -TERM "$daemon_pid" 2>/dev/null || true
-        for i in $(seq 1 20); do
-            kill -0 "$daemon_pid" 2>/dev/null || break
-            sleep 0.5
-        done
-        kill -0 "$daemon_pid" 2>/dev/null && kill -9 "$daemon_pid" 2>/dev/null || true
+    # Fallback: compute DJB2 hash of the default mind path to find the correct PID file.
+    # Using ls|head -1 is wrong: if main daemon already cleaned up its PID file, ls would
+    # return an auxiliary daemon's PID file (e.g., a benchmark daemon) and kill it.
+    local default_mind="${MIND_PATH:-$HOME/.claude/mind}"
+    local hash
+    hash=$(python3 -c "
+h = 5381
+for c in '${default_mind}':
+    h = ((h << 5) + h + ord(c)) & 0xFFFFFFFF
+print(h)
+" 2>/dev/null || true)
+    local pid_file=""
+    if [[ -n "$hash" ]]; then
+        local sock_dir="${XDG_RUNTIME_DIR:-}/chitta"
+        [[ -z "${XDG_RUNTIME_DIR:-}" ]] && sock_dir="/run/user/$(id -u)/chitta"
+        pid_file="$sock_dir/chitta-${hash}.pid"
+        [[ ! -f "$pid_file" ]] && pid_file="/tmp/chitta-${hash}.pid"
+        [[ ! -f "$pid_file" ]] && pid_file=""
     fi
-
-    # Clean up stale files
-    rm -f /tmp/chitta-*.sock /tmp/chitta-*.lock /tmp/chitta-*.pid 2>/dev/null || true
+    if [[ -f "$pid_file" ]]; then
+        local daemon_pid
+        daemon_pid=$(cat "$pid_file" 2>/dev/null || true)
+        if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
+            echo "[cc-soul] Stopping daemon (pid $daemon_pid)..."
+            kill -TERM "$daemon_pid" 2>/dev/null || true
+            for i in $(seq 1 20); do
+                kill -0 "$daemon_pid" 2>/dev/null || break
+                sleep 0.5
+            done
+            kill -0 "$daemon_pid" 2>/dev/null && kill -9 "$daemon_pid" 2>/dev/null || true
+        fi
+    fi
 }
 
 validate_binaries() {

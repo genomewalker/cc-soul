@@ -93,8 +93,11 @@
     // ── Strength/forget ops ──────────────────────────────────────────────────
 
     ToolResult tool_remember(const json& params);
+    ToolResult tool_remember_batch(const json& params);
+    ToolResult tool_flush_embeddings(const json& params);
     ToolResult tool_recall(const json& params);
     ToolResult tool_recall_temporal(const json& params);
+    ToolResult tool_recall_temporal_events(const json& params);
     ToolResult tool_recall_keyword(const json& params);
     ToolResult tool_hybrid_recall(const json& params);
     ToolResult tool_smart_recall(const json& params);
