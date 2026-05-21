@@ -2,6 +2,33 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.41.3] - 2026-05-21
+
+### Added — LongMemEval benchmark pipeline (78% on longmemeval_s)
+
+- `scripts/benchmark_longmemeval.py`: production-ready benchmark harness against
+  the LongMemEval dataset. Ingests all haystack turns per question (no cap),
+  prioritising user turns by length score. Sequential ingestion with 120 s recall
+  timeout; no pipeline overlap that previously caused watchdog kills.
+- Recall strategy: hybrid BM25+HDC (limit 30) + `recall_session` for non-temporal
+  questions + keyword second-pass recall (strips stop words, re-queries BM25).
+- `source_session` metadata on every ingested turn enables session-level
+  noisy-OR aggregation via `recall_session`.
+- Synthesis via `claude -p` with raw-memories context (no date-parse truncation);
+  codex CLI fallback if claude unavailable.
+- Achieves **78.0% (39/50)** on `longmemeval_s`, matching the best prior run.
+
+### Added — `flush_embeddings` RPC tool
+
+- `cf_flush_embedding_queue` FFI export, C++ handler `tool_flush_embeddings`,
+  registered as `flush_embeddings` tool. Returns `{flushed: N}`.
+
+### Fixed — `subconscious.sh` stray-daemon detection
+
+- `kill_stray_daemons()` now only targets daemons with **no `--path` flag**
+  (those that would default to the same mind path). Daemons started with an
+  explicit `--path <dir>` (e.g. isolated benchmark daemons) are left untouched.
+
 ## [5.32.0] - 2026-05-19
 
 ### Added — CEC Phase 8: Cross-Session Motif Q-Values
