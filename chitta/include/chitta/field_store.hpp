@@ -688,6 +688,10 @@ public:
         return cf_requeue_ghost_embeddings(handle_);
     }
 
+    int64_t requeue_all_embeddings(const char* model_id, size_t model_id_len) {
+        return cf_requeue_all_embeddings(handle_, model_id, model_id_len);
+    }
+
     size_t raw_pending_count() const {
         return cf_pending_count(handle_);
     }

@@ -4870,4 +4870,32 @@ COMPOSITE_TOOLS = [
             },
             "required": ["query"],
         },
+    ),
+    Tool(
+        name="run_hint_enricher",
+        description="Generate retrieval hints for unprocessed memories using chitta-hint-tuned. "
+                    "Reads memories without a retrieval_hint tag, calls the local hint model, "
+                    "stores each hint as a derived memory (kind=hint, tags=retrieval_hint), "
+                    "and marks the source memory with hint:done. Run after a session to enrich "
+                    "new memories for better recall.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max memories to enrich per run (default: 100)",
+                    "default": 100,
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Ollama model to use (default: chitta-hint-tuned)",
+                    "default": "chitta-hint-tuned",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview hints without writing to memory (default: false)",
+                    "default": False,
+                },
+            },
+        },
     )]
