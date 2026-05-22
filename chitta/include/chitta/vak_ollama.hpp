@@ -94,6 +94,44 @@ private:
         } catch (...) { return false; }
     }
 
+    // Embed a single input with progressive truncation on HTTP 400 (context overflow).
+    // Tries full text first, then halves down to 500 bytes before giving up.
+    Vector embed_one_safe(const std::string& input) {
+        static const size_t TRUNCATION_STEPS[] = {
+            std::string::npos, 4000, 2000, 1000, 500
+        };
+        for (size_t max_bytes : TRUNCATION_STEPS) {
+            std::string text = (max_bytes == std::string::npos || input.size() <= max_bytes)
+                               ? input : input.substr(0, max_bytes);
+            nlohmann::json body;
+            body["model"] = model_;
+            body["input"] = nlohmann::json::array({text});
+            std::string body_str = body.dump();
+            try {
+                auto [host, port, path] = parse_url(base_url_ + "/api/embed");
+                httplib::Client cli(host, port);
+                cli.set_read_timeout(TIMEOUT_MS / 1000, 0);
+                cli.set_write_timeout(5, 0);
+                auto res = cli.Post(path.c_str(), body_str, "application/json");
+                if (!res) continue;
+                if (res->status == 400) continue;  // truncate and retry
+                if (res->status != 200) { ready_ = false; return Vector{}; }
+                auto j = nlohmann::json::parse(res->body);
+                auto& emb_field = j.contains("embeddings") ? j["embeddings"] : j["embedding"];
+                if (emb_field.empty()) continue;
+                auto& row = emb_field[0];
+                if (row.size() != EMBED_DIM) continue;
+                Vector v;
+                v.data.resize(EMBED_DIM);
+                for (size_t d = 0; d < EMBED_DIM; ++d) v.data[d] = row[d].get<float>();
+                l2_normalize(v);
+                return v;
+            } catch (...) {}
+        }
+        log("[ollama-embed] WARNING: could not embed even at 500 bytes — zero-vec");
+        return Vector{};
+    }
+
     std::vector<Vector> embed_batch(const std::vector<std::string>& inputs) {
         std::vector<Vector> out(inputs.size());  // zero-vectors as fallback
 
@@ -115,6 +153,14 @@ private:
                         std::this_thread::sleep_for(
                             std::chrono::milliseconds(200 * (1 << attempt)));
                         continue;
+                    }
+                    // On persistent 400 (context overflow), retry each item individually
+                    // with progressive truncation so no memory is silently skipped.
+                    if (res && res->status == 400) {
+                        for (size_t i = 0; i < inputs.size(); ++i)
+                            out[i] = embed_one_safe(inputs[i]);
+                        ready_ = true;
+                        return out;
                     }
                     log("[ollama-embed] ERROR: HTTP " +
                         std::to_string(res ? res->status : -1) + " after " +
