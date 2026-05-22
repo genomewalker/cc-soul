@@ -74,6 +74,7 @@ vectors/
 *.pt
 *.pth
 *.safetensors
+!chitta-mcp/enrichers/chitta-hint-adapter/*.safetensors
 synapse/models/
 
 # Build artifacts

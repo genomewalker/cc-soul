@@ -207,6 +207,8 @@ ADVANCED_TOOLS = {
     "recall_true_counterfactual", "hypothesis_probes", "turiya_status", "tape_stats",
     "verbalize_rules", "queue_experiments", "fep_status", "routed_recall",
     "witness_memory", "reconcile_pass", "harvest_scope", "seed_hdc_geometry",
+    # Hint enricher
+    "run_hint_enricher",
 }
 
 # Combined set of tools to hide from listing (but still callable)
@@ -1946,6 +1948,29 @@ def handle_memory_edit_gateway(arguments: dict) -> str:
 
 
 # Map composite tool names to handlers
+def handle_run_hint_enricher(arguments: dict) -> str:
+    import subprocess as _sp
+    script = os.path.join(os.path.dirname(__file__), "enrichers", "hint_enricher.py")
+    mind = os.environ.get("MIND", os.path.expanduser("~/.claude/mind"))
+    cmd = [
+        "python3", script,
+        "--mind", mind,
+        "--limit", str(arguments.get("limit", 100)),
+        "--model", str(arguments.get("model", "chitta-hint-tuned")),
+    ]
+    if arguments.get("dry_run"):
+        cmd.append("--dry-run")
+    try:
+        result = _sp.run(cmd, capture_output=True, text=True, timeout=300)
+        out = result.stdout.strip()
+        err = result.stderr.strip()
+        if result.returncode != 0:
+            return f"[hint_enricher] error (rc={result.returncode})\n{err}\n{out}"
+        return out if out else (err if err else "[hint_enricher] done (no output)")
+    except Exception as e:
+        return f"[hint_enricher] failed: {e}"
+
+
 COMPOSITE_HANDLERS = {
     "advanced": handle_advanced,
     "soul_repl": handle_soul_repl,
@@ -1983,6 +2008,7 @@ COMPOSITE_HANDLERS = {
     "ack_memory": handle_ack_memory,
     "nack_memory": handle_nack_memory,
     "remember_typed": handle_remember_typed,
+    "run_hint_enricher": handle_run_hint_enricher,
 }
 
 # Messaging tools that need session_id auto-injection

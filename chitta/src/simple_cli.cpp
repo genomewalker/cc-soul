@@ -25,11 +25,8 @@
 #include <chitta/queue_processor.hpp>
 #include <chitta/http_viz.hpp>
 #include <chitta/version.hpp>
-#ifdef CHITTA_WITH_ONNX
-#include <chitta/vak_onnx.hpp>
+#include <chitta/vak_ollama.hpp>
 #include <chitta/vak_timeout.hpp>
-#include <chitta/ssl_gloss.hpp>
-#endif
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -947,30 +944,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Create yantra for embeddings
-#ifdef CHITTA_WITH_ONNX
-    // Thread limits already set at main() start
-    const int max_onnx_threads = 4;
-
-    std::string model_path = default_model_path();
-    std::string vocab_path = default_vocab_path();
-    AntahkaranaYantra::Config yantra_config;
-    yantra_config.pooling = PoolingStrategy::Mean;
-    yantra_config.normalize_embeddings = true;
-    yantra_config.num_threads = max_onnx_threads;
-    yantra_config.query_prefix = "search_query: ";
-    yantra_config.doc_prefix   = "search_document: ";
-    auto inner_yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
-    std::shared_ptr<VakYantra> yantra;
-    if (inner_yantra->awaken(model_path, vocab_path)) {
-        // Wrap with timeout protection (30s to accommodate batched backfill calls)
-        yantra = std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(30000));
-        std::cerr << "[Yantra] Awakened (timeout-protected)\n";
-    } else {
-        std::cerr << "[Yantra] Failed: " << inner_yantra->error() << "\n";
-        // yantra stays nullptr
-    }
-#endif
+    // Create yantra for embeddings (Ollama nomic-embed-text v1.5)
+    auto inner_yantra = std::make_shared<chitta::OllamaYantra>();
+    // Wrap with timeout protection (30s to accommodate batched backfill calls)
+    std::shared_ptr<VakYantra> yantra =
+        std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(30000));
 
     // Open chitta-field store — the sole storage backend
     std::string field_path = mind_path + "/chitta-field";
@@ -1034,10 +1012,7 @@ int main(int argc, char* argv[]) {
 #if defined(__linux__)
     malloc_trim(0);
 #endif
-    VakYantra* yantra_raw = nullptr;
-#ifdef CHITTA_WITH_ONNX
-    yantra_raw = yantra.get();
-#endif
+    VakYantra* yantra_raw = yantra.get();
     std::cerr << "[Backend] chitta-field (" << field_store.memory_count() << " memories)\n";
 
     int result = 0;
@@ -1081,6 +1056,53 @@ int main(int argc, char* argv[]) {
 
         bool success = run_distillation(field_store, yantra_raw, state, distill_config, nullptr, false);
         result = success ? 0 : 1;
+    } else if (command == "re_embed") {
+        // Re-embed all memories through Ollama nomic-embed-text:v1.5 (768-d migration).
+        // Marks every non-deleted memory embed_pending, then drains synchronously.
+        if (!yantra_raw || !yantra_raw->ready()) {
+            std::cerr << "[re_embed] ERROR: Ollama not reachable — start Ollama and pull nomic-embed-text:v1.5\n";
+            return 1;
+        }
+        const std::string model_id = "nomic-embed-text:v1.5";
+        int64_t queued = field_store.requeue_all_embeddings(model_id.c_str(), model_id.size());
+        if (queued < 0) {
+            std::cerr << "[re_embed] ERROR: requeue_all_embeddings failed\n";
+            return 1;
+        }
+        std::cerr << "[re_embed] Queued " << queued << " memories for 768-d re-embedding\n";
+
+        // Drain the queue using the same batched backfill logic as the daemon thread.
+        size_t done = 0;
+        while (true) {
+            std::vector<uint64_t> pending = field_store.pending_embeddings(64);
+            if (pending.empty()) break;
+            std::vector<std::string> contents;
+            contents.reserve(pending.size());
+            for (uint64_t id : pending) contents.push_back(field_store.get_content(id));
+
+            constexpr size_t SUB_BATCH = 16;
+            for (size_t b = 0; b < pending.size(); b += SUB_BATCH) {
+                size_t end = std::min(b + SUB_BATCH, pending.size());
+                std::vector<std::string> batch_texts;
+                batch_texts.reserve(end - b);
+                for (size_t i = b; i < end; ++i) {
+                    if (contents[i].empty()) { batch_texts.push_back(""); continue; }
+                    batch_texts.push_back("search_document: " + contents[i]);
+                }
+                auto arthas = yantra_raw->transform_batch(batch_texts);
+                for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
+                    if (contents[b + i].empty()) continue;
+                    const auto& emb = arthas[i].nu.data;
+                    if (emb.size() != EMBED_DIM) continue;
+                    field_store.backfill_embedding(pending[b + i], emb);
+                }
+                done += end - b;
+            }
+            if (done % 1000 < 64)
+                std::cerr << "[re_embed] " << done << "/" << queued << " embedded...\n";
+        }
+        std::cerr << "[re_embed] Done: " << done << " memories re-embedded at 768-d\n";
+        result = 0;
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);

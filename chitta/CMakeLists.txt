@@ -222,7 +222,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 # Options
 option(CHITTA_BUILD_TESTS "Build tests" ON)
 option(CHITTA_BUILD_RPC "Build RPC server executable" ON)
-option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings" ON)
+option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings (deprecated — use Ollama)" OFF)
 
 # Header-only library
 add_library(chitta INTERFACE)
