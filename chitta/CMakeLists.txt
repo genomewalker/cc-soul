@@ -223,6 +223,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 option(CHITTA_BUILD_TESTS "Build tests" ON)
 option(CHITTA_BUILD_RPC "Build RPC server executable" ON)
 option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings (deprecated — use Ollama)" OFF)
+option(CHITTA_WITH_LLAMA_CPP "Enable inline GGUF embeddings via llama.cpp (no Ollama required)" OFF)
 
 # Header-only library
 add_library(chitta INTERFACE)
@@ -385,6 +386,24 @@ if(CHITTA_WITH_ONNX)
     endif()
 endif()
 
+# llama.cpp (optional) — in-process GGUF embeddings, no external server required.
+# Build with CUDA: cmake -DCHITTA_WITH_LLAMA_CPP=ON -DGGML_CUDA=ON (requires nvcc on build node)
+# CPU-only:        cmake -DCHITTA_WITH_LLAMA_CPP=ON
+if(CHITTA_WITH_LLAMA_CPP)
+    CPMAddPackage(
+        NAME llama_cpp
+        GITHUB_REPOSITORY ggml-org/llama.cpp
+        GIT_TAG b4990
+        OPTIONS
+            "LLAMA_BUILD_TESTS OFF"
+            "LLAMA_BUILD_EXAMPLES OFF"
+            "LLAMA_BUILD_SERVER OFF"
+            "LLAMA_CURL OFF"
+            "BUILD_SHARED_LIBS OFF"
+    )
+    target_compile_definitions(chitta INTERFACE CHITTA_WITH_LLAMA_CPP=1)
+    message(STATUS "llama.cpp enabled (tag b4990, GPU via -DGGML_CUDA=ON)")
+endif()
 
 # chitta-field — required storage backend
 # Resolve root: prefer CHITTA_FIELD_ROOT env/cmake var, then sibling submodule, then legacy path
@@ -477,6 +496,9 @@ add_executable(chittad
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 find_package(Python3 REQUIRED COMPONENTS Development)
 target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread Python3::Python)
+if(CHITTA_WITH_LLAMA_CPP)
+    target_link_libraries(chittad PRIVATE llama ggml)
+endif()
 list(APPEND CHITTA_RUNTIME_LIBS "${Python3_LIBRARY_DIRS}")
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 

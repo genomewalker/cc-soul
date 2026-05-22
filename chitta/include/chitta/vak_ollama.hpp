@@ -119,6 +119,7 @@ private:
                     log("[ollama-embed] ERROR: HTTP " +
                         std::to_string(res ? res->status : -1) + " after " +
                         std::to_string(MAX_RETRIES) + " retries — returning zero-vecs");
+                    if (res) log("[ollama-embed] response body: " + res->body.substr(0, 200));
                     ready_ = false;
                     return out;
                 }

@@ -26,6 +26,7 @@
 #include <chitta/http_viz.hpp>
 #include <chitta/version.hpp>
 #include <chitta/vak_ollama.hpp>
+#include <chitta/vak_llama.hpp>
 #include <chitta/vak_timeout.hpp>
 #include <iostream>
 #include <string>
@@ -944,8 +945,31 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Create yantra for embeddings (Ollama nomic-embed-text v1.5)
-    auto inner_yantra = std::make_shared<chitta::OllamaYantra>();
+    // Embeddings: prefer in-process GGUF (LlamaYantra), fall back to Ollama HTTP.
+    std::shared_ptr<VakYantra> inner_yantra;
+#ifdef CHITTA_WITH_LLAMA_CPP
+    {
+        namespace fs = std::filesystem;
+        std::string gguf;
+        const char* env_model = std::getenv("CHITTA_EMBED_MODEL");
+        if (env_model && *env_model && fs::exists(env_model)) {
+            gguf = env_model;
+        } else if (const char* home = std::getenv("HOME")) {
+            fs::path p = fs::path(home) / ".claude" / "models" / "nomic-embed-text-v1.5.gguf";
+            if (fs::exists(p)) gguf = p.string();
+        }
+        if (gguf.empty()) {
+            fs::path p = fs::path(mind_path) / ".." / ".." / "models" / "nomic-embed-text-v1.5.gguf";
+            if (fs::exists(p)) gguf = fs::canonical(p).string();
+        }
+        if (!gguf.empty()) {
+            auto llama_yantra = std::make_shared<chitta::LlamaYantra>(gguf, mind_path);
+            if (llama_yantra->ready()) inner_yantra = llama_yantra;
+        }
+    }
+#endif
+    if (!inner_yantra)
+        inner_yantra = std::make_shared<chitta::OllamaYantra>();
     // Wrap with timeout protection (30s to accommodate batched backfill calls)
     std::shared_ptr<VakYantra> yantra =
         std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(30000));
@@ -1085,16 +1109,23 @@ int main(int argc, char* argv[]) {
                 size_t end = std::min(b + SUB_BATCH, pending.size());
                 std::vector<std::string> batch_texts;
                 batch_texts.reserve(end - b);
+                // nomic-embed-text v1.5: 8192 token limit; ~6KB is safe for code/unicode
+                static constexpr size_t MAX_CONTENT_BYTES = 6000;
+                std::vector<size_t> nonempty_idx;
                 for (size_t i = b; i < end; ++i) {
-                    if (contents[i].empty()) { batch_texts.push_back(""); continue; }
-                    batch_texts.push_back("search_document: " + contents[i]);
+                    if (!contents[i].empty()) {
+                        nonempty_idx.push_back(i);
+                        const auto& c = contents[i];
+                        batch_texts.push_back(c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c);
+                    }
                 }
+                if (batch_texts.empty()) { done += end - b; continue; }
                 auto arthas = yantra_raw->transform_batch(batch_texts);
-                for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
-                    if (contents[b + i].empty()) continue;
-                    const auto& emb = arthas[i].nu.data;
+                for (size_t j = 0; j < arthas.size() && j < nonempty_idx.size(); ++j) {
+                    size_t i = nonempty_idx[j];
+                    const auto& emb = arthas[j].nu.data;
                     if (emb.size() != EMBED_DIM) continue;
-                    field_store.backfill_embedding(pending[b + i], emb);
+                    field_store.backfill_embedding(pending[i], emb);
                 }
                 done += end - b;
             }

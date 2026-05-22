@@ -22,7 +22,7 @@ set -euo pipefail
 
 MIND_PATH="${MIND_PATH:-$HOME/.claude/mind}"
 OLLAMA_BIN="${OLLAMA_BIN:-$HOME/.local/bin/ollama}"
-CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chittad}"
 MODEL="nomic-embed-text:v1.5"
 LOG_DIR="/maps/projects/caeg/scratch/kbd606/tmp"
 
