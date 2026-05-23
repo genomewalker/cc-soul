@@ -614,6 +614,22 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 continue;
             }
 
+            // health_check fast path: both counts are AtomicUsize — no locking needed.
+            // Execute inline to avoid queuing behind long-running learn_codebase jobs.
+            if (tool_name == "health_check") {
+                auto req_json = json::parse(req.data);
+                bool details = false;
+                if (req_json.contains("params") && req_json["params"].contains("arguments"))
+                    details = req_json["params"]["arguments"].value("details", false);
+                if (!details) {
+                    auto req_id = req_json.value("id", json());
+                    std::string resp = handler.fast_health_check_json(
+                        req_id, pool.worker_count(), pool.active_count(), pool.pending());
+                    server.respond(req.client_fd, resp);
+                    continue;
+                }
+            }
+
             // All other requests go to thread pool (health_check included — main thread must not block on rpc_mutex_)
             pool.submit(req.client_fd, tool_name,
                 [&handler, &pool, data = req.data, tname = tool_name]() {
@@ -1002,8 +1018,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "[socket_server] Listening (warming up) on " << sock_path << "\n";
     }
 
-    static const std::string warming_resp =
-        "{\"id\":null,\"result\":{\"text\":\"daemon loading, please retry\",\"structured\":{\"status\":\"warming_up\"}},\"error\":null}\n";
     std::atomic<bool> load_done{false};
     std::exception_ptr load_ex;
     std::thread loader([&]() {
@@ -1017,7 +1031,21 @@ int main(int argc, char* argv[]) {
     while (!load_done.load(std::memory_order_acquire)) {
         if (early_server) {
             auto reqs = early_server->poll(100);
-            for (auto& r : reqs) early_server->respond(r.client_fd, warming_resp);
+            for (auto& r : reqs) {
+                // Echo the request id so the client gets a matched response immediately
+                // (id=null caused RESPONSE_TIMEOUT_MS=5min wait because client drops unmatched frames).
+                json warming = {
+                    {"jsonrpc", "2.0"},
+                    {"id",      nullptr},
+                    {"result",  {{"text", "daemon loading, please retry"},
+                                 {"structured", {{"status", "warming_up"}}}}}
+                };
+                try {
+                    auto rj = json::parse(r.data, nullptr, false);
+                    if (!rj.is_discarded()) warming["id"] = rj.value("id", json(nullptr));
+                } catch (...) {}
+                early_server->respond(r.client_fd, warming.dump());
+            }
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
@@ -1105,6 +1133,9 @@ int main(int argc, char* argv[]) {
             for (uint64_t id : pending) contents.push_back(field_store.get_content(id));
 
             constexpr size_t SUB_BATCH = 16;
+            // Track which IDs were successfully backfilled; the rest must be force-cleared
+            // so they don't loop back into pending_embeddings() forever.
+            std::vector<uint64_t> not_backfilled;
             for (size_t b = 0; b < pending.size(); b += SUB_BATCH) {
                 size_t end = std::min(b + SUB_BATCH, pending.size());
                 std::vector<std::string> batch_texts;
@@ -1117,6 +1148,8 @@ int main(int argc, char* argv[]) {
                         nonempty_idx.push_back(i);
                         const auto& c = contents[i];
                         batch_texts.push_back(c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c);
+                    } else {
+                        not_backfilled.push_back(pending[i]);
                     }
                 }
                 if (batch_texts.empty()) { done += end - b; continue; }
@@ -1124,11 +1157,17 @@ int main(int argc, char* argv[]) {
                 for (size_t j = 0; j < arthas.size() && j < nonempty_idx.size(); ++j) {
                     size_t i = nonempty_idx[j];
                     const auto& emb = arthas[j].nu.data;
-                    if (emb.size() != EMBED_DIM) continue;
+                    if (emb.size() != EMBED_DIM) {
+                        not_backfilled.push_back(pending[i]);
+                        continue;
+                    }
                     field_store.backfill_embedding(pending[i], emb);
                 }
                 done += end - b;
             }
+            // Force-clear any IDs that couldn't be embedded (empty content, wrong dim).
+            if (!not_backfilled.empty())
+                field_store.force_clear_embed_pending(not_backfilled);
             if (done % 1000 < 64)
                 std::cerr << "[re_embed] " << done << "/" << queued << " embedded...\n";
         }
