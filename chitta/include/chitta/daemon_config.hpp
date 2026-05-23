@@ -95,6 +95,27 @@ inline std::string default_distill_script() {
     return std::string(home ? home : ".") + "/.claude/hooks/distill.sh";
 }
 
+inline std::string default_hint_enricher_script() {
+    namespace fs = std::filesystem;
+    if (const char* p = std::getenv("CHITTA_HINT_ENRICHER"))
+        if (p[0] && fs::exists(p)) return p;
+#if defined(__linux__)
+    char self_path[4096];
+    ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (len > 0) {
+        self_path[len] = '\0';
+        fs::path bin_dir = fs::path(self_path).parent_path();
+        // Installed: ~/.claude/bin/hint_enricher.py
+        fs::path p = bin_dir / "hint_enricher.py";
+        if (fs::exists(p)) return p.string();
+        // Dev/repo layout: bin/../chitta-mcp/enrichers/hint_enricher.py
+        p = bin_dir.parent_path() / "chitta-mcp" / "enrichers" / "hint_enricher.py";
+        if (fs::exists(p)) return p.string();
+    }
+#endif
+    return "";
+}
+
 inline std::string default_enrich_script() {
     if (const char* pr = std::getenv("CLAUDE_PLUGIN_ROOT")) {
         std::string p = std::string(pr) + "/scripts/enrich.sh";

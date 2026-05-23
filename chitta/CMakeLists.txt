@@ -390,19 +390,34 @@ endif()
 # Build with CUDA: cmake -DCHITTA_WITH_LLAMA_CPP=ON -DGGML_CUDA=ON (requires nvcc on build node)
 # CPU-only:        cmake -DCHITTA_WITH_LLAMA_CPP=ON
 if(CHITTA_WITH_LLAMA_CPP)
-    CPMAddPackage(
-        NAME llama_cpp
-        GITHUB_REPOSITORY ggml-org/llama.cpp
-        GIT_TAG b4990
-        OPTIONS
-            "LLAMA_BUILD_TESTS OFF"
-            "LLAMA_BUILD_EXAMPLES OFF"
-            "LLAMA_BUILD_SERVER OFF"
-            "LLAMA_CURL OFF"
-            "BUILD_SHARED_LIBS OFF"
-    )
+    # Use local clone if LLAMA_CPP_SOURCE_DIR is set (e.g. for Qwen3 support), else fetch b4990.
+    if(DEFINED LLAMA_CPP_SOURCE_DIR AND EXISTS "${LLAMA_CPP_SOURCE_DIR}/CMakeLists.txt")
+        CPMAddPackage(
+            NAME llama_cpp
+            SOURCE_DIR "${LLAMA_CPP_SOURCE_DIR}"
+            OPTIONS
+                "LLAMA_BUILD_TESTS OFF"
+                "LLAMA_BUILD_EXAMPLES OFF"
+                "LLAMA_BUILD_SERVER OFF"
+                "LLAMA_CURL OFF"
+                "BUILD_SHARED_LIBS OFF"
+        )
+        message(STATUS "llama.cpp enabled (local: ${LLAMA_CPP_SOURCE_DIR})")
+    else()
+        CPMAddPackage(
+            NAME llama_cpp
+            GITHUB_REPOSITORY ggml-org/llama.cpp
+            GIT_TAG b4990
+            OPTIONS
+                "LLAMA_BUILD_TESTS OFF"
+                "LLAMA_BUILD_EXAMPLES OFF"
+                "LLAMA_BUILD_SERVER OFF"
+                "LLAMA_CURL OFF"
+                "BUILD_SHARED_LIBS OFF"
+        )
+        message(STATUS "llama.cpp enabled (tag b4990, GPU via -DGGML_CUDA=ON)")
+    endif()
     target_compile_definitions(chitta INTERFACE CHITTA_WITH_LLAMA_CPP=1)
-    message(STATUS "llama.cpp enabled (tag b4990, GPU via -DGGML_CUDA=ON)")
 endif()
 
 # chitta-field — required storage backend

@@ -1,8 +1,9 @@
-FROM gemma4:e4b
-
-SYSTEM """You are a memory indexer. Given a user's statement, output a single short third-person retrieval fact (8-15 words) that captures the personal information for a memory search index. Output only the fact, nothing else. If there is no personal fact, output exactly: -"""
-
-PARAMETER temperature 0.1
-PARAMETER num_predict 48
-PARAMETER stop "."
-PARAMETER stop "\n"
+FROM /maps/projects/caeg/scratch/kbd606/tmp/hint_qwen_v4_gguf/chitta-hint-qwen-f16.gguf
+TEMPLATE """<|im_start|>system
+Extract a single concise factual hint from the user message. If no personal fact or preference is present, output nothing.<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+PARAMETER temperature 0.0
+PARAMETER stop "<|im_end|>"

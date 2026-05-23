@@ -23,7 +23,7 @@ OUT_DIR="${CHITTA_HINT_MODEL_DIR:-/maps/projects/caeg/scratch/kbd606/tmp/hint_qw
 GGUF_DIR="${CHITTA_HINT_GGUF_DIR:-/maps/projects/caeg/scratch/kbd606/tmp/hint_qwen_gguf}"
 STEPS="${CHITTA_HINT_STEPS:-200}"
 BATCH="${CHITTA_HINT_BATCH:-4}"
-BASE_MODEL="Qwen/Qwen3-0.6B"
+BASE_MODEL="unsloth/Qwen3-0.6B-unsloth-bnb-4bit"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do

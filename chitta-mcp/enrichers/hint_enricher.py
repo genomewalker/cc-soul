@@ -24,7 +24,8 @@ import time
 import urllib.request
 import urllib.error
 
-CHITTA_BIN = os.environ.get("CHITTA_BIN", os.path.expanduser("~/.claude/bin/chitta"))
+CHITTA_BIN  = os.environ.get("CHITTA_BIN",  os.path.expanduser("~/.claude/bin/chitta"))
+CHITTAD_BIN = os.environ.get("CHITTAD_BIN", os.path.expanduser("~/.claude/bin/chittad"))
 DEFAULT_MIND = os.environ.get("MIND", os.path.expanduser("~/.claude/mind"))
 # chitta-hint-tuned is gemma4:e4b with the system prompt baked in (fast, 4B MoE).
 # Falls back to gemma4:26b if chitta-hint-tuned hasn't been created yet.
@@ -45,10 +46,12 @@ PROMPT_FALLBACK = (
 PROMPT_TEMPLATE = PROMPT_CHITTA_HINT  # default; overridden per-call for fallback model
 
 # Kinds that are worth enriching — skip code/symbol/artifact memories
-ENRICHABLE_KINDS = {"episode", "signal", "wisdom", "observation", "fact"}
+ENRICHABLE_KINDS = {"episode", "signal", "wisdom", "observation", "fact",
+                    "correction", "preference", "habit"}
 
-# Content prefixes that indicate user turns worth enriching
-USER_PREFIXES = ("[user]", "[human]", "user:", "human:")
+# Prefixes to strip before passing to the hint model (no filtering — model decides)
+USER_PREFIXES = ("[user]", "[human]", "user:", "human:", "[compliance:auto]",
+                 "user correction:", "User correction:")
 
 
 def discover_ollama() -> str:
@@ -131,17 +134,34 @@ def chitta(args: list, mind: str, input_text: str | None = None) -> str:
 
 def list_memories(mind: str, limit: int) -> list[dict]:
     """Return memories that need hints: kind in ENRICHABLE_KINDS, no hint:done tag."""
-    raw = chitta(["list_memories_brief", "--limit", str(limit * 3)], mind)
+    # Cap at 60 to stay under the ~200KB socket response threshold where the
+    # daemon falls back to raw JSON array format (without tags field).
+    fetch = min(limit * 3, 60)
+    raw = chitta(["list_memories_brief", "--limit", str(fetch)], mind)
     if not raw:
         return []
-    memories = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
+
+    # Parse: daemon returns JSONL for small responses, JSON array for large ones.
+    rows: list[dict] = []
+    stripped = raw.strip()
+    if stripped.startswith("["):
         try:
-            m = json.loads(line)
+            rows = json.loads(stripped)
         except json.JSONDecodeError:
+            pass
+    else:
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    memories = []
+    for m in rows:
+        if not isinstance(m, dict):
             continue
         kind = m.get("kind", "")
         if kind not in ENRICHABLE_KINDS:
@@ -152,11 +172,7 @@ def list_memories(mind: str, limit: int) -> list[dict]:
         if "hint:done" in tags or "retrieval_hint" in tags:
             continue
         content = m.get("content", "") or m.get("text", "")
-        if not content:
-            continue
-        # Only enrich user-turn content
-        has_user_prefix = any(content.lower().startswith(p) for p in USER_PREFIXES)
-        if not has_user_prefix:
+        if not content or len(content.strip()) < 15:
             continue
         memories.append({
             "id": m.get("id") or m.get("memory_id", ""),
@@ -180,39 +196,105 @@ def store_hint(mind: str, realm: str, hint: str) -> bool:
     return bool(out)
 
 
-def tag_done(mind: str, memory_id: str) -> None:
+def tag_done(mind: str, memory_id) -> None:
     """Tag the original memory so we don't re-process it."""
-    chitta(["tag", memory_id, "hint:done"], mind)
+    chitta(["tag", "--id", str(memory_id), "--add", "hint:done"], mind)
+
+
+def _check_inline(mind: str) -> bool:
+    """Return True if chittad hint_extract is available with the hint model loaded."""
+    try:
+        r = subprocess.run(
+            [CHITTAD_BIN, "--path", mind, "hint_extract", "test"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _strip_prefix(text: str) -> str:
+    for prefix in USER_PREFIXES:
+        if text.lower().startswith(prefix):
+            return text[len(prefix):].strip()
+    return text
+
+
+def _clean_hint(raw: str) -> str:
+    hint = raw.strip()
+    if not hint or hint.startswith("-") or len(hint) < 5:
+        return ""
+    for sep in (".", "\n"):
+        idx = hint.find(sep)
+        if 0 < idx < 120:
+            hint = hint[:idx + 1].strip()
+            break
+    return hint[:150]
+
+
+def hint_extract_batch(memories: list[dict], mind: str) -> list[str]:
+    """Run chittad hint_extract in batch mode. One process load, N inferences."""
+    texts = []
+    for m in memories:
+        t = _strip_prefix(m["content"].strip())
+        texts.append(t[:500] if len(t) >= 10 else "")
+
+    batch_input = "\n".join(t.replace("\n", " ") for t in texts) + "\n"
+    try:
+        r = subprocess.run(
+            [CHITTAD_BIN, "--path", mind, "hint_extract"],
+            input=batch_input, capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0:
+            sys.stderr.write(f"[hint_enricher] chittad hint_extract rc={r.returncode}: {r.stderr[:200]}\n")
+            return [""] * len(memories)
+        lines = r.stdout.splitlines()
+        # Pad or truncate to match input count
+        lines += [""] * max(0, len(memories) - len(lines))
+        return [_clean_hint(l) for l in lines[:len(memories)]]
+    except Exception as e:
+        sys.stderr.write(f"[hint_enricher] hint_extract_batch failed: {e}\n")
+        return [""] * len(memories)
 
 
 def run(mind: str, limit: int, model: str, dry_run: bool) -> None:
-    endpoint = discover_ollama()
-    if not endpoint:
-        sys.stderr.write("[hint_enricher] no Ollama endpoint found\n")
-        sys.exit(1)
-    sys.stderr.write(f"[hint_enricher] endpoint={endpoint} model={model} limit={limit}\n")
+    # Prefer in-process hint_extract (CPU llama.cpp); fall back to Ollama HTTP.
+    use_inline = _check_inline(mind)
+    endpoint = ""
+    if not use_inline:
+        endpoint = discover_ollama()
+        if not endpoint:
+            sys.stderr.write("[hint_enricher] no Ollama endpoint and hint_extract unavailable\n")
+            sys.exit(1)
+    mode = "inline(llama.cpp)" if use_inline else f"ollama({endpoint})"
+    sys.stderr.write(f"[hint_enricher] mode={mode} model={model} limit={limit}\n")
 
     memories = list_memories(mind, limit)
     sys.stderr.write(f"[hint_enricher] {len(memories)} memories to enrich\n")
 
+    # Batch-extract all hints in one chittad call (model loads once)
+    if use_inline:
+        hints = hint_extract_batch(memories, mind)
+    else:
+        hints = [generate_hint(endpoint, model, m["content"]) for m in memories]
+
     done = 0
     skipped = 0
-    for m in memories:
-        hint = generate_hint(endpoint, model, m["content"])
+    for m, hint in zip(memories, hints):
         if not hint:
             skipped += 1
-            sys.stderr.write(f"[hint_enricher] skip {m['id'][:8]} (no hint)\n")
+            sys.stderr.write(f"[hint_enricher] skip {str(m['id'])[:16]} (no hint)\n")
             if not dry_run:
                 tag_done(mind, m["id"])
             continue
 
-        sys.stderr.write(f"[hint_enricher] {m['id'][:8]} → {hint!r}\n")
+        sys.stderr.write(f"[hint_enricher] {str(m['id'])[:16]} → {hint!r}\n")
         if not dry_run:
             if store_hint(mind, m["realm"], hint):
                 tag_done(mind, m["id"])
                 done += 1
             else:
-                sys.stderr.write(f"[hint_enricher] store failed for {m['id'][:8]}\n")
+                sys.stderr.write(f"[hint_enricher] store failed for {str(m['id'])[:16]}\n")
         else:
             done += 1
 

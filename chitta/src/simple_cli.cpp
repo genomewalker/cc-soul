@@ -28,6 +28,7 @@
 #include <chitta/vak_ollama.hpp>
 #include <chitta/vak_llama.hpp>
 #include <chitta/vak_timeout.hpp>
+#include <chitta/hint_yantra.hpp>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -489,10 +490,79 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // Code enrichment thread — disabled pending CfSymbolHit description field in FFI
     std::atomic<size_t> enrich_count{0};
     std::thread enrichment([&]() {
-        // Enrichment requires CfSymbolHit.description field (not yet in C FFI).
-        // Will be re-enabled when FieldRpcHandler is fully migrated.
         (void)enrich_config;
         (void)enrich_count;
+    });
+
+    // Hint enricher thread — runs hint_enricher.py when new memories land
+    std::atomic<size_t> hint_enrich_count{0};
+    std::thread hint_enrichment([&]() {
+        std::string script = default_hint_enricher_script();
+        if (script.empty()) {
+            std::cerr << "[hint-enrich] script not found — set CHITTA_HINT_ENRICHER or run smart-install\n";
+            return;
+        }
+        std::cerr << "[hint-enrich] started (script=" << script << ")\n";
+
+        static constexpr int  TRIGGER_NEW   = 3;    // new memories needed to trigger
+        static constexpr int  COOLDOWN_SECS = 600;  // min 10 min between runs
+        static constexpr int  LIMIT         = 50;   // memories per run
+        static constexpr int  INITIAL_DELAY = 60;   // let daemon settle
+
+        for (int i = 0; i < INITIAL_DELAY && daemon_running; ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        size_t last_count = field_store.memory_count();
+        auto   last_run   = std::chrono::steady_clock::now() - std::chrono::seconds(COOLDOWN_SECS);
+
+        while (daemon_running) {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            if (!daemon_running) break;
+
+            size_t cur_count = field_store.memory_count();
+            auto   now_time  = std::chrono::steady_clock::now();
+            bool   enough_new  = (cur_count >= last_count + TRIGGER_NEW);
+            bool   cooled_down = (now_time - last_run >= std::chrono::seconds(COOLDOWN_SECS));
+
+            if (!enough_new || !cooled_down) continue;
+
+            last_count = cur_count;
+            last_run   = now_time;
+
+            std::vector<std::string> cmd = {
+                "python3", script,
+                "--mind",  mind_path,
+                "--limit", std::to_string(LIMIT),
+            };
+            try {
+                // Build argv for execvp
+                std::vector<const char*> argv;
+                for (const auto& s : cmd) argv.push_back(s.c_str());
+                argv.push_back(nullptr);
+
+                pid_t pid = ::fork();
+                if (pid < 0) {
+                    std::cerr << "[hint-enrich] fork failed\n";
+                    continue;
+                }
+                if (pid == 0) {
+                    // Child: redirect stdout/stderr to /dev/null to avoid clogging daemon log
+                    int devnull = ::open("/dev/null", O_WRONLY);
+                    if (devnull >= 0) { ::dup2(devnull, STDOUT_FILENO); ::dup2(devnull, STDERR_FILENO); ::close(devnull); }
+                    ::execvp(argv[0], const_cast<char* const*>(argv.data()));
+                    ::_exit(127);
+                }
+                // Parent: reap child (non-blocking — don't stall daemon)
+                std::thread reaper([pid, &hint_enrich_count]() {
+                    int status = 0;
+                    if (::waitpid(pid, &status, 0) > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+                        ++hint_enrich_count;
+                });
+                reaper.detach();
+            } catch (const std::exception& e) {
+                std::cerr << "[hint-enrich] error: " << e.what() << "\n";
+            }
+        }
     });
 
     // Queue processor - handles fire-and-forget writes from hooks
@@ -748,6 +818,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     if (backfill_thread.joinable()) backfill_thread.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
+    if (hint_enrichment.joinable()) hint_enrichment.join();
     queue_proc.stop();
     subconscious.stop();
 
@@ -758,6 +829,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
               << ", distilled=" << distill_count
               << ", queue_distilled=" << queue_distill_count
               << ", enriched=" << enrich_count
+              << ", hint_enriched=" << hint_enrich_count
               << ", queued=" << queue_count
               << ", subconscious_events=" << sc_stats.events_processed.load()
               << ", corrections=" << sc_stats.corrections_detected.load()
@@ -875,6 +947,7 @@ int main(int argc, char* argv[]) {
 
     std::string mind_path = default_mind_path();
     std::string command;
+    int command_idx = -1;
     int interval = 60;
     bool foreground = false;
 
@@ -969,6 +1042,7 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (argv[i][0] != '-' && command.empty()) {
             command = argv[i];
+            command_idx = i;
         }
     }
 
@@ -982,6 +1056,28 @@ int main(int argc, char* argv[]) {
 
     if (command == "shutdown") return cmd_shutdown(sock_path);
     if (command == "status")   return cmd_status(sock_path);
+
+#ifdef CHITTA_WITH_LLAMA_CPP
+    if (command == "hint_extract") {
+        // Standalone: no field store, no embedding yantra — just load the hint GGUF.
+        chitta::HintYantra hy("", mind_path);
+        if (!hy.ready()) {
+            std::cerr << "[hint_extract] hint model not loaded — set CHITTA_HINT_MODEL or place GGUF in ~/.claude/models/\n";
+            return 1;
+        }
+        if (command_idx >= 0 && command_idx + 1 < argc) {
+            std::string hint = hy.extract(argv[command_idx + 1]);
+            if (!hint.empty()) std::cout << hint << "\n";
+        } else {
+            std::string line;
+            while (std::getline(std::cin, line)) {
+                while (!line.empty() && line.back() == '\r') line.pop_back();
+                std::cout << (line.empty() ? "" : hy.extract(line)) << "\n";
+            }
+        }
+        return 0;
+    }
+#endif
     if (command == "health") {
         // Socket-only: never load FieldStore for a health ping.
         SocketClient client(sock_path);
@@ -1041,6 +1137,8 @@ int main(int argc, char* argv[]) {
     // Wrap with timeout protection (30s to accommodate batched backfill calls)
     std::shared_ptr<VakYantra> yantra =
         std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(8000));
+
+
 
     // Open chitta-field store — the sole storage backend
     std::string field_path = mind_path + "/chitta-field";
@@ -1225,6 +1323,10 @@ int main(int argc, char* argv[]) {
         }
         std::cerr << "[re_embed] Done: " << done << " memories re-embedded at 768-d\n";
         result = 0;
+    } else if (command == "hint_extract") {
+        // Should have been caught by the early-exit above; only reached if built without llama.cpp
+        std::cerr << "[hint_extract] built without CHITTA_WITH_LLAMA_CPP\n";
+        result = 1;
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);

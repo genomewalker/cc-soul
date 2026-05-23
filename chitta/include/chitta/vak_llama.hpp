@@ -123,6 +123,7 @@ private:
         llama_context_params cparams = llama_context_default_params();
         cparams.n_ctx        = N_CTX;
         cparams.n_batch      = N_CTX;
+        cparams.n_ubatch     = N_CTX;  // non-causal embedding requires n_ubatch >= n_tokens
         cparams.embeddings   = true;
         cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
         ctx_ = llama_init_from_model(model_, cparams);
@@ -163,7 +164,7 @@ private:
         toks.resize(n);
 
         // Clear KV cache between sequences — essential for pooled embeddings.
-        llama_memory_clear(llama_get_memory(ctx_), true);
+        llama_memory_clear(llama_get_memory(ctx_), false);
 
         llama_batch batch = llama_batch_get_one(toks.data(), (int)toks.size());
         if (llama_decode(ctx_, batch) != 0) {
