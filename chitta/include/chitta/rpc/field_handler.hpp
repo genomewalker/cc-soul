@@ -355,6 +355,16 @@ public:
                 }
             }
 
+            // Pre-embed query for vector-search read tools so rpc_mutex_ isn't
+            // held during the Ollama call (recall holds shared_lock for each embed).
+            if (is_read_only_tool(name) && !args.contains("_preembedding")) {
+                std::string q = args.value("query", "");
+                if (!q.empty() && yantra_) {
+                    Artha a = yantra_->transform(q, EmbedMode::Query);
+                    if (!a.nu.data.empty()) args["_preembedding"] = a.nu.data;
+                }
+            }
+
             ToolResult result;
             if (is_read_only_tool(name)) {
                 std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
