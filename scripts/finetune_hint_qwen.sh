@@ -85,6 +85,8 @@ tokenizer = get_chat_template(tokenizer, chat_template="qwen-2.5")
 rows = [json.loads(l) for l in open(DATA_PATH) if l.strip()]
 
 def format_row(row):
+    if "text" in row:
+        return row["text"]
     return tokenizer.apply_chat_template(
         row["conversations"], tokenize=False, add_generation_prompt=False
     )
