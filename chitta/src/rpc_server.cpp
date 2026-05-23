@@ -1105,8 +1105,14 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     // Connect to daemon (safe mode: never kill/restart)
     chitta::SocketClient client(socket_path);
     if (!client.connect_only()) {
-        std::cerr << "Error: " << client.last_error() << "\n";
-        std::cerr << "Hint: Start daemon with 'chittad daemon' or let hooks start it\n";
+        const auto& err = client.last_error();
+        std::cerr << "Error: " << err << "\n";
+        if (err.find("still loading") != std::string::npos || err.find("warming up") != std::string::npos)
+            std::cerr << "Hint: Daemon is starting up — retry in a few seconds\n";
+        else if (err.find("incompatible") != std::string::npos)
+            std::cerr << "Hint: Restart daemon with 'systemctl --user restart chittad'\n";
+        else
+            std::cerr << "Hint: Start daemon with 'chittad daemon' or let hooks start it\n";
         return 1;
     }
 
@@ -1216,8 +1222,14 @@ int run_thin_client(const std::string& socket_path) {
 
     // Safe connect: never kill/restart daemon
     if (!client.connect_only()) {
-        std::cerr << "[chitta] " << client.last_error() << "\n";
-        std::cerr << "[chitta] Hint: Start daemon with 'chittad daemon'\n";
+        const auto& err = client.last_error();
+        std::cerr << "[chitta] " << err << "\n";
+        if (err.find("still loading") != std::string::npos || err.find("warming up") != std::string::npos)
+            std::cerr << "[chitta] Hint: Daemon is starting up — retry in a few seconds\n";
+        else if (err.find("incompatible") != std::string::npos)
+            std::cerr << "[chitta] Hint: Restart daemon with 'systemctl --user restart chittad'\n";
+        else
+            std::cerr << "[chitta] Hint: Start daemon with 'chittad daemon'\n";
         return 1;
     }
 
