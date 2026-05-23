@@ -245,8 +245,11 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             }
         };
 
+        std::vector<float> base_emb;
+        if (params.contains("_preembedding"))
+            base_emb = params["_preembedding"].get<std::vector<float>>();
         for (const auto& f : forms) {
-            auto emb = embed_query(f);
+            auto emb = (f == query && !base_emb.empty()) ? base_emb : embed_query(f);
             if (emb.empty()) continue;
             rrf_lane(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm));
         }
@@ -270,7 +273,11 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             }
         }
     } else {
-        auto embedding = embed_query(query);
+        std::vector<float> embedding;
+        if (params.contains("_preembedding"))
+            embedding = params["_preembedding"].get<std::vector<float>>();
+        else
+            embedding = embed_query(query);
         if (embedding.empty()) return ToolResult::error("Failed to embed query");
         hits = field_store_->recall(embedding, fetch_limit, realm);
     }

@@ -988,7 +988,7 @@ int main(int argc, char* argv[]) {
         inner_yantra = std::make_shared<chitta::OllamaYantra>();
     // Wrap with timeout protection (30s to accommodate batched backfill calls)
     std::shared_ptr<VakYantra> yantra =
-        std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(30000));
+        std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(8000));
 
     // Open chitta-field store — the sole storage backend
     std::string field_path = mind_path + "/chitta-field";
