@@ -149,7 +149,7 @@ std::optional<DaemonHealth> SocketClient::check_health() {
         health.db_path = structured.value("db_path", "");
         health.status = structured.value("status", "");
 
-        if (health.protocol_major > 0 || !health.software.empty()) {
+        if (health.protocol_major > 0 || !health.software.empty() || health.status == "warming_up") {
             return health;
         }
     } catch (const std::exception& e) {
@@ -331,9 +331,26 @@ bool SocketClient::connect_only() {
         return false;
     }
 
-    auto health = check_health();
-    if (!health) {
-        last_error_ = "Daemon did not respond to health check";
+    // Retry while daemon is warming up (snapshot load + HNSW backfill can take ~90s).
+    // Without retry, clients connecting during this window wait the full RESPONSE_TIMEOUT_MS.
+    std::optional<DaemonHealth> health;
+    for (int attempt = 0; attempt < 60; ++attempt) {
+        health = check_health();
+        if (!health) {
+            last_error_ = "Daemon did not respond to health check";
+            disconnect();
+            return false;
+        }
+        if (health->status != "warming_up") break;
+        disconnect();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        if (!connect()) {
+            last_error_ = "Lost connection to daemon while it was warming up";
+            return false;
+        }
+    }
+    if (!health || health->status == "warming_up") {
+        last_error_ = "Daemon is still loading after 120s — try again shortly";
         disconnect();
         return false;
     }

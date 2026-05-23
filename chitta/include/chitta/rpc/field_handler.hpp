@@ -107,6 +107,45 @@ public:
     std::shared_lock<std::shared_mutex> acquire_shared_lock() { return std::shared_lock<std::shared_mutex>(rpc_mutex_); }
     std::shared_mutex& rpc_mutex() { return rpc_mutex_; }
 
+    // Lock-free health_check fast path — bypasses both thread pool and rpc_mutex_.
+    // Both raw_memory_count() and raw_pending_count() use AtomicUsize internally.
+    // Called inline on the socket-loop thread when details=false (the default).
+    std::string fast_health_check_json(const json& req_id, int pool_workers, int pool_active, int pool_pending) const {
+        if (!field_store_) {
+            json err = {{"jsonrpc","2.0"},{"id",req_id},
+                        {"error",{{"code",-32000},{"message","store unavailable"}}}};
+            return err.dump(-1, ' ', false, json::error_handler_t::replace);
+        }
+        size_t mem  = field_store_->raw_memory_count();
+        size_t pend = field_store_->raw_pending_count();
+        json out = {
+            {"status",           "ok"},
+            {"backend",          "chitta-field"},
+            {"yantra",           yantra_ ? "loaded" : "unavailable"},
+            {"software_version", CHITTA_VERSION},
+            {"protocol_major",   CHITTA_PROTOCOL_VERSION_MAJOR},
+            {"protocol_minor",   CHITTA_PROTOCOL_VERSION_MINOR},
+            {"pid",              static_cast<int>(getpid())},
+            {"memory_count",     mem},
+            {"pending_count",    pend},
+            {"pool_workers",     pool_workers},
+            {"pool_active",      pool_active},
+            {"pool_pending",     pool_pending},
+        };
+        std::string text = "Status: ok\nchitta-field daemon healthy\n  memories : ~"
+                           + std::to_string(mem) + "\n";
+        if (pend > 0) text += "  pending  : " + std::to_string(pend) + " (awaiting embed)\n";
+        json resp = {
+            {"jsonrpc", "2.0"},
+            {"id",      req_id},
+            {"result", {
+                {"content", {{{"type","text"},{"text", text}}}},
+                {"structured", out}
+            }}
+        };
+        return resp.dump(-1, ' ', false, json::error_handler_t::replace);
+    }
+
     void run_belief_maintenance(float stale_strength_threshold = 0.1f,
                                 int stale_days = 30,
                                 float dup_threshold = 0.97f,
