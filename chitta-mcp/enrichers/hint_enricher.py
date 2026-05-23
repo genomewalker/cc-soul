@@ -33,14 +33,16 @@ FALLBACK_MODEL = "gemma4:26b"
 DEFAULT_LIMIT = 100
 LLM_TIMEOUT = 30  # chitta-hint is fast (~1-2s); 30s is generous
 
-# When using chitta-hint (baked system prompt), just send the raw content.
+# When using chitta-hint-tuned (system prompt baked into Modelfile), send raw content.
 # When using the fallback model, wrap with instructions.
-PROMPT_CHITTA_HINT = '"{content}"'
+PROMPT_CHITTA_HINT = '{content}'
 PROMPT_FALLBACK = (
     'Rewrite as a short third-person retrieval fact (8-15 words, no explanation):\n'
     '"{content}"\n'
     'Fact:'
 )
+# Select template based on model name at call time (see generate_hint)
+PROMPT_TEMPLATE = PROMPT_CHITTA_HINT  # default; overridden per-call for fallback model
 
 # Kinds that are worth enriching — skip code/symbol/artifact memories
 ENRICHABLE_KINDS = {"episode", "signal", "wisdom", "observation", "fact"}
@@ -80,7 +82,8 @@ def generate_hint(endpoint: str, model: str, content: str) -> str:
     if len(text) < 10:
         return ""
 
-    prompt = PROMPT_TEMPLATE.format(content=text[:500])
+    template = PROMPT_CHITTA_HINT if "chitta-hint" in model else PROMPT_FALLBACK
+    prompt = template.format(content=text[:500])
     body = json.dumps({
         "model": model,
         "prompt": prompt,
