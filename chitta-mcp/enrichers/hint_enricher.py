@@ -26,9 +26,9 @@ import urllib.error
 
 CHITTA_BIN = os.environ.get("CHITTA_BIN", os.path.expanduser("~/.claude/bin/chitta"))
 DEFAULT_MIND = os.environ.get("MIND", os.path.expanduser("~/.claude/mind"))
-# chitta-hint is gemma4:e4b with the system prompt baked in (fast, 4B MoE).
-# Falls back to gemma4:26b if chitta-hint hasn't been created yet.
-DEFAULT_MODEL = os.environ.get("CHITTA_HINT_MODEL", "chitta-hint")
+# chitta-hint-tuned is gemma4:e4b with the system prompt baked in (fast, 4B MoE).
+# Falls back to gemma4:26b if chitta-hint-tuned hasn't been created yet.
+DEFAULT_MODEL = os.environ.get("CHITTA_HINT_MODEL", "chitta-hint-tuned")
 FALLBACK_MODEL = "gemma4:26b"
 DEFAULT_LIMIT = 100
 LLM_TIMEOUT = 30  # chitta-hint is fast (~1-2s); 30s is generous
