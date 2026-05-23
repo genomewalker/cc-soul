@@ -433,6 +433,12 @@ build_from_source() {
         fi
     done
 
+    # Install hint_enricher.py so daemon can discover it at runtime
+    local enricher_src="$PLUGIN_DIR/chitta-mcp/enrichers/hint_enricher.py"
+    if [[ -f "$enricher_src" ]]; then
+        install -m 0644 "$enricher_src" "$BIN_DIR/hint_enricher.py"
+    fi
+
     # Copy shared libraries if present
     for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
         if [[ -f "$plugin_bin/$lib" ]]; then

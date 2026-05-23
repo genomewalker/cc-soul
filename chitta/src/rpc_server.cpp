@@ -476,6 +476,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"seed", "Compressed SSL seed", true, nullptr},
       {"reconstructed", "Text reconstructed from seed", true, nullptr}}},
 
+    // Memory listing
+    {"list_memories_brief", "List memories with full content, realm, and tags (JSON-per-line). Used by enrichers.",
+     {{"limit",  "Max memories to return (default 200)", false, "200"},
+      {"offset", "Pagination offset",                    false, "0"},
+      {"realm",  "Filter by realm",                      false, ""},
+      {"kind",   "Filter by kind",                       false, ""}}},
+
     // Bulk operations
     {"forget_kind", "Bulk-delete all memories of a given kind (e.g. habit, unknown)",
      {{"kind", "Memory kind to delete", true, nullptr},
@@ -963,7 +970,7 @@ void print_usage(const char* prog) {
               << "  Transcript:  read_transcript, transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
               << "  Learning:    learn_outcome, episode_cluster_status, calibration_record, calibration_score\n"
               << "  Theme:       theme_list, theme_get, theme_recall, theme_stats, theme_maintain, theme_assign_orphans\n"
-              << "  Bulk ops:    forget_kind\n"
+              << "  Bulk ops:    forget_kind, list_memories_brief\n"
               << "  CEC events:  log_event, log_event_ex, log_decision\n"
               << "  CEC recall:  recall_last_action, recall_causal_antecedent, recall_failure_pattern,\n"
               << "               recall_counterfactual, recall_true_counterfactual, recall_motif_value\n"

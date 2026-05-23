@@ -513,13 +513,16 @@ ToolResult FieldRpcHandler::tool_list_memories_brief(const json& params) {
             std::string preview = content.substr(0, 80);
             uint64_t mid = m["id"].is_number() ? m["id"].get<uint64_t>() : 0;
             json brief = {
-                {"id", mid},
-                {"kind", m.value("kind", "")},
-                {"preview", preview},
+                {"id",         mid},
+                {"kind",       m.value("kind", "")},
+                {"realm",      m.value("realm", "")},
+                {"tags",       m.value("tags", json::array())},
+                {"content",    content},
+                {"preview",    preview},
                 {"confidence", m.value("confidence", 0.0f)},
             };
             results.push_back(brief);
-            ss << "#" << mid << " [" << m.value("kind", "?") << "] " << preview << "\n";
+            ss << brief.dump() << "\n";
         }
         return ToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
     } catch (...) {
