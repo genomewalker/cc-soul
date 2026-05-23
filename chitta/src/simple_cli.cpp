@@ -45,6 +45,7 @@
 #include <nlohmann/json.hpp>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <unistd.h>
 #include <climits>
@@ -514,6 +515,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // Thread pool for async RPC handling (scales 8-16 workers based on load)
     ThreadPool pool(8, 16);
 
+    // Dedup set for learn_codebase: key = path + "::" + project.
+    // Prevents pool saturation when hooks fire multiple index requests for the same path.
+    std::mutex inflight_lc_mutex;
+    std::unordered_set<std::string> inflight_learn_codebase;
+
     // Watchdog callback - log stuck operations
     pool.set_watchdog_callback([]([[maybe_unused]] const std::string& method, [[maybe_unused]] int64_t secs) {
         std::cerr << "[watchdog] Stuck operation: " << method << " (" << secs << "s)\n";
@@ -626,6 +632,52 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     std::string resp = handler.fast_health_check_json(
                         req_id, pool.worker_count(), pool.active_count(), pool.pending());
                     server.respond(req.client_fd, resp);
+                    continue;
+                }
+            }
+
+            // Dedup learn_codebase: if the same (path, project) is already queued or running,
+            // return a skipped response immediately rather than saturating the pool with
+            // redundant multi-minute index jobs.
+            if (tool_name == "learn_codebase") {
+                auto req_json = json::parse(req.data, nullptr, false);
+                if (!req_json.is_discarded()) {
+                    std::string lc_path, lc_project;
+                    if (req_json.contains("params") && req_json["params"].contains("arguments")) {
+                        const auto& args = req_json["params"]["arguments"];
+                        lc_path    = args.value("path", "");
+                        lc_project = args.value("project", "");
+                    }
+                    std::string lc_key = lc_path + "::" + lc_project;
+                    bool already_inflight = false;
+                    {
+                        std::lock_guard<std::mutex> lk(inflight_lc_mutex);
+                        already_inflight = inflight_learn_codebase.count(lc_key) > 0;
+                        if (!already_inflight) inflight_learn_codebase.insert(lc_key);
+                    }
+                    if (already_inflight) {
+                        auto req_id = req_json.value("id", json(nullptr));
+                        std::string msg = "already indexing — skipped duplicate learn_codebase for " + lc_path;
+                        json resp = {{"jsonrpc","2.0"}, {"id", req_id},
+                            {"result", {
+                                {"content", json::array({{{"type","text"},{"text", msg}}})},
+                                {"structured", {{"status","skipped"},{"reason","already_in_progress"},{"path",lc_path}}}
+                            }}};
+                        server.respond(req.client_fd, resp.dump(-1, ' ', false, json::error_handler_t::replace));
+                        continue;
+                    }
+                    pool.submit(req.client_fd, tool_name,
+                        [&handler, data = req.data]() {
+                            auto request = json::parse(data);
+                            auto response = handler.handle(request);
+                            return response.dump(-1, ' ', false, json::error_handler_t::replace);
+                        },
+                        [&server, &inflight_lc_mutex, &inflight_learn_codebase, lk = lc_key](int fd, std::string response) {
+                            server.queue_response(fd, std::move(response));
+                            std::lock_guard<std::mutex> lock(inflight_lc_mutex);
+                            inflight_learn_codebase.erase(lk);
+                        }
+                    );
                     continue;
                 }
             }
