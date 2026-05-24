@@ -1,6 +1,6 @@
 FROM /maps/projects/caeg/scratch/kbd606/tmp/hint_qwen_v4_gguf/chitta-hint-qwen-f16.gguf
 TEMPLATE """<|im_start|>system
-Extract a single concise factual hint from the user message. If no personal fact or preference is present, output nothing.<|im_end|>
+Extract a single concise retrieval hint from the message. Cover: personal preferences, tech choices (languages, editors, tools, configs), developer workflows, domain expertise, project facts, and recurring patterns. If nothing factual is present, output nothing.<|im_end|>
 <|im_start|>user
 {{ .Prompt }}<|im_end|>
 <|im_start|>assistant

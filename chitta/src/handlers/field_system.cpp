@@ -887,6 +887,46 @@ ToolResult FieldRpcHandler::tool_queue_status(const json&) {
     return ToolResult::ok(ss.str(), s);
 }
 
+ToolResult FieldRpcHandler::tool_ledger_health(const json&) {
+    // Queue stats
+    size_t processed = queue_count_ ? queue_count_->load() : 0;
+    size_t failed    = queue_fail_count_ ? queue_fail_count_->load() : 0;
+    size_t in_file   = 0;
+    if (!failed_queue_path_.empty()) {
+        std::ifstream f(failed_queue_path_);
+        std::string ln;
+        while (std::getline(f, ln)) if (!ln.empty()) in_file++;
+    }
+
+    // Ledger event counts by kind
+    std::string raw = field_store_->ledger_query_json("{}");
+    auto events = json::parse(raw, nullptr, false);
+    std::unordered_map<std::string, int> kind_counts;
+    int total_events = 0;
+    if (!events.is_discarded() && events.is_array()) {
+        total_events = static_cast<int>(events.size());
+        for (const auto& ev : events) {
+            std::string kind = ev.value("kind", "unknown");
+            kind_counts[kind]++;
+        }
+    }
+    json counts = json::object();
+    for (const auto& [k, v] : kind_counts) counts[k] = v;
+
+    json s;
+    s["queue_processed"]   = processed;
+    s["queue_failed"]      = failed;
+    s["dead_letter_count"] = in_file;
+    s["ledger_total"]      = total_events;
+    s["ledger_by_kind"]    = counts;
+
+    std::ostringstream ss;
+    ss << "Ledger: " << total_events << " events";
+    for (const auto& [k, v] : kind_counts) ss << ", " << k << "=" << v;
+    ss << "; Queue: " << processed << " processed, " << failed << " failed";
+    return ToolResult::ok(ss.str(), s);
+}
+
 ToolResult FieldRpcHandler::tool_memory_provenance(const json& params) {
     auto [id, id_str] = parse_id(params);
     if (id_str.empty()) return ToolResult::error("id is required");

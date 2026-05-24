@@ -255,8 +255,10 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         }
         // BM25 lane
         rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20)));
-        // HDC lane
-        rrf_lane(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm));
+        // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
+        if (!params.value("disable_hdc", false)) {
+            rrf_lane(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm));
+        }
 
         // Collect sorted by RRF score, keep original hit metadata
         std::vector<std::pair<float, uint64_t>> ranked;
@@ -390,7 +392,8 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         ss << " " << r.value("text", "").substr(0, 400) << "\n";
     }
 
-    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+    std::string recall_status = results_json.empty() ? "empty" : "ok";
+    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}, {"status", recall_status}});
     fire_recall_callback(results_json, 1);
     return result;
 }

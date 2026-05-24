@@ -365,6 +365,13 @@ void QueueProcessor::run() {
                                                 session_id, args.dump());
                         queue_count_++;
                     }
+                } else if (tool == "ledger_append") {
+                    try {
+                        field_store_.ledger_append(args.dump());
+                        queue_count_++;
+                    } catch (const std::exception& e) {
+                        throw; // re-throw so the outer catch writes to dead-letter
+                    }
                 } else if (tool == "narrative_log") {
                     std::string session_id = args.value("session_id", "");
                     std::string summary = args.value("summary", "");
