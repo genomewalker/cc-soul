@@ -131,3 +131,7 @@
     ToolResult tool_reconcile_pass(const json& params);
     ToolResult tool_harvest_scope(const json& params);
     ToolResult tool_seed_hdc_geometry(const json& params);
+    ToolResult tool_ledger_append(const json& params);
+    ToolResult tool_ledger_query(const json& params);
+    ToolResult tool_ledger_compile(const json& params);
+    ToolResult tool_ledger_contradictions(const json& params);

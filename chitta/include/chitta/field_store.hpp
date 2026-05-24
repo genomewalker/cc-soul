@@ -262,6 +262,12 @@ char* cf_graph_traverse(struct CfHandle* h, const char* start, const char* edge_
                         size_t max_hops, size_t max_results, const char* direction);
 char* cf_graph_pagerank(struct CfHandle* h, const char* seeds_json, const char* edge_types_json,
                         float damping, uint8_t iterations, size_t top_k);
+
+// Interaction Ledger FFI
+int   cf_ledger_append(const struct CfHandle* h, const char* json_in, uint64_t* out_event_id);
+char* cf_ledger_query(const struct CfHandle* h, const char* json_in);
+int   cf_ledger_compile(const struct CfHandle* h, uint32_t* out_count);
+char* cf_ledger_contradictions(const struct CfHandle* h);
 }
 
 namespace chitta {
@@ -1957,6 +1963,37 @@ public:
     }
 
     CfHandle* handle() const { return handle_; }
+
+    // ── Interaction Ledger ──────────────────────────────────────────────────
+
+    uint64_t ledger_append(const std::string& json_in) {
+        uint64_t event_id = 0;
+        int rc = cf_ledger_append(handle_, json_in.c_str(), &event_id);
+        if (rc != 0) throw std::runtime_error("cf_ledger_append failed");
+        return event_id;
+    }
+
+    std::string ledger_query_json(const std::string& json_in = "{}") {
+        char* raw = cf_ledger_query(handle_, json_in.c_str());
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    uint32_t ledger_compile() {
+        uint32_t count = 0;
+        cf_ledger_compile(handle_, &count);
+        return count;
+    }
+
+    std::string ledger_contradictions_json() {
+        char* raw = cf_ledger_contradictions(handle_);
+        if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
 
 private:
     CfHandle* handle_ = nullptr;

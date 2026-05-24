@@ -874,6 +874,21 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"time_from_ms",  "Temporal lower bound (epoch ms)",                          false, ""},
       {"time_to_ms",    "Temporal upper bound (epoch ms)",                          false, ""},
       {"k",             "Max hits to return",                                        false, "10"}}},
+    {"ledger_append", "v6.0 Interaction Ledger: record a retrieve/inject/outcome/override event. Pass full InteractionEvent JSON.",
+     {{"kind",        "Event kind: Retrieve | Inject | Outcome | Override",         true,  ""},
+      {"session_id",  "Session UUID",                                                true,  ""},
+      {"payload",     "Typed payload JSON matching EventPayload variant",            true,  ""},
+      {"thread_id",   "Optional thread ID",                                          false, ""},
+      {"causal_parent","Optional parent event_id",                                  false, ""}}}  ,
+    {"ledger_query", "v6.0 Interaction Ledger: query events by kind/session/time.",
+     {{"kind",       "Filter by kind: Retrieve | Inject | Outcome | Override",      false, ""},
+      {"session_id", "Filter by session UUID",                                       false, ""},
+      {"since_ms",   "Only events at or after this epoch ms",                        false, ""},
+      {"limit",      "Max events to return",                                          false, "50"}}},
+    {"ledger_compile", "v6.0 Interaction Ledger: compile Override events into versioned VersionedAssertions.",
+     {}},
+    {"ledger_contradictions", "v6.0 Interaction Ledger: list contested (subject, predicate) pairs with >1 active assertion.",
+     {}},
 };
 
 // Build set of known tools from specs
