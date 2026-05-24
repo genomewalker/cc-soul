@@ -199,8 +199,6 @@ def store_hint(mind: str, realm: str, hint: str) -> bool:
 def tag_done(mind: str, memory_id) -> None:
     """Tag the original memory so we don't re-process it."""
     chitta(["tag", "--id", str(memory_id), "--add", "hint:done"], mind)
-
-
 def _check_inline(mind: str) -> bool:
     """Return True if chittad hint_extract is available with the hint model loaded."""
     try:
@@ -213,6 +211,63 @@ def _check_inline(mind: str) -> bool:
         return False
 
 
+def _check_llama_cpp() -> bool:
+    """Return True if llama_cpp Python is importable and the GGUF model exists."""
+    model_path = os.environ.get(
+        "CHITTA_HINT_GGUF",
+        os.path.expanduser("~/.claude/models/chitta-hint-qwen-q4_k_m.gguf"),
+    )
+    if not os.path.exists(model_path):
+        return False
+    try:
+        import importlib
+        return importlib.util.find_spec("llama_cpp") is not None
+    except Exception:
+        return False
+
+
+_llama_cpp_instance = None
+
+def hint_extract_llama_cpp_batch(memories: list[dict]) -> list[str]:
+    """Run hint extraction via llama_cpp Python (no daemon, no Ollama)."""
+    global _llama_cpp_instance
+    SYSTEM = (
+        "Extract a single concise retrieval hint from the message. "
+        "Cover: personal preferences, tech choices, developer workflows, "
+        "domain expertise, project facts, and recurring patterns. "
+        "If nothing factual is present, output nothing."
+    )
+    model_path = os.environ.get(
+        "CHITTA_HINT_GGUF",
+        os.path.expanduser("~/.claude/models/chitta-hint-qwen-q4_k_m.gguf"),
+    )
+    try:
+        from llama_cpp import Llama
+        if _llama_cpp_instance is None:
+            _llama_cpp_instance = Llama(
+                model_path=model_path, n_ctx=512, n_gpu_layers=0, verbose=False,
+            )
+        llm = _llama_cpp_instance
+    except Exception as e:
+        sys.stderr.write(f"[hint_enricher] llama_cpp load failed: {e}\n")
+        return [""] * len(memories)
+
+    results = []
+    for m in memories:
+        text = _strip_prefix(m["content"].strip())[:500]
+        if len(text) < 10:
+            results.append("")
+            continue
+        prompt = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n"
+                  f"<|im_start|>user\n{text}<|im_end|>\n"
+                  f"<|im_start|>assistant\n")
+        try:
+            out = llm(prompt, max_tokens=80, temperature=0.0, stop=["<|im_end|>"])
+            results.append(_clean_hint(out["choices"][0]["text"]))
+        except Exception as e:
+            sys.stderr.write(f"[hint_enricher] llama_cpp inference failed: {e}\n")
+            results.append("")
+    return results
 def _strip_prefix(text: str) -> str:
     for prefix in USER_PREFIXES:
         if text.lower().startswith(prefix):
@@ -255,26 +310,35 @@ def hint_extract_batch(memories: list[dict], mind: str) -> list[str]:
     except Exception as e:
         sys.stderr.write(f"[hint_enricher] hint_extract_batch failed: {e}\n")
         return [""] * len(memories)
-
-
 def run(mind: str, limit: int, model: str, dry_run: bool) -> None:
-    # Prefer in-process hint_extract (CPU llama.cpp); fall back to Ollama HTTP.
+    # Priority: chittad hint_extract → llama_cpp Python → Ollama HTTP
     use_inline = _check_inline(mind)
+    use_llama_cpp = False
     endpoint = ""
+
     if not use_inline:
+        use_llama_cpp = _check_llama_cpp()
+    if not use_inline and not use_llama_cpp:
         endpoint = discover_ollama()
         if not endpoint:
-            sys.stderr.write("[hint_enricher] no Ollama endpoint and hint_extract unavailable\n")
+            sys.stderr.write("[hint_enricher] no inference backend available (chittad/llama_cpp/ollama)\n")
             sys.exit(1)
-    mode = "inline(llama.cpp)" if use_inline else f"ollama({endpoint})"
+
+    if use_inline:
+        mode = "inline(chittad)"
+    elif use_llama_cpp:
+        mode = "llama_cpp(python)"
+    else:
+        mode = f"ollama({endpoint})"
     sys.stderr.write(f"[hint_enricher] mode={mode} model={model} limit={limit}\n")
 
     memories = list_memories(mind, limit)
     sys.stderr.write(f"[hint_enricher] {len(memories)} memories to enrich\n")
 
-    # Batch-extract all hints in one chittad call (model loads once)
     if use_inline:
         hints = hint_extract_batch(memories, mind)
+    elif use_llama_cpp:
+        hints = hint_extract_llama_cpp_batch(memories)
     else:
         hints = [generate_hint(endpoint, model, m["content"]) for m in memories]
 
@@ -299,8 +363,6 @@ def run(mind: str, limit: int, model: str, dry_run: bool) -> None:
             done += 1
 
     print(json.dumps({"enriched": done, "skipped": skipped, "total": len(memories)}))
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Retrieval-hint enricher")
     parser.add_argument("--mind", default=DEFAULT_MIND)

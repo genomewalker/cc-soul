@@ -1098,12 +1098,10 @@ PYEOF
 fi
 # ═══════════════════════════════════════════════════════════════════════════
 
-# v6.0: fire-and-forget Outcome event into interaction ledger (non-blocking)
-if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" && -n "${CHITTA_BIN:-}" ]]; then
-    _ts_ms=$(date +%s%3N)
+# v6.0: route Outcome event into interaction ledger via durable queue
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
     _success=$([ "${HAS_ERROR:-false}" = "true" ] && echo false || echo true)
-    _ev_json="{\"kind\":\"Outcome\",\"session_id\":\"$SESSION_ID\",\"ts_ms\":$_ts_ms,\"event_id\":0,\"payload\":{\"Outcome\":{\"success\":$_success,\"error_kind\":null,\"turn_count\":0}},\"causal_parent\":null,\"thread_id\":null,\"observation_mode\":\"Live\"}"
-    "$CHITTA_BIN" ledger_append "$_ev_json" &>/dev/null &
+    queue_write "ledger_append" "{\"kind\":\"Outcome\",\"session_id\":\"${SESSION_ID}\",\"Outcome\":{\"success\":${_success},\"error_kind\":null,\"turn_count\":${TURN_INDEX:-0}}}"
 fi
 
 exit 0

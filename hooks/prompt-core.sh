@@ -847,11 +847,27 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
     fi
 fi
 
-# v6.0: fire-and-forget Retrieve event into interaction ledger (non-blocking)
-if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" && -n "${CHITTA_BIN:-}" ]]; then
-    _ts_ms=$(date +%s%3N)
-    _ev_json="{\"kind\":\"Retrieve\",\"session_id\":\"$SESSION_ID\",\"ts_ms\":$_ts_ms,\"event_id\":0,\"payload\":{\"Retrieve\":{\"query\":\"\",\"strategy\":\"prompt_hook\",\"limit\":0,\"refs\":[]}},\"causal_parent\":null,\"thread_id\":null,\"observation_mode\":\"Live\"}"
-    "$CHITTA_BIN" ledger_append "$_ev_json" &>/dev/null &
+# v6.0: route Retrieve event into interaction ledger via durable queue
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
+    _lq=$(printf '%s' "$QUERY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')
+    queue_write "ledger_append" "{\"kind\":\"Retrieve\",\"session_id\":\"${SESSION_ID}\",\"Retrieve\":{\"query\":${_lq},\"strategy\":\"prompt_hook\",\"limit\":0,\"refs\":[]}}"
+fi
+
+# Real-time hint extraction: every 4 turns starting at turn 4
+_HINT_INTERVAL=4
+_HINT_MODEL="${CHITTA_HINT_MODEL:-$HOME/.claude/models/chitta-hint-qwen-q4_k_m.gguf}"
+_HINT_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/../scripts/hint_realtime.py"
+if [[ $((TURN_INDEX % _HINT_INTERVAL)) -eq 0 && ${TURN_INDEX:-0} -ge 4 \
+      && -n "${TRANSCRIPT_PATH:-}" && -f "${TRANSCRIPT_PATH:-}" \
+      && -f "$_HINT_MODEL" && -f "$_HINT_SCRIPT" ]]; then
+    python3 "$_HINT_SCRIPT" \
+        --transcript "$TRANSCRIPT_PATH" \
+        --session "$SESSION_ID" \
+        --turns 5 \
+        --model "$_HINT_MODEL" \
+        --chitta-bin "$CHITTA_BIN" \
+        --mind-path "$MIND_PATH" \
+        &>/dev/null &
 fi
 
 exit 0

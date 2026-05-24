@@ -1,0 +1,9 @@
+FROM /maps/projects/caeg/scratch/kbd606/tmp/hint_model_a_gguf/chitta-hint-model-a-q4_k_m.gguf
+TEMPLATE """<|im_start|>system
+You are converting a compact memory notation into a natural language retrieval hint. Output a single concise factual sentence in third person. Preserve all technical details (paths, versions, names). If the input is a job/task record or operational log, output nothing.<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+PARAMETER temperature 0.0
+PARAMETER stop "<|im_end|>"

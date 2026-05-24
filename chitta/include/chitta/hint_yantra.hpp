@@ -22,8 +22,10 @@ public:
     static constexpr int N_GPU_LAYERS = 0;
 
     static constexpr const char* SYSTEM_PROMPT =
-        "Extract a single concise factual hint from the user message. "
-        "If no personal fact or preference is present, output nothing.";
+        "Extract a single concise retrieval hint from the message. "
+        "Cover: personal preferences, tech choices (languages, editors, tools, configs), "
+        "developer workflows, domain expertise, project facts, and recurring patterns. "
+        "If nothing factual is present, output nothing.";
 
     explicit HintYantra(std::string model_path = "", const std::string& mind_path = "")
         : model_path_(model_path.empty() ? discover(mind_path) : std::move(model_path)) {

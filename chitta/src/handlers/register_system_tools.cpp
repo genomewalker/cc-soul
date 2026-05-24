@@ -46,6 +46,11 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["queue_status"] = [this](const json& p) { return tool_queue_status(p); };
 
+    tools_.push_back({{"name","ledger_health"},{"description","Get ledger event counts by kind and queue health metrics"},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["ledger_health"] = [this](const json& p) { return tool_ledger_health(p); };
+
     tools_.push_back({{"name","health_check"},{"description","Check daemon health"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });

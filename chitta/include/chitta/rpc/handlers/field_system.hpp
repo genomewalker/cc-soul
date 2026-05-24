@@ -27,6 +27,7 @@
     ToolResult tool_realm_visibility(const json& params);
     ToolResult tool_realm_detect();
     ToolResult tool_queue_status(const json&);
+    ToolResult tool_ledger_health(const json&);
     ToolResult tool_memory_provenance(const json& params);
     ToolResult tool_memory_status(const json& params);
     ToolResult tool_trim_realm_names(const json&);

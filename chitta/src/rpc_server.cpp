@@ -889,6 +889,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"ledger_contradictions", "v6.0 Interaction Ledger: list contested (subject, predicate) pairs with >1 active assertion.",
      {}},
+    {"ledger_health", "Get ledger event counts by kind and queue health metrics.",
+     {}},
 };
 
 // Build set of known tools from specs

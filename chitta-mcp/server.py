@@ -211,6 +211,7 @@ ADVANCED_TOOLS = {
     "run_hint_enricher",
     # Interaction ledger (v6.0)
     "ledger_append", "ledger_query", "ledger_compile", "ledger_contradictions",
+    "ledger_health",
 }
 
 # Combined set of tools to hide from listing (but still callable)
@@ -1846,6 +1847,7 @@ def handle_recall_gateway(arguments: dict) -> str:
     """Unified recall with strategy routing.
 
     Strategies: semantic (default), priority, temporal, hybrid, smart
+    disable_hdc: if True, skip HDC lane in RRF (ablation/benchmarking)
     """
     strategy = arguments.pop("strategy", "semantic")
     tool_map = {
