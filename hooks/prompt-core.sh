@@ -847,4 +847,11 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
     fi
 fi
 
+# v6.0: fire-and-forget Retrieve event into interaction ledger (non-blocking)
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" && -n "${CHITTA_BIN:-}" ]]; then
+    _ts_ms=$(date +%s%3N)
+    _ev_json="{\"kind\":\"Retrieve\",\"session_id\":\"$SESSION_ID\",\"ts_ms\":$_ts_ms,\"event_id\":0,\"payload\":{\"Retrieve\":{\"query\":\"\",\"strategy\":\"prompt_hook\",\"limit\":0,\"refs\":[]}},\"causal_parent\":null,\"thread_id\":null,\"observation_mode\":\"Live\"}"
+    "$CHITTA_BIN" ledger_append "$_ev_json" &>/dev/null &
+fi
+
 exit 0

@@ -1364,4 +1364,39 @@ ToolResult FieldRpcHandler::tool_seed_hdc_geometry(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed}});
 }
 
+// ── Interaction Ledger handlers ───────────────────────────────────────────────
+
+ToolResult FieldRpcHandler::tool_ledger_append(const json& params) {
+    std::string json_in = params.dump();
+    uint64_t event_id = 0;
+    try { event_id = field_store_->ledger_append(json_in); }
+    catch (const std::exception& e) { return ToolResult::error(e.what()); }
+    std::ostringstream ss;
+    ss << "ledger_append: event_id=" << event_id;
+    return ToolResult::ok(ss.str(), {{"event_id", event_id}});
+}
+
+ToolResult FieldRpcHandler::tool_ledger_query(const json& params) {
+    std::string raw = field_store_->ledger_query_json(params.dump());
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    ss << "ledger_query: " << (parsed.is_array() ? parsed.size() : 0) << " events";
+    return ToolResult::ok(ss.str(), {{"events", parsed.is_array() ? parsed : json::array()}});
+}
+
+ToolResult FieldRpcHandler::tool_ledger_compile(const json& /*params*/) {
+    uint32_t count = field_store_->ledger_compile();
+    std::ostringstream ss;
+    ss << "ledger_compile: " << count << " new assertions";
+    return ToolResult::ok(ss.str(), {{"new_assertions", count}});
+}
+
+ToolResult FieldRpcHandler::tool_ledger_contradictions(const json& /*params*/) {
+    std::string raw = field_store_->ledger_contradictions_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    ss << "ledger_contradictions: " << (parsed.is_array() ? parsed.size() : 0) << " contested pairs";
+    return ToolResult::ok(ss.str(), {{"contested", parsed.is_array() ? parsed : json::array()}});
+}
+
 } // namespace chitta

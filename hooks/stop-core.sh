@@ -969,8 +969,10 @@ echo "[ledger] queued: $SESSION_ID ($mood, files=$file_count decisions=$decision
 
 # ===========================================
 # GOAL DETECTION: Detect goal setting and progress patterns
+# Skip for non-interactive sessions (claude -p, API) — labeler/batch content
+# would otherwise match goal patterns and flood the daemon with spurious calls.
 # ===========================================
-if [[ -n "$LAST_USER_MSG" ]]; then
+if [[ -n "$LAST_USER_MSG" && "${CLAUDE_CODE_ENTRYPOINT:-cli}" == "cli" ]]; then
     # Goal setting patterns: "I want to", "we need to", "let's build/create/implement"
     if echo "$LAST_USER_MSG" | grep -qiE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)"; then
         goal_title=$(echo "$LAST_USER_MSG" | grep -ioE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)[^.!?]*" | head -1 | head -c 100 | tr '\n' ' ')
@@ -1095,5 +1097,13 @@ PYEOF
     fi
 fi
 # ═══════════════════════════════════════════════════════════════════════════
+
+# v6.0: fire-and-forget Outcome event into interaction ledger (non-blocking)
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" && -n "${CHITTA_BIN:-}" ]]; then
+    _ts_ms=$(date +%s%3N)
+    _success=$([ "${HAS_ERROR:-false}" = "true" ] && echo false || echo true)
+    _ev_json="{\"kind\":\"Outcome\",\"session_id\":\"$SESSION_ID\",\"ts_ms\":$_ts_ms,\"event_id\":0,\"payload\":{\"Outcome\":{\"success\":$_success,\"error_kind\":null,\"turn_count\":0}},\"causal_parent\":null,\"thread_id\":null,\"observation_mode\":\"Live\"}"
+    "$CHITTA_BIN" ledger_append "$_ev_json" &>/dev/null &
+fi
 
 exit 0

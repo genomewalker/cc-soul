@@ -209,6 +209,8 @@ ADVANCED_TOOLS = {
     "witness_memory", "reconcile_pass", "harvest_scope", "seed_hdc_geometry",
     # Hint enricher
     "run_hint_enricher",
+    # Interaction ledger (v6.0)
+    "ledger_append", "ledger_query", "ledger_compile", "ledger_contradictions",
 }
 
 # Combined set of tools to hide from listing (but still callable)
