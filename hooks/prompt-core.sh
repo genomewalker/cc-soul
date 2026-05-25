@@ -504,31 +504,8 @@ if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
         exit 0
     fi
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[DISCIPLINE] $turns_since_store turns without storing — consider remember/learn_correction/learn_milestone"
-    # Auto-capture: queue a brief observe so work survives compaction even without explicit stores.
-    # Pulls last 5 bash commands from transcript as a fallback memory.
-    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-        recent_cmds=$(python3 -c "
-import json, sys
-try:
-    lines = open('$TRANSCRIPT_PATH').readlines()[-200:]
-    cmds = []
-    for l in lines:
-        try:
-            d = json.loads(l)
-            if d.get('type') == 'tool_use' and d.get('name') == 'Bash':
-                cmd = (d.get('input') or {}).get('command','')[:120]
-                if cmd: cmds.append(cmd)
-        except: pass
-    print('; '.join(cmds[-5:]))
-except: pass
-" 2>/dev/null || true)
-        if [[ -n "$recent_cmds" ]]; then
-            AUTO_OBS="[auto-checkpoint turn=$TURN_INDEX realm=$REALM] Recent work: $recent_cmds"
-            queue_write "observe" "$(jq -n --arg c "$AUTO_OBS" --arg r "$REALM" \
-                '{content:$c, category:"episode", realm:$r, tags:["auto-checkpoint"]}')"
-            echo "$TURN_INDEX" > "$LAST_STORE_FILE"
-        fi
-    fi
+    # Auto-store is handled by the stop hook (PostToolUse) which has the full
+    # assistant response and can produce a richer turn summary.
 fi
 
 # ===========================================

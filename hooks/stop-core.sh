@@ -561,6 +561,46 @@ if [[ "$CLAUDE_LEARNED" == "true" ]]; then
     echo "$TURN_INDEX" > "${MIND_PATH}/.last_store_turn_${SESSION_ID}"
 fi
 
+# AUTO-STORE: When discipline threshold crossed and model didn't store, do it
+# automatically from the stop hook — no model intervention needed.
+STORE_INTERVAL="${CC_SOUL_STORE_INTERVAL:-7}"
+LAST_STORE_FILE="${MIND_PATH}/.last_store_turn_${SESSION_ID}"
+_last_store=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo 0)
+_turns_since_store=$(( TURN_INDEX - _last_store ))
+if [[ "$CLAUDE_LEARNED" == "false" && $_turns_since_store -ge $STORE_INTERVAL && ${TURN_INDEX:-0} -gt 0 ]]; then
+    # Extract a meaningful summary: first non-empty non-marker assistant line
+    _auto_summary=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -5 | head -c 300 | tr '\n' ' ')
+    # Also pull the last tool result (file edited, command run) as context
+    _auto_tool=""
+    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+        _auto_tool=$(python3 -c "
+import json,sys
+lines=open('$TRANSCRIPT_PATH').readlines()[-100:]
+tools=[]
+for l in lines:
+    try:
+        d=json.loads(l)
+        if d.get('type')=='tool_use' and d.get('name') in ('Bash','Edit','Write'):
+            inp=d.get('input',{})
+            c=inp.get('command') or inp.get('file_path','')
+            if c: tools.append(c[:80])
+    except: pass
+print('; '.join(tools[-3:]))
+" 2>/dev/null || true)
+    fi
+    _auto_content="[auto-store turn=$TURN_INDEX realm=${REALM:-brahman}]"
+    [[ -n "$_auto_summary" ]] && _auto_content="$_auto_content $_auto_summary"
+    [[ -n "$_auto_tool" ]] && _auto_content="$_auto_content | tools: $_auto_tool"
+    if [[ ${#_auto_content} -gt 30 ]]; then
+        queue_write "remember" "$(jq -n \
+            --arg c "$_auto_content" --arg r "${REALM:-brahman}" \
+            '{content:$c,kind:"episode",realm:$r,tags:["auto-store","discipline"]}')"
+        echo "$TURN_INDEX" > "$LAST_STORE_FILE"
+        echo "[discipline] auto-stored turn summary (${_turns_since_store} turns since last store)" >&2
+        CLAUDE_LEARNED=true
+    fi
+fi
+
 # If user correction detected but Claude didn't learn, auto-store
 if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
     # ===========================================
