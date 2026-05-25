@@ -157,6 +157,12 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
 fi
 
 # Skip daemon-dependent operations immediately if daemon is not running.
+# v6.0: route Retrieve event into interaction ledger via durable queue (file-based, no daemon needed)
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
+    _lq=$(printf '%s' "$QUERY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')
+    queue_write "ledger_append" "{\"kind\":\"Retrieve\",\"session_id\":\"${SESSION_ID}\",\"payload\":{\"Retrieve\":{\"query\":${_lq},\"strategy\":\"prompt_hook\",\"limit\":0,\"refs\":[]}}}"
+fi
+
 # queue_write above is file-based (no daemon needed), everything below requires it.
 daemon_available || exit 0
 
@@ -853,12 +859,6 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         # Fallback: plain text (starts without {, so Claude Code treats as plain text)
         echo "$FINAL_OUTPUT"
     fi
-fi
-
-# v6.0: route Retrieve event into interaction ledger via durable queue
-if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
-    _lq=$(printf '%s' "$QUERY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')
-    queue_write "ledger_append" "{\"kind\":\"Retrieve\",\"session_id\":\"${SESSION_ID}\",\"Retrieve\":{\"query\":${_lq},\"strategy\":\"prompt_hook\",\"limit\":0,\"refs\":[]}}"
 fi
 
 # Real-time hint extraction: every 4 turns starting at turn 4
