@@ -1406,7 +1406,13 @@ ToolResult FieldRpcHandler::tool_ledger_contradictions(const json& /*params*/) {
 
 ToolResult FieldRpcHandler::tool_predicate_attach(const json& params) {
     uint64_t memory_id = params.value("memory_id", uint64_t{0});
-    std::string check_cmd = params.value("check_cmd", "");
+    // check_cmd may arrive as boolean if CLI auto-converted "true"/"false" strings.
+    std::string check_cmd;
+    if (params.contains("check_cmd")) {
+        const auto& v = params["check_cmd"];
+        if (v.is_string()) check_cmd = v.get<std::string>();
+        else if (v.is_boolean()) check_cmd = v.get<bool>() ? "true" : "false";
+    }
     if (!memory_id || check_cmd.empty())
         return ToolResult::error("memory_id and check_cmd are required");
     int64_t pred_id = field_store_->predicate_attach(memory_id, check_cmd);
