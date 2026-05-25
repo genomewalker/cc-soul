@@ -230,13 +230,13 @@ def _install_codex():
     text = config.read_text()
 
     if "[features]" not in text:
-        text += "\n[features]\nplugins = true\ncodex_hooks = true\n"
+        text += "\n[features]\nplugins = true\nhooks = true\n"
     else:
         features_section = text.split("[features]", 1)[1].split("\n[", 1)[0]
         if "plugins" not in features_section:
             text = text.replace("[features]", "[features]\nplugins = true")
-        if "codex_hooks" not in features_section:
-            text = text.replace("[features]", "[features]\ncodex_hooks = true")
+        if "hooks" not in features_section:
+            text = text.replace("[features]", "[features]\nhooks = true")
 
     if f"{PLUGIN_NAME}@{MARKETPLACE}" not in text:
         text += f'\n[plugins."{PLUGIN_NAME}@{MARKETPLACE}"]\nenabled = true\n'
