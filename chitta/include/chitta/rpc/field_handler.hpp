@@ -249,6 +249,16 @@ public:
 
     // Read-only tools that may run concurrently under a shared lock.
     // Anything not in this set takes an exclusive lock (safe default).
+    // Tools that manage their own Rust-level RwLock synchronisation and must NOT
+    // hold rpc_mutex_ during subprocess execution (popen in predicate_run takes
+    // up to 5s and would starve every other RPC for its duration).
+    static bool is_subprocess_tool(const std::string& name) {
+        static const std::unordered_set<std::string> kSubprocess = {
+            "predicate_run",
+        };
+        return kSubprocess.count(name) > 0;
+    }
+
     static bool is_read_only_tool(const std::string& name) {
         static const std::unordered_set<std::string> kReads = {
             "health_check", "version_check", "soul_context", "hygiene_stats",
@@ -309,7 +319,10 @@ public:
             }
 
             ToolResult result;
-            if (is_read_only_tool(name)) {
+            if (is_subprocess_tool(name)) {
+                // No rpc_mutex_ held — tool manages its own Rust RwLock synchronisation.
+                result = it->second(args);
+            } else if (is_read_only_tool(name)) {
                 std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
                 result = it->second(args);
             } else {

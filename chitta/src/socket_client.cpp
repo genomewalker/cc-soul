@@ -252,6 +252,13 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
     while (true) {
         if (auto frame = extract_frame()) {
             if (frame_id_matches(*frame)) return frame;
+            // Null-id error frames (from thread-pool exception handler) match any caller.
+            try {
+                auto j = json::parse(*frame);
+                if (j.contains("error") && (!j.contains("id") || j["id"].is_null())) {
+                    return frame;
+                }
+            } catch (...) {}
             // id mismatch: stale frame, drop and keep reading
             continue;
         }

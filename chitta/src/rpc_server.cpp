@@ -1069,6 +1069,10 @@ int run_cli(const std::string& socket_path, const std::string& tool,
                         try {
                             if (has_dot) {
                                 args[key] = std::stod(value);
+                            } else if (value[0] != '-') {
+                                // Use stoull for non-negative: avoids overflow on large uint64_t
+                                // memory IDs (> INT64_MAX ~9.2e18) that stoll would throw on.
+                                args[key] = std::stoull(value);
                             } else {
                                 args[key] = std::stoll(value);
                             }
