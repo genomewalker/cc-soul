@@ -561,6 +561,9 @@ void FieldRpcHandler::register_memory_core_tools() {
     handlers_["ledger_query"]          = [this](const json& p) { return tool_ledger_query(p); };
     handlers_["ledger_compile"]        = [this](const json& p) { return tool_ledger_compile(p); };
     handlers_["ledger_contradictions"] = [this](const json& p) { return tool_ledger_contradictions(p); };
+    handlers_["predicate_attach"]      = [this](const json& p) { return tool_predicate_attach(p); };
+    handlers_["predicate_run"]         = [this](const json& p) { return tool_predicate_run(p); };
+    handlers_["predicate_list"]        = [this](const json& p) { return tool_predicate_list(p); };
 
     tools_.push_back({{"name","log_event_ex"},{"description","Log a CEC event with regret-shaping telemetry (token_cost, latency_ms, retry_count). Updates Q-values with utility = outcome_reward - 0.001*token_cost - 0.00001*latency_ms - 0.1*retry_count."},
         {"inputSchema",{{"type","object"},{"properties",{
