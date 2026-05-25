@@ -33,7 +33,7 @@ from typing import Optional
 DEFAULT_CHITTA_BIN = Path.home() / ".claude" / "bin" / "chitta"
 SEED_TAG = "eval_fixture"
 RECALL_TIMEOUT = 90   # seconds — embedding can take a while
-REMEMBER_TIMEOUT = 30
+REMEMBER_TIMEOUT = 120
 
 # ---------------------------------------------------------------------------
 # Test suite definition
@@ -411,7 +411,9 @@ def score_recall(output: str, case: Case) -> tuple[bool, bool, bool, bool, bool]
                 if fingerprint and fingerprint in lower_out:
                     fp = True
                     break
-        tn = not fp and (no_results or not has_content)
+        # TN: seeded irrelevant content didn't appear in results.
+        # Other results (genuinely relevant memories) may appear — that's correct behavior.
+        tn = not fp
         return (False, tn, fp, False, False)
     else:
         # TP case

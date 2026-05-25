@@ -4,6 +4,7 @@
 #include "../ssl_gloss.hpp"
 #include "../field_store.hpp"
 #include "../vak.hpp"
+#include "../embed_queue.hpp"
 #include "../code_intel.hpp"
 #include "../mind/subconscious.hpp"
 #include "../sadhana/sadhana_manager.hpp"
@@ -73,6 +74,8 @@ public:
         register_tools();
     }
 
+    void set_embed_queue(EmbedQueue* eq) { embed_queue_ = eq; }
+
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
     void set_queue_stats(std::atomic<size_t>* count, std::atomic<size_t>* fails,
@@ -81,6 +84,12 @@ public:
     }
     using RecallCallback = std::function<void(const std::vector<uint64_t>&, int)>;
     void set_recall_callback(RecallCallback cb) { recall_callback_ = std::move(cb); }
+
+    // Called after any write that stores a memory with empty embedding (pending backfill).
+    // Used by the backfill thread to wake immediately rather than waiting 30s.
+    using WriteNotifyCallback = std::function<void()>;
+    void set_write_notify_callback(WriteNotifyCallback cb) { write_notify_fn_ = std::move(cb); }
+    void fire_write_notify() const { if (write_notify_fn_) write_notify_fn_(); }
     FieldStore* get_field_store() const { return field_store_; }
     VakYantra* get_yantra() const { return yantra_; }
 
@@ -253,6 +262,7 @@ public:
             // RPC for the duration of their event scan.
             "msg_inbox", "msg_history",
             "queue_status", "distill_status", "enrichment_status",
+            "probe_status", "ledger_query", "ledger_contradictions",
             "agent_list", "agent_get", "agent_protocol_stats",
             "dream_list", "dream_status",
             "file_at_time", "file_timeline", "file_dependents", "file_imports",
@@ -277,91 +287,24 @@ public:
                 return make_error(id, -32601, "Unknown tool: " + name);
             }
 
-            // Pre-embed write tools BEFORE taking the exclusive lock.
-            // embed_ssl_aware() / embed_text() only use yantra_ (ML model),
-            // not field_store_, so they are safe outside the lock.  Previously
-            // this ran inside the exclusive lock for the full 30-60s inference
-            // window, starving every concurrent reader.
-            // Pre-embed write tools BEFORE the exclusive lock.
-            // embed_*() only uses yantra_ (ML model), not field_store_.
-            // Previously embedding ran inside the exclusive lock for 30-60 s,
-            // starving every concurrent reader.
-            if (!is_read_only_tool(name) && !args.contains("_preembedding")) {
-                std::string content = args.value("content", "");
-                if (!content.empty()) {
-                    std::vector<float> emb;
-                    if (name == "remember") {
-                        emb = embed_ssl_aware(content);
-                    } else if (name == "observe") {
-                        std::string category = args.value("category", "episode");
-                        emb = embed_text(to_ssl_format(content, category));
-                    } else if (name == "grow") {
-                        std::string type  = args.value("type", "wisdom");
-                        std::string title = args.value("title", "");
-                        std::string ssl   = title.empty() ? to_ssl_format(content, type)
-                                          : "[" + type + "] " + title + "\n" + content;
-                        emb = embed_text(ssl);
-                    } else if (name == "learn" || name == "learn_correction" ||
-                               name == "learn_milestone" || name == "learn_outcome") {
-                        emb = embed_ssl_aware(content);
-                    } else if (name == "suggestion_track") {
-                        emb = embed_text(content);
-                    } else if (name == "anticipation_observe") {
-                        std::string context = args.value("context", "");
-                        std::string action  = args.value("action", "");
-                        if (!context.empty() && !action.empty())
-                            emb = embed_text("anticipation: " + context + " \xe2\x86\x92 " + action);
-                    } else if (name == "create_episode") {
-                        std::string title = args.value("title", "");
-                        int start_turn    = args.value("start_turn", 0);
-                        int end_turn      = args.value("end_turn", 0);
-                        if (!title.empty())
-                            emb = embed_text(title + ": turns " + std::to_string(start_turn)
-                                             + "-" + std::to_string(end_turn));
-                    } else if (name == "update" || name == "reconsolidate") {
-                        emb = embed_text(content);
-                    } else if (name == "consolidation_merge") {
-                        std::string mc = args.value("merged_content", "");
-                        if (!mc.empty()) emb = embed_text(mc);
-                    } else if (name == "curiosity_note_gap") {
-                        std::string gap     = args.value("gap", "");
-                        std::string ctx     = args.value("context", "");
-                        std::string txt     = gap;
-                        if (!ctx.empty()) txt += "\nContext: " + ctx;
-                        if (!txt.empty()) emb = embed_text(txt);
-                    } else if (name == "profile_update") {
-                        std::string uid   = args.value("user_id", "default");
-                        std::string field = args.value("field", "");
-                        std::string val   = args.value("value", "");
-                        if (!field.empty()) emb = embed_text("profile " + uid + " " + field + " " + val);
-                    } else if (name == "profile_observe") {
-                        std::string obs_type = args.value("observation_type", "");
-                        std::string val      = args.value("value", "");
-                        std::string uid      = args.value("user_id", "default");
-                        if (!obs_type.empty())
-                            emb = embed_text("observation[" + obs_type + "] for " + uid + ": " + val);
-                    } else if (name == "goal_set") {
-                        std::string title = args.value("title", "");
-                        std::string desc  = args.value("description", "");
-                        std::string dl    = args.value("deadline", "");
-                        if (!title.empty()) {
-                            std::string txt = title;
-                            if (!desc.empty()) txt += ": " + desc;
-                            if (!dl.empty())   txt += " (by " + dl + ")";
-                            emb = embed_text(txt);
-                        }
-                    }
-                    if (!emb.empty()) args["_preembedding"] = emb;
-                }
-            }
+            // Write tools: skip synchronous embedding here — the backfill thread
+            // will embed pending memories asynchronously via backfill_embedding().
+            // Embedding inside the write lock caused 96% CPU blocks starving all readers.
+            // Read tools still pre-embed below (shared lock, not exclusive).
 
-            // Pre-embed query for vector-search read tools so rpc_mutex_ isn't
-            // held during the Ollama call (recall holds shared_lock for each embed).
+            // Pre-embed query via EmbedQueue (single-owner, non-blocking, cached).
+            // Falls through to BM25-only if the embed queue is busy or yantra unavailable.
             if (is_read_only_tool(name) && !args.contains("_preembedding")) {
                 std::string q = args.value("query", "");
-                if (!q.empty() && yantra_) {
-                    Artha a = yantra_->transform(q, EmbedMode::Query);
-                    if (!a.nu.data.empty()) args["_preembedding"] = a.nu.data;
+                if (!q.empty()) {
+                    std::vector<float> emb;
+                    if (embed_queue_) {
+                        emb = embed_queue_->query(q, std::chrono::milliseconds(2000));
+                    } else if (yantra_) {
+                        Artha a = yantra_->transform(q, EmbedMode::Query);
+                        if (a.certainty > 0.0f) emb = a.nu.data;
+                    }
+                    if (!emb.empty()) args["_preembedding"] = emb;
                 }
             }
 
@@ -387,6 +330,8 @@ private:
     std::atomic<size_t>* queue_fail_count_ = nullptr;
     std::string failed_queue_path_;
     RecallCallback recall_callback_;
+    WriteNotifyCallback write_notify_fn_;
+    EmbedQueue* embed_queue_ = nullptr;
 
     mutable std::shared_mutex rpc_mutex_;    // Reads share, writes exclusive; see is_read_only_tool()
     mutable std::mutex distill_mutex_;
@@ -399,16 +344,27 @@ private:
 
     // ── Embedding helpers ───────────────────────────────────────────────────
 
+    // Write-path embed: fire-and-forget via queue (warms cache, doesn't block).
+    // Falls back to direct yantra if no queue; returns empty if both unavailable.
     std::vector<float> embed_text(const std::string& text) {
-        if (!yantra_ || text.empty()) return {};
+        if (text.empty()) return {};
+        if (embed_queue_) {
+            embed_queue_->enqueue_write(text);
+            return {};  // caller must handle empty (store with pending embed)
+        }
+        if (!yantra_) return {};
         Artha a = yantra_->transform(text);
-        return a.nu.data;
+        return (a.certainty > 0.0f) ? a.nu.data : std::vector<float>{};
     }
 
+    // Read-path embed: await via queue (≤2s), fall to BM25 on miss.
     std::vector<float> embed_query(const std::string& query) {
-        if (!yantra_ || query.empty()) return {};
+        if (query.empty()) return {};
+        if (embed_queue_)
+            return embed_queue_->query(query, std::chrono::milliseconds(2000));
+        if (!yantra_) return {};
         Artha a = yantra_->transform(query, EmbedMode::Query);
-        return a.nu.data;
+        return (a.certainty > 0.0f) ? a.nu.data : std::vector<float>{};
     }
 
     // ── ID extraction helpers ───────────────────────────────────────────────
