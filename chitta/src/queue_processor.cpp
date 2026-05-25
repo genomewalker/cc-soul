@@ -192,8 +192,9 @@ void QueueProcessor::run() {
                         }
                         std::string full_text = title.empty() ? content : title + "\n" + content;
                         std::string realm = args.value("realm", "brahman");
+                        // Pass empty embedding — backfill thread embeds asynchronously.
                         auto new_id = field_store_.remember(category_to_kind(category), realm,
-                                                  full_text, embed_text(full_text),
+                                                  full_text, {},
                                                   confidence, decay);
                         // Set initial epistemic status and memory status based on source
                         if (new_id > 0) {
@@ -241,6 +242,9 @@ void QueueProcessor::run() {
                                     } catch (...) {}
                                 }
                             }
+                            // For semantic supersession we still need the embedding.
+                            // Compute it here (outside lock is impossible — lock is already held),
+                            // but this is a rare correction path, not the hot remember path.
                             auto emb = embed_text(full_text);
                             std::string target_id_str = args.value("target_id", "");
                             if (!target_id_str.empty()) {
@@ -290,8 +294,9 @@ void QueueProcessor::run() {
                     std::string gap = args.value("gap", "");
                     if (!gap.empty()) {
                         std::string content = "[curiosity] " + gap;
+                        // Empty embedding — backfill thread handles it.
                         field_store_.remember("episode", "brahman", content,
-                                              embed_text(content), 0.7f, 0.0f);
+                                              {}, 0.7f, 0.0f);
                         queue_count_++;
                     }
                 } else if (tool == "store_policy") {
@@ -300,8 +305,9 @@ void QueueProcessor::run() {
                     float confidence = args.value("confidence", 0.5f);
                     if (!policy_type.empty() && !content.empty()) {
                         std::string full = "[policy:" + policy_type + "] " + content;
+                        // Empty embedding — backfill thread handles it.
                         field_store_.remember("wisdom", "brahman", full,
-                                              embed_text(full), confidence, 0.0f);
+                                              {}, confidence, 0.0f);
                         queue_count_++;
                     }
                 } else if (tool == "store_claim") {
