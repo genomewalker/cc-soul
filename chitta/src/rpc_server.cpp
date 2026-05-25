@@ -20,9 +20,6 @@
 #include <chitta/socket_client.hpp>
 #include <chitta/rpc/sandbox.hpp>  // append_line_atomic
 #include <unistd.h>  // getppid
-#ifdef CHITTA_WITH_ONNX
-#include <chitta/vak_onnx.hpp>
-#endif
 #include <fstream>
 #include <array>
 #include <thread>

@@ -222,7 +222,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 # Options
 option(CHITTA_BUILD_TESTS "Build tests" ON)
 option(CHITTA_BUILD_RPC "Build RPC server executable" ON)
-option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings (deprecated — use Ollama)" OFF)
 option(CHITTA_WITH_LLAMA_CPP "Enable inline GGUF embeddings via llama.cpp (no Ollama required)" OFF)
 
 # Header-only library
@@ -262,127 +261,6 @@ else()
         target_link_libraries(chitta INTERFACE nlohmann_json::nlohmann_json)
         target_compile_definitions(chitta INTERFACE CHITTA_WITH_JSON=1)
         message(STATUS "nlohmann_json downloaded via CPM")
-    endif()
-endif()
-
-# ONNX Runtime (optional)
-if(CHITTA_WITH_ONNX)
-    # Auto-discover ONNX Runtime - no hardcoded paths
-    # Priority: user -D flags > find_library/find_path
-
-    if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB_DIR)
-        # Build search hints from environment
-        set(_ort_search_paths "")
-
-        # Official cc-soul deps location (has CoreML on macOS)
-        if(EXISTS "$ENV{HOME}/.claude/deps/onnxruntime")
-            list(APPEND _ort_search_paths "$ENV{HOME}/.claude/deps/onnxruntime")
-        endif()
-
-        # Environment-based paths (conda, virtualenv, etc.)
-        if(DEFINED ENV{CONDA_PREFIX})
-            list(APPEND _ort_search_paths "$ENV{CONDA_PREFIX}")
-        endif()
-        if(DEFINED ENV{VIRTUAL_ENV})
-            list(APPEND _ort_search_paths "$ENV{VIRTUAL_ENV}")
-        endif()
-
-        # Homebrew (detect dynamically)
-        if(APPLE)
-            execute_process(
-                COMMAND brew --prefix onnxruntime
-                OUTPUT_VARIABLE _brew_ort_prefix
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_QUIET
-                RESULT_VARIABLE _brew_result
-            )
-            if(_brew_result EQUAL 0 AND EXISTS "${_brew_ort_prefix}")
-                list(APPEND _ort_search_paths "${_brew_ort_prefix}")
-            endif()
-        endif()
-
-        # System paths
-        list(APPEND _ort_search_paths "/usr/local" "/usr")
-
-        # Find the library first
-        find_library(ONNXRUNTIME_LIBRARY
-            NAMES onnxruntime
-            HINTS ${_ort_search_paths}
-            PATH_SUFFIXES lib lib64
-        )
-
-        if(ONNXRUNTIME_LIBRARY)
-            get_filename_component(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
-            get_filename_component(_ort_root "${ONNXRUNTIME_LIB_DIR}" DIRECTORY)
-
-            # Find header - check both layouts (flat and nested)
-            # Nested: onnxruntime/core/session/onnxruntime_cxx_api.h
-            # Flat: onnxruntime_cxx_api.h
-            find_path(ONNXRUNTIME_INCLUDE_DIR
-                NAMES onnxruntime_cxx_api.h
-                HINTS "${_ort_root}/include" ${_ort_search_paths}
-                PATH_SUFFIXES
-                    include
-                    include/onnxruntime/core/session
-                    onnxruntime/core/session
-            )
-
-            if(ONNXRUNTIME_INCLUDE_DIR)
-                message(STATUS "ONNX Runtime: auto-detected")
-                message(STATUS "  Library: ${ONNXRUNTIME_LIBRARY}")
-                message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
-
-                # Check for CoreML support (macOS official release)
-                if(APPLE AND EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/coreml_provider_factory.h")
-                    set(ONNXRUNTIME_HAS_COREML TRUE)
-                    message(STATUS "  CoreML: available")
-                endif()
-            endif()
-        endif()
-
-        # Cache for user override
-        if(NOT ONNXRUNTIME_INCLUDE_DIR)
-            set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
-        endif()
-        if(NOT ONNXRUNTIME_LIB_DIR)
-            set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
-        endif()
-    else()
-        # User provided both dirs via -D flags, find the library
-        message(STATUS "ONNX Runtime: using user-provided paths")
-        message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
-        message(STATUS "  Lib dir: ${ONNXRUNTIME_LIB_DIR}")
-        find_library(ONNXRUNTIME_LIBRARY
-            NAMES onnxruntime
-            HINTS ${ONNXRUNTIME_LIB_DIR}
-            NO_DEFAULT_PATH
-        )
-        if(ONNXRUNTIME_LIBRARY)
-            message(STATUS "  Library: ${ONNXRUNTIME_LIBRARY}")
-        else()
-            message(WARNING "ONNX Runtime library not found in ${ONNXRUNTIME_LIB_DIR}")
-        endif()
-    endif()
-
-    # Create imported target if found
-    if(ONNXRUNTIME_LIBRARY AND ONNXRUNTIME_INCLUDE_DIR)
-        add_library(onnxruntime SHARED IMPORTED)
-        set_target_properties(onnxruntime PROPERTIES
-            IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
-        )
-
-        # Link Apple frameworks for CoreML EP
-        if(ONNXRUNTIME_HAS_COREML)
-            target_compile_definitions(chitta INTERFACE CHITTA_WITH_COREML=1)
-        endif()
-
-        # Add to chitta
-        target_link_libraries(chitta INTERFACE onnxruntime)
-        target_compile_definitions(chitta INTERFACE CHITTA_WITH_ONNX=1)
-        message(STATUS "ONNX Runtime enabled")
-    else()
-        message(STATUS "ONNX Runtime: not found (embeddings disabled)")
     endif()
 endif()
 
@@ -527,10 +405,6 @@ if(CHITTA_BUILD_RPC)
     set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
     target_link_libraries(chitta_tool PRIVATE chitta)
     target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
-    if(TARGET onnx_yantra)
-        target_link_libraries(chitta_tool PRIVATE onnx_yantra)
-        target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
-    endif()
 endif()
 
 # Thinking block insight extractor — perception-change mining from session JSONL
@@ -550,11 +424,6 @@ install(TARGETS chitta_migrate DESTINATION bin)
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
 set(CHITTA_RUNTIME_LIBS "")
 
-
-# Get ONNX Runtime library directory if enabled
-if(CHITTA_WITH_ONNX AND ONNXRUNTIME_LIB_DIR)
-    list(APPEND CHITTA_RUNTIME_LIBS "${ONNXRUNTIME_LIB_DIR}")
-endif()
 
 # Remove duplicates
 list(REMOVE_DUPLICATES CHITTA_RUNTIME_LIBS)

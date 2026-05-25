@@ -28,11 +28,6 @@ _DOWNLOAD_TMP=""
 cleanup_tmp() { [[ -n "$_DOWNLOAD_TMP" ]] && rm -rf "$_DOWNLOAD_TMP"; }
 trap cleanup_tmp EXIT
 
-# ONNX model checksums (SHA256) - empty hash = skip verification
-# TODO: compute actual checksums when models are pinned
-MODEL_CHECKSUM=""
-VOCAB_CHECKSUM=""
-
 # Detect platform
 detect_platform() {
     local os=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -156,9 +151,6 @@ download_binaries() {
                 # Atomic install: running daemon keeps its old inode until restarted
                 install -m 0755 "$tmp_extract/chittad" "$BIN_DIR/chittad"
                 install -m 0755 "$tmp_extract/chitta"  "$BIN_DIR/chitta"
-                for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
-                    [[ -f "$tmp_extract/$lib" ]] && install -m 0755 "$tmp_extract/$lib" "$BIN_DIR/$lib"
-                done
                 rm -rf "$tmp_extract"
                 echo "[cc-soul] Pre-built binaries installed"
                 return 0
@@ -172,69 +164,6 @@ download_binaries() {
         rm -rf "$tmp_extract"
     fi
 
-    return 1
-}
-
-# Detect ONNX Runtime location
-detect_onnx_runtime() {
-    local include_dir=""
-    local lib_dir=""
-
-    # 1. Check CONDA_PREFIX (active conda environment)
-    if [[ -n "$CONDA_PREFIX" ]]; then
-        if [[ -f "$CONDA_PREFIX/lib/libonnxruntime.so" || -f "$CONDA_PREFIX/lib/libonnxruntime.dylib" ]]; then
-            lib_dir="$CONDA_PREFIX/lib"
-            # Check for nested include structure
-            if [[ -d "$CONDA_PREFIX/include/onnxruntime/core/session" ]]; then
-                include_dir="$CONDA_PREFIX/include/onnxruntime/core/session"
-            elif [[ -f "$CONDA_PREFIX/include/onnxruntime_cxx_api.h" ]]; then
-                include_dir="$CONDA_PREFIX/include"
-            fi
-        fi
-    fi
-
-    # 2. Check ~/.claude/deps/onnxruntime (dedicated install)
-    if [[ -z "$lib_dir" && -d "$HOME/.claude/deps/onnxruntime" ]]; then
-        local ort_dir="$HOME/.claude/deps/onnxruntime"
-        if [[ -f "$ort_dir/lib/libonnxruntime.so" || -f "$ort_dir/lib/libonnxruntime.dylib" ]]; then
-            lib_dir="$ort_dir/lib"
-            if [[ -d "$ort_dir/include/onnxruntime/core/session" ]]; then
-                include_dir="$ort_dir/include/onnxruntime/core/session"
-            elif [[ -f "$ort_dir/include/onnxruntime_cxx_api.h" ]]; then
-                include_dir="$ort_dir/include"
-            fi
-        fi
-    fi
-
-    # 3. Check pip install location
-    if [[ -z "$lib_dir" ]]; then
-        local pip_ort=$(python3 -c "import onnxruntime; print(onnxruntime.__file__)" 2>/dev/null | xargs dirname 2>/dev/null || true)
-        if [[ -n "$pip_ort" && -d "$pip_ort/capi" ]]; then
-            if [[ -f "$pip_ort/capi/libonnxruntime.so" || -f "$pip_ort/capi/libonnxruntime.dylib" ]]; then
-                lib_dir="$pip_ort/capi"
-                include_dir="$pip_ort/capi/include"
-            fi
-        fi
-    fi
-
-    # 4. macOS: Check Homebrew
-    if [[ -z "$lib_dir" && "$(uname -s)" == "Darwin" ]]; then
-        local brew_prefix=$(brew --prefix onnxruntime 2>/dev/null || true)
-        if [[ -n "$brew_prefix" && -d "$brew_prefix/lib" ]]; then
-            lib_dir="$brew_prefix/lib"
-            if [[ -d "$brew_prefix/include/onnxruntime/core/session" ]]; then
-                include_dir="$brew_prefix/include/onnxruntime/core/session"
-            elif [[ -f "$brew_prefix/include/onnxruntime_cxx_api.h" ]]; then
-                include_dir="$brew_prefix/include"
-            fi
-        fi
-    fi
-
-    # Return results
-    if [[ -n "$lib_dir" && -n "$include_dir" ]]; then
-        echo "$include_dir|$lib_dir"
-        return 0
-    fi
     return 1
 }
 
@@ -386,19 +315,7 @@ build_from_source() {
     # Pass rustup-managed cargo explicitly so cmake doesn't pick up conda/system cargo
     local _cargo_exe
     _cargo_exe=$(find_cargo 2>/dev/null) && cmake_args="$cmake_args -DCARGO_EXECUTABLE=$_cargo_exe"
-    local onnx_info
-    if onnx_info=$(detect_onnx_runtime); then
-        local onnx_include="${onnx_info%%|*}"
-        local onnx_lib="${onnx_info##*|}"
-        echo "[cc-soul] Found ONNX Runtime: $onnx_lib"
-        cmake_args="$cmake_args -DONNXRUNTIME_INCLUDE_DIR=$onnx_include -DONNXRUNTIME_LIB_DIR=$onnx_lib"
-        # Set RPATH so binary finds libs at runtime without LD_LIBRARY_PATH
-        cmake_args="$cmake_args -DCMAKE_INSTALL_RPATH=$onnx_lib"
-        cmake_args="$cmake_args -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
-    else
-        echo "[cc-soul] WARNING: ONNX Runtime not found, embeddings will be disabled"
-        echo "[cc-soul]   Install via: conda install onnxruntime-cpp, pip install onnxruntime, or brew install onnxruntime"
-    fi
+    cmake_args="$cmake_args -DCHITTA_WITH_LLAMA_CPP=ON"
 
     # Configure - cmake .. runs from build_dir, so source is one level up ($src_chitta)
     if ! cmake "$src_chitta" $cmake_args 2>&1 | tail -10; then
@@ -439,57 +356,7 @@ build_from_source() {
         install -m 0644 "$enricher_src" "$BIN_DIR/hint_enricher.py"
     fi
 
-    # Copy shared libraries if present
-    for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
-        if [[ -f "$plugin_bin/$lib" ]]; then
-            install -m 0755 "$plugin_bin/$lib" "$BIN_DIR/$lib"
-        fi
-    done
-
     $all_built && echo "[cc-soul] Build complete"
-}
-
-# Download ONNX models with checksum verification
-download_models() {
-    if [[ -f "$MODELS_DIR/model.onnx" && -f "$MODELS_DIR/vocab.txt" ]]; then
-        # Check if model dimension changed (force re-download for model upgrade)
-        # Must check BEFORE checksum verification to catch old MiniLM→BGE upgrade
-        local model_size=$(stat -f%z "$MODELS_DIR/model.onnx" 2>/dev/null || stat --printf="%s" "$MODELS_DIR/model.onnx" 2>/dev/null || echo "0")
-        if [[ "$model_size" -lt 200000000 ]]; then
-            echo "[cc-soul] Model upgrade detected (384→768 dim), re-downloading..."
-            rm -f "$MODELS_DIR/model.onnx" "$MODELS_DIR/vocab.txt"
-        else
-            # Verify checksums on correct-sized model
-            if verify_checksum "$MODELS_DIR/model.onnx" "$MODEL_CHECKSUM" && \
-               verify_checksum "$MODELS_DIR/vocab.txt" "$VOCAB_CHECKSUM"; then
-                return 0
-            fi
-            echo "[cc-soul] Model checksum mismatch, re-downloading..."
-        fi
-    fi
-
-    echo "[cc-soul] Downloading embedding model (bge-base-en-v1.5, ~436MB)..."
-    mkdir -p "$MODELS_DIR"
-
-    local model_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/onnx/model.onnx"
-    local vocab_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/vocab.txt"
-
-    if ! download "$model_url" "$MODELS_DIR/model.onnx"; then
-        echo "[cc-soul] WARNING: Could not download model.onnx" >&2
-        return 1
-    fi
-
-    if ! download "$vocab_url" "$MODELS_DIR/vocab.txt"; then
-        echo "[cc-soul] WARNING: Could not download vocab.txt" >&2
-        return 1
-    fi
-
-    # Verify downloads
-    if ! verify_checksum "$MODELS_DIR/model.onnx" "$MODEL_CHECKSUM"; then
-        echo "[cc-soul] WARNING: model.onnx checksum mismatch" >&2
-    fi
-
-    echo "[cc-soul] Models downloaded"
 }
 
 # Configure bash permissions for chitta commands (global settings)
@@ -666,16 +533,7 @@ install_python_packages() {
         echo "[cc-soul] Linked cec-status → $BIN_DIR/cec-status"
     fi
 
-    # Install model-export tools (optimum + onnxruntime) for embedding model management.
-    # Required for: nomic-embed export, model swap, re-embedding after dim change.
-    if ! $python_cmd -c "import optimum.onnxruntime" 2>/dev/null; then
-        echo "[cc-soul] Installing optimum[onnxruntime] for model management..."
-        if $python_cmd -m pip install -q "optimum[onnxruntime]>=1.20.0" --user 2>/dev/null; then
-            echo "[cc-soul] Installed optimum[onnxruntime]"
-        else
-            echo "[cc-soul] Warning: optimum install failed — model export unavailable"
-        fi
-    fi
+
 }
 
 # Configure hooks in settings.json
@@ -906,17 +764,14 @@ main() {
 
     local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
-    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
+    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" ]]; then
         echo "[cc-soul] Already at v$current_version"
         exit 0
     fi
 
     echo "[cc-soul] Installing v$current_version..."
 
-    # Download models
-    download_models
-
-    # Install binaries (try pre-built first, then build)
+    # Install binaries (try pre-built first, then build from source with llama.cpp)
     # NOTE: binaries are installed atomically (install cmd) so the running daemon
     # keeps its old inode in memory — stop_daemon happens AFTER install.
     local platform=$(detect_platform)
@@ -927,13 +782,6 @@ main() {
     fi
 
     if $need_binaries; then
-        # Check if ONNX Runtime is available locally
-        # Pre-built binaries DON'T include ONNX, so build from source when possible
-        local has_local_onnx=false
-        if detect_onnx_runtime >/dev/null 2>&1; then
-            has_local_onnx=true
-        fi
-
         # Determine source root: download latest if needed, otherwise use plugin cache
         local src_root="$PLUGIN_DIR"
         if $use_downloaded_source; then
@@ -945,33 +793,12 @@ main() {
             fi
         fi
 
-        if $has_local_onnx; then
-            # ONNX available: build from source to get embeddings support
-            echo "[cc-soul] ONNX Runtime detected, building from source for embedding support..."
-            build_from_source "$src_root" || {
-                echo "[cc-soul] WARNING: Source build failed, trying pre-built (no embeddings)"
-                if [[ "$platform" != "unknown" ]]; then
-                    download_binaries "$current_version" "$platform" || {
-                        echo "[cc-soul] ERROR: Installation failed" >&2
-                        exit 1
-                    }
-                else
-                    echo "[cc-soul] ERROR: No pre-built binaries for this platform" >&2
-                    exit 1
-                fi
-            }
-        elif [[ "$platform" != "unknown" ]]; then
-            # No local ONNX: try pre-built first (faster), then source
-            download_binaries "$current_version" "$platform" || build_from_source "$src_root" || {
-                echo "[cc-soul] ERROR: Installation failed" >&2
-                exit 1
-            }
-        else
-            build_from_source "$src_root" || {
-                echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
-                exit 1
-            }
-        fi
+        # Always build from source with llama.cpp; pre-built binaries don't include it
+        echo "[cc-soul] Building from source with llama.cpp embeddings..."
+        build_from_source "$src_root" || {
+            echo "[cc-soul] ERROR: Build failed" >&2
+            exit 1
+        }
     fi
 
     # Create directories
