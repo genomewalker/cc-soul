@@ -213,7 +213,13 @@ with open(p, "r", encoding="utf-8", errors="ignore") as f:
                 d=json.loads(line)
             except Exception:
                 continue
-            if d.get("type") != "response_item":
+            t=d.get("type","")
+            # Claude Code format: type="assistant"|"user" with message.content
+            if t in ("assistant","user"):
+                emit(t, d.get("message",{}).get("content",[]))
+                continue
+            # Codex format: type="response_item" with payload.role/content
+            if t != "response_item":
                 continue
             pl=d.get("payload",{})
             if pl.get("type") != "message":
@@ -374,6 +380,12 @@ fi
 
 # Skip daemon-dependent operations if daemon is not running.
 # queue_write / store_turn above are file-based and always run.
+# v6.0: route Outcome event into interaction ledger via durable queue (file-based, no daemon needed)
+if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
+    _success=$([ "${HAS_ERROR:-false}" = "true" ] && echo false || echo true)
+    queue_write "ledger_append" "{\"kind\":\"Outcome\",\"session_id\":\"${SESSION_ID}\",\"payload\":{\"Outcome\":{\"success\":${_success},\"error_kind\":null,\"turn_count\":${TURN_INDEX:-0}}}}"
+fi
+
 daemon_available || exit 0
 
 # Detect realm (quick CLI call with short timeout)
@@ -1137,11 +1149,5 @@ PYEOF
     fi
 fi
 # ═══════════════════════════════════════════════════════════════════════════
-
-# v6.0: route Outcome event into interaction ledger via durable queue
-if [[ -n "${SESSION_ID:-}" && "$SESSION_ID" != "unknown" ]]; then
-    _success=$([ "${HAS_ERROR:-false}" = "true" ] && echo false || echo true)
-    queue_write "ledger_append" "{\"kind\":\"Outcome\",\"session_id\":\"${SESSION_ID}\",\"Outcome\":{\"success\":${_success},\"error_kind\":null,\"turn_count\":${TURN_INDEX:-0}}}"
-fi
 
 exit 0
