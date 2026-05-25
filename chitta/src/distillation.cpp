@@ -5,9 +5,6 @@
 #include <chitta/native_distiller.hpp>
 #include <chitta/rpc/field_handler.hpp>
 #include <chitta/version.hpp>
-#ifdef CHITTA_WITH_ONNX
-#include <chitta/vak_onnx.hpp>
-#endif
 #include <iostream>
 #include <sstream>
 #include <atomic>
