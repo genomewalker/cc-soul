@@ -1402,4 +1402,45 @@ ToolResult FieldRpcHandler::tool_ledger_contradictions(const json& /*params*/) {
     return ToolResult::ok(ss.str(), {{"contested", parsed.is_array() ? parsed : json::array()}});
 }
 
+// ── Predicate (falsifiable memory) handlers ──────────────────────────────────
+
+ToolResult FieldRpcHandler::tool_predicate_attach(const json& params) {
+    uint64_t memory_id = params.value("memory_id", uint64_t{0});
+    std::string check_cmd = params.value("check_cmd", "");
+    if (!memory_id || check_cmd.empty())
+        return ToolResult::error("memory_id and check_cmd are required");
+    int64_t pred_id = field_store_->predicate_attach(memory_id, check_cmd);
+    if (pred_id < 0) return ToolResult::error("predicate_attach failed");
+    std::ostringstream ss;
+    ss << "predicate_attach: predicate_id=" << pred_id
+       << " attached to memory=" << memory_id;
+    return ToolResult::ok(ss.str(), {{"predicate_id", pred_id}, {"memory_id", memory_id}});
+}
+
+ToolResult FieldRpcHandler::tool_predicate_run(const json& params) {
+    uint64_t memory_id = params.value("memory_id", uint64_t{0});
+    if (!memory_id) return ToolResult::error("memory_id is required");
+    std::string raw = field_store_->predicate_run_json(memory_id);
+    auto parsed = json::parse(raw, nullptr, false);
+    if (parsed.is_discarded()) return ToolResult::error("predicate_run returned invalid JSON");
+    std::ostringstream ss;
+    ss << "predicate_run: memory=" << memory_id
+       << " passed=" << parsed.value("passed", 0)
+       << " failed=" << parsed.value("failed", 0)
+       << " status=" << parsed.value("epistemic_status", "?");
+    return ToolResult::ok(ss.str(), parsed.is_object() ? parsed : json::object());
+}
+
+ToolResult FieldRpcHandler::tool_predicate_list(const json& params) {
+    uint64_t memory_id = params.value("memory_id", uint64_t{0});
+    if (!memory_id) return ToolResult::error("memory_id is required");
+    std::string raw = field_store_->predicate_list_json(memory_id);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    int n = (parsed.is_object() && parsed.contains("predicates")) ? (int)parsed["predicates"].size() : 0;
+    ss << "predicate_list: memory=" << memory_id << " predicates=" << n
+       << " epistemic_status=" << (parsed.is_object() ? parsed.value("epistemic_status", "?") : "?");
+    return ToolResult::ok(ss.str(), parsed.is_object() ? parsed : json::object());
+}
+
 } // namespace chitta

@@ -268,6 +268,9 @@ int   cf_ledger_append(const struct CfHandle* h, const char* json_in, uint64_t* 
 char* cf_ledger_query(const struct CfHandle* h, const char* json_in);
 int   cf_ledger_compile(const struct CfHandle* h, uint32_t* out_count);
 char* cf_ledger_contradictions(const struct CfHandle* h);
+int64_t cf_predicate_attach(const struct CfHandle* h, uint64_t memory_id, const char* check_cmd);
+char*   cf_predicate_run(const struct CfHandle* h, uint64_t memory_id);
+char*   cf_predicate_list(const struct CfHandle* h, uint64_t memory_id);
 }
 
 namespace chitta {
@@ -1990,6 +1993,26 @@ public:
     std::string ledger_contradictions_json() {
         char* raw = cf_ledger_contradictions(handle_);
         if (!raw) return "[]";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    int64_t predicate_attach(uint64_t memory_id, const std::string& check_cmd) {
+        return cf_predicate_attach(handle_, memory_id, check_cmd.c_str());
+    }
+
+    std::string predicate_run_json(uint64_t memory_id) {
+        char* raw = cf_predicate_run(handle_, memory_id);
+        if (!raw) return "{}";
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string predicate_list_json(uint64_t memory_id) {
+        char* raw = cf_predicate_list(handle_, memory_id);
+        if (!raw) return "{}";
         std::string result(raw);
         cf_free_string(raw);
         return result;

@@ -212,6 +212,8 @@ ADVANCED_TOOLS = {
     # Interaction ledger (v6.0)
     "ledger_append", "ledger_query", "ledger_compile", "ledger_contradictions",
     "ledger_health",
+    # Falsifiable memories / predicate store (v6.1)
+    "predicate_attach", "predicate_run", "predicate_list",
 }
 
 # Combined set of tools to hide from listing (but still callable)

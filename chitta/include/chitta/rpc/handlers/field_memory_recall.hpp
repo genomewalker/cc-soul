@@ -135,3 +135,6 @@
     ToolResult tool_ledger_query(const json& params);
     ToolResult tool_ledger_compile(const json& params);
     ToolResult tool_ledger_contradictions(const json& params);
+    ToolResult tool_predicate_attach(const json& params);
+    ToolResult tool_predicate_run(const json& params);
+    ToolResult tool_predicate_list(const json& params);

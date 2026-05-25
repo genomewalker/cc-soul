@@ -891,6 +891,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
     {"ledger_health", "Get ledger event counts by kind and queue health metrics.",
      {}},
+    {"predicate_attach", "v7.0 Falsifiable memories: attach an executable shell predicate to a memory. check_cmd is run to verify the memory is still true.",
+     {}},
+    {"predicate_run", "v7.0 Falsifiable memories: run all predicates for a memory; returns passed/failed counts and epistemic_status. Decays confidence on failure.",
+     {}},
+    {"predicate_list", "v7.0 Falsifiable memories: list all predicates attached to a memory and their current status.",
+     {}},
 };
 
 // Build set of known tools from specs
