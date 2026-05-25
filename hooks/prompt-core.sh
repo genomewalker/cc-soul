@@ -410,6 +410,14 @@ if [[ -f "$_CLASSIFIER_MODEL" && -x "$_CLASSIFIER_SCRIPT" ]]; then
     fi
 fi
 
+# Skip intent detection when user is quoting/discussing hook output (feedback loop prevention)
+if echo "$QUERY" | grep -qE "(\[LEARN\]|\[DISCIPLINE\]|UserPromptSubmit says|learn_correction NOW|context-bloat)"; then
+    LEARNING_HINTS=""
+    _skip_intent=1
+else
+    _skip_intent=0
+fi
+
 # Regex fallback for each category (used when model absent OR as safety net)
 _regex_correction=0
 _regex_preference=0
@@ -417,6 +425,7 @@ _regex_belief=0
 _regex_milestone=0
 _regex_frustration=0
 
+if [[ $_skip_intent -eq 0 ]]; then
 echo "$QUERY" | grep -qiE "(that'?s (wrong|incorrect|not right|not what)|you('re| are) (wrong|incorrect|mistaken|off)|use your memory|check.*your memory|did you forget|you forgot\b|you missed\b|that breaks\b|wrong order\b|not like that\b|not this way\b|before.*not after\b|I (said|meant) .{0,30}not\b|^no[,. ].{0,50}(instead|should|is|use|try|that|the)\b)" \
     && _regex_correction=1 || true
 echo "$QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)" \
@@ -428,17 +437,17 @@ echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|compl
 echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)" \
     && _regex_frustration=1 || true
 
-# Merge: model wins when confident; regex fills gaps
+# Merge: correction requires BOTH model + regex to reduce false positives;
+# other categories: model OR regex is sufficient.
 _intent_correction=0
 _intent_preference=0
 _intent_belief=0
 _intent_milestone=0
 
-[[ "$_DETECTED_INTENT" == "correction"  ]] && _intent_correction=1  || true
+[[ "$_DETECTED_INTENT" == "correction" && $_regex_correction -eq 1 ]] && _intent_correction=1 || true
 [[ "$_DETECTED_INTENT" == "preference"  ]] && _intent_preference=1  || true
 [[ "$_DETECTED_INTENT" == "belief"      ]] && _intent_belief=1      || true
 [[ "$_DETECTED_INTENT" == "milestone"   ]] && _intent_milestone=1   || true
-[[ $_regex_correction -eq 1 ]]  && _intent_correction=1  || true
 [[ $_regex_preference -eq 1 ]]  && _intent_preference=1  || true
 [[ $_regex_belief -eq 1 ]]      && _intent_belief=1      || true
 [[ $_regex_milestone -eq 1 ]]   && _intent_milestone=1   || true
@@ -478,6 +487,7 @@ if [[ $_intent_milestone -eq 1 ]]; then
     milestone_text=$(echo "$QUERY" | head -c 300 | tr '\n' ' ')
     queue_write "observe" "{\"content\":\"[milestone] $milestone_text\",\"category\":\"milestone\",\"realm\":\"$REALM\",\"tags\":[\"milestone\"]}"
 fi
+fi  # end _skip_intent guard
 
 # ===========================================
 # TURN DISCIPLINE: Nudge if too many turns without storing
