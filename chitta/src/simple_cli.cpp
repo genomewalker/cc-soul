@@ -29,6 +29,7 @@
 #include <chitta/vak_llama.hpp>
 #include <chitta/vak_timeout.hpp>
 #include <chitta/hint_yantra.hpp>
+#include <chitta/embed_queue.hpp>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -77,7 +78,8 @@ void daemon_signal_handler(int sig) {
     daemon_running = false;
 }
 
-int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
+int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* embed_queue,
+               int interval,
                SocketServer& server, const std::string& socket_path, const std::string& mind_path,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
@@ -113,6 +115,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // server already bound and started (early socket in main)
 
     FieldRpcHandler handler(&field_store, yantra);
+    if (embed_queue) handler.set_embed_queue(embed_queue);
     handler.set_distill_model(distill_config.model);
     handler.set_distill_enabled(distill_config.enabled);
 
@@ -337,16 +340,29 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 #endif
     });
 
+    // Condvar used by the backfill thread to wake immediately when a write stores a
+    // pending memory instead of sleeping the full 30s poll interval.
+    std::mutex embed_cv_mutex;
+    std::condition_variable embed_cv;
+
+    handler.set_write_notify_callback([&embed_cv]() {
+        embed_cv.notify_one();
+    });
+
     // Backfill thread — re-embeds memories stored while yantra was unavailable.
     // Runs independently so ONNX calls never block the maintenance thread or RPCs.
     std::thread backfill_thread([&]() {
+        // Run at lower scheduling priority so RPC handler threads are never starved.
+#if defined(__linux__)
+        ::nice(10);
+#endif
         const std::string prefix = "search_document: ";
         // Initial delay: let WAL replay and HNSW load finish before hammering ONNX.
         for (int i = 0; i < 150 && daemon_running; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         while (daemon_running) {
-            if (yantra) {
+            if (embed_queue) {
                 try {
                     std::vector<uint64_t> pending;
                     std::vector<std::string> contents;
@@ -359,26 +375,16 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     }
                     if (!pending.empty()) {
                         std::cerr << "[backfill] Processing " << pending.size() << " memories\n";
-                        constexpr size_t SUB_BATCH = 8;
-                        for (size_t b = 0; b < pending.size() && daemon_running; b += SUB_BATCH) {
-                            size_t end = std::min(b + SUB_BATCH, pending.size());
-                            std::vector<std::string> batch_texts;
-                            batch_texts.reserve(end - b);
-                            for (size_t i = b; i < end; ++i) {
-                                if (contents[i].empty()) { batch_texts.push_back(""); continue; }
-                                auto gloss = chitta::ssl::gloss_ssl_content(contents[i]);
-                                auto text  = gloss.empty() ? contents[i] : contents[i] + "\n" + gloss;
-                                batch_texts.push_back(prefix + text);
-                            }
-                            auto arthas = yantra->transform_batch(batch_texts);
-                            for (size_t i = 0; i < arthas.size() && (b + i) < pending.size(); ++i) {
-                                if (contents[b + i].empty()) continue;
-                                const auto& emb = arthas[i].nu.data;
-                                if (emb.size() != EMBED_DIM) continue;
-                                // No C++ lock: Rust store uses internal RwLocks.
-                                // WAL append is NFS-backed; holding rpc_mutex_ here would block all RPCs.
-                                field_store.backfill_embedding(pending[b + i], emb);
-                            }
+                        for (size_t i = 0; i < pending.size() && daemon_running; ++i) {
+                            if (contents[i].empty()) continue;
+                            auto gloss = chitta::ssl::gloss_ssl_content(contents[i]);
+                            auto text  = gloss.empty() ? contents[i] : contents[i] + "\n" + gloss;
+                            // READ path with long timeout — gets vector back for persistence.
+                            // Backfill runs at nice(10) so this 30s wait never blocks RPCs.
+                            auto emb = embed_queue->query(prefix + text,
+                                                          std::chrono::milliseconds(30000));
+                            if (emb.size() == EMBED_DIM)
+                                field_store.backfill_embedding(pending[i], emb);
                         }
                     }
                 } catch (const std::exception& e) {
@@ -386,9 +392,13 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         std::cerr << "[backfill] Error: " << e.what() << "\n";
                 }
             }
-            // 30s sleep in small increments to stay responsive to shutdown
-            for (int i = 0; i < 300 && daemon_running; ++i)
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // Wait up to 5s for a write-notify or until shutdown.
+            // fire_write_notify() wakes us immediately when a new pending memory arrives.
+            {
+                std::unique_lock<std::mutex> lk(embed_cv_mutex);
+                embed_cv.wait_for(lk, std::chrono::seconds(5),
+                                  [&] { return !daemon_running.load(); });
+            }
         }
     });
 
@@ -1134,9 +1144,10 @@ int main(int argc, char* argv[]) {
 #endif
     if (!inner_yantra)
         inner_yantra = std::make_shared<chitta::OllamaYantra>();
-    // Wrap with timeout protection (30s to accommodate batched backfill calls)
-    std::shared_ptr<VakYantra> yantra =
-        std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(8000));
+    // EmbedQueue owns all serialization: single worker thread, LRU cache, two-lane queue.
+    // TimeoutYantra is no longer needed — concurrent embed calls are never made directly.
+    std::shared_ptr<VakYantra> yantra = inner_yantra;
+    chitta::EmbedQueue embed_queue(inner_yantra);
 
 
 
@@ -1219,7 +1230,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, daemon_lock);
+        result = cmd_daemon(field_store, yantra_raw, &embed_queue, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, daemon_lock);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {

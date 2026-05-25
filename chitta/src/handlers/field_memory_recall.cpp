@@ -51,12 +51,10 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
         if (auto act = classify_speech_act(content)) kind = *act;
     }
 
+    // Always pass empty embedding — backfill thread will embed asynchronously.
+    // Calling embed_ssl_aware() here was inside the exclusive rpc_mutex_ lock,
+    // blocking all readers for the full llama.cpp inference duration.
     std::vector<float> embedding;
-    if (params.contains("_preembedding")) {
-        embedding = params["_preembedding"].get<std::vector<float>>();
-    } else {
-        embedding = embed_ssl_aware(content);
-    }
 
     int64_t authored_at_ms = 0;
     if (params.contains("valid_from")) {
@@ -65,22 +63,23 @@ ToolResult FieldRpcHandler::tool_remember(const json& params) {
     }
     uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate,
                                          authored_at_ms);
+    // Notify backfill thread: a new pending memory was just stored.
+    fire_write_notify();
 
     // Phase 3: for SSL memories, create a pure-NL alias memory so the gloss
     // gets its own embedding in NL space (higher cosine vs natural-language queries).
     // Alias kind is excluded from default recall results but is searchable.
+    // SSL alias: store with empty embedding — backfill thread will embed it.
+    // Previously called embed_text() here inside the write lock.
     static const std::string ssl_arrow = "\xe2\x86\x92";
     if (id > 0 && kind != "alias" && content.find(ssl_arrow) != std::string::npos) {
         auto gloss = chitta::ssl::gloss_ssl_content(content);
         if (!gloss.empty() && gloss != content) {
-            auto alias_emb = embed_text("search_document: " + gloss);
-            if (!alias_emb.empty()) {
-                uint64_t alias_id = field_store_->remember(
-                    "alias", realm, gloss, alias_emb, confidence, decay_rate);
-                if (alias_id > 0) {
-                    field_store_->add_triplet(
-                        std::to_string(alias_id), "alias-of", std::to_string(id));
-                }
+            uint64_t alias_id = field_store_->remember(
+                "alias", realm, gloss, {}, confidence, decay_rate);
+            if (alias_id > 0) {
+                field_store_->add_triplet(
+                    std::to_string(alias_id), "alias-of", std::to_string(id));
             }
         }
     }
@@ -167,12 +166,8 @@ ToolResult FieldRpcHandler::tool_remember_batch(const json& params) {
             if (auto act = classify_speech_act(content)) kind = *act;
         }
 
+        // Pass empty embedding — backfill thread embeds asynchronously.
         std::vector<float> embedding;
-        if (item.contains("_preembedding")) {
-            embedding = item["_preembedding"].get<std::vector<float>>();
-        } else {
-            embedding = embed_ssl_aware(content);
-        }
 
         int64_t authored_at_ms = 0;
         if (item.contains("valid_from")) {
@@ -248,10 +243,14 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         std::vector<float> base_emb;
         if (params.contains("_preembedding"))
             base_emb = params["_preembedding"].get<std::vector<float>>();
-        for (const auto& f : forms) {
-            auto emb = (f == query && !base_emb.empty()) ? base_emb : embed_query(f);
-            if (emb.empty()) continue;
-            rrf_lane(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm));
+        // Only attempt semantic lanes if we have a working embedding (base_emb non-empty).
+        // When yantra is unavailable, skip SSL-variant embed calls (each costs a full timeout).
+        if (!base_emb.empty()) {
+            for (const auto& f : forms) {
+                auto emb = (f == query) ? base_emb : embed_query(f);
+                if (emb.empty()) continue;
+                rrf_lane(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm));
+            }
         }
         // BM25 lane
         rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20)));
@@ -275,13 +274,14 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             }
         }
     } else {
-        std::vector<float> embedding;
-        if (params.contains("_preembedding"))
-            embedding = params["_preembedding"].get<std::vector<float>>();
-        else
-            embedding = embed_query(query);
-        if (embedding.empty()) return ToolResult::error("Failed to embed query");
-        hits = field_store_->recall(embedding, fetch_limit, realm);
+        // _preembedding is set only when pre-embed succeeded (certainty > 0).
+        // Never call embed_query() here — that's inside rpc_mutex_ and blocks readers.
+        if (params.contains("_preembedding")) {
+            auto emb = params["_preembedding"].get<std::vector<float>>();
+            hits = field_store_->recall(emb, fetch_limit, realm);
+        } else {
+            hits = field_store_->recall_keyword(query, fetch_limit);
+        }
     }
 
     // Filter orphaned HNSW entries (deleted payloads with lingering vectors)
