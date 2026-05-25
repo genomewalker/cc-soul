@@ -339,6 +339,28 @@ done <<< "$memories"
     fi
 ) 2>/dev/null || true
 
+# v6.1: Predicate re-falsification — fire background predicate_run for recalled
+# memories (confidence decay handled by store.rs). Surface cached STALE warnings.
+if [[ -n "${_sus_ids:-}" && "${_sus_ids:-}" != "[]" ]]; then
+    _pred_mids=$(echo "$_sus_ids" | tr -d '[]' | tr ',' '\n' | grep -E '^[0-9]+$' | head -10)
+    _stale_warn=""
+    for _mid in $_pred_mids; do
+        [[ -z "$_mid" ]] && continue
+        _pst=$(timeout 0.3 "$CHITTA_BIN" predicate_list --memory_id "$_mid" --json 2>/dev/null || true)
+        _est=$(echo "$_pst" | jq -r '.epistemic_status // ""' 2>/dev/null || true)
+        if [[ "$_est" == "Failed" || "$_est" == "Mixed" ]]; then
+            _cmd=$(echo "$_pst" | jq -r '.predicates[0].check_cmd // ""' 2>/dev/null | cut -c1-60 || true)
+            _stale_warn="${_stale_warn}[STALE:#${_mid}/${_est}] ${_cmd}"$'\n'
+        fi
+        "$CHITTA_BIN" predicate_run --memory_id "$_mid" >/dev/null 2>&1 &
+    done
+    if [[ -n "$_stale_warn" ]]; then
+        LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS
+}⚠ STALE MEMORIES (predicate failed — may be outdated):
+${_stale_warn}"
+    fi
+fi
+
 # Save exposed correction memory IDs for M metric (stop-hook reads this)
 _sus_corr_ids="["
 _sus_corr_first=true
@@ -389,7 +411,7 @@ _regex_belief=0
 _regex_milestone=0
 _regex_frustration=0
 
-echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget|should not\b|shouldn'?t\b|should never\b|you forgot\b|you missed\b|that breaks\b|wrong order\b|backwards\b|not like that\b|not this way\b|^no[,. ]|before.*not after\b)" \
+echo "$QUERY" | grep -qiE "(that'?s (wrong|incorrect|not right|not what)|you('re| are) (wrong|incorrect|mistaken|off)|use your memory|check.*your memory|did you forget|you forgot\b|you missed\b|that breaks\b|wrong order\b|not like that\b|not this way\b|before.*not after\b|I (said|meant) .{0,30}not\b|^no[,. ].{0,50}(instead|should|is|use|try|that|the)\b)" \
     && _regex_correction=1 || true
 echo "$QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)" \
     && _regex_preference=1 || true
@@ -476,6 +498,11 @@ fi
 
 turns_since_store=$((TURN_INDEX - last_store_turn))
 if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
+    # Hard block at 3× interval when CC_SOUL_DISCIPLINE_ENFORCE=1
+    if [[ $turns_since_store -ge $((STORE_INTERVAL * 3)) && "${CC_SOUL_DISCIPLINE_ENFORCE:-0}" == "1" ]]; then
+        printf '{"decision":"block","reason":"[DISCIPLINE] %d turns without a soul store. Call remember/learn_correction/learn_milestone before continuing — memories are the persistent layer that survives compaction."}\n' "$turns_since_store"
+        exit 0
+    fi
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[DISCIPLINE] $turns_since_store turns without storing — consider remember/learn_correction/learn_milestone"
     # Auto-capture: queue a brief observe so work survives compaction even without explicit stores.
     # Pulls last 5 bash commands from transcript as a fallback memory.
@@ -818,6 +845,10 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         [[ -n "$CEC_WARN" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${CEC_WARN}"
         if [[ -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"CORRECTION"* ]]; then
             SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }${LEARNING_HINTS}"
+        fi
+        # Escalate DISCIPLINE to systemMessage at 2× interval so it can't be ignored
+        if [[ $turns_since_store -ge $((STORE_INTERVAL * 2)) && -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"DISCIPLINE"* ]]; then
+            SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }[DISCIPLINE] ${turns_since_store} turns without storing — call remember/learn/milestone NOW"
         fi
         # Promote matched [correction] memories to systemMessage so model cannot ignore them
         if [[ -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then

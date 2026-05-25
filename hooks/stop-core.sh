@@ -579,7 +579,7 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
 
     # 2. Fallback: regex on last user message
     if [[ "$CORRECTION_DETECTED" == "false" ]]; then
-        if echo "$LAST_USER_MSG" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|not what I|won'?t work|should be|use your memory|check.*memory|did you forget)"; then
+        if echo "$LAST_USER_MSG" | grep -qiE "(that'?s (wrong|incorrect|not right|not what)|you('re| are) (wrong|incorrect|mistaken)|use your memory|check.*your memory|did you forget|you forgot\b|you missed\b|I (said|meant) .{0,30}not\b|^no[,. ].{0,50}(instead|should|is|use|try|that|the)\b)"; then
             CORRECTION_DETECTED=true
             CORRECTION_TEXT=$(echo "$LAST_USER_MSG" | head -c 300 | tr '\n' ' ')
             echo "[soul] correction source: regex fallback" >&2
