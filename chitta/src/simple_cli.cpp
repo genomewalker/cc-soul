@@ -934,6 +934,8 @@ void print_usage(const char* prog) {
               << "  --enrich-batch N         Symbols per batch (default: 10)\n"
               << "  --enrich-model MODEL     LLM model for enrichment (default: gemma4:26b)\n"
               << "  --no-enrich              Disable code enrichment\n"
+              << "\nEmbeddings:\n"
+              << "  --embed-model PATH       GGUF model for in-process embeddings (overrides CHITTA_EMBED_MODEL)\n"
               << "\nSubconscious (background processing):\n"
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
               << "  --no-autonomous          Disable autonomous agents (dream, think)\n"
@@ -1023,6 +1025,8 @@ int main(int argc, char* argv[]) {
             distill_config.max_context_chars = static_cast<size_t>(safe_stoi(argv[++i], "--distill-context-chars"));
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
+        } else if (strcmp(argv[i], "--embed-model") == 0 && i + 1 < argc) {
+            setenv("CHITTA_EMBED_MODEL", argv[++i], 1);
         } else if (strcmp(argv[i], "--no-enrich") == 0) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
