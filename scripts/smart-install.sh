@@ -167,6 +167,40 @@ download_binaries() {
     return 1
 }
 
+# Download nomic embedding model from GitHub release or HuggingFace
+download_embed_model() {
+    local version="$1"
+    local dest="$MODELS_DIR/nomic-embed-text-v1.5.gguf"
+    [[ -f "$dest" ]] && return 0
+
+    mkdir -p "$MODELS_DIR"
+    echo "[cc-soul] Downloading embedding model..."
+
+    # Try release artifact first
+    local url="$RELEASE_URL/v$version/embed-models.tar.gz"
+    local tmp=$(mktemp)
+    if download "$url" "$tmp" && [[ -s "$tmp" ]]; then
+        local td=$(mktemp -d)
+        tar -xzf "$tmp" -C "$td" 2>/dev/null && mv "$td"/*.gguf "$dest" 2>/dev/null && rm -rf "$td" "$tmp" && echo "[cc-soul] Embedding model installed" && return 0
+        rm -rf "$td" "$tmp"
+    fi
+    rm -f "$tmp"
+
+    # Fallback: download direct from HuggingFace
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+from huggingface_hub import hf_hub_download
+import shutil, os
+path = hf_hub_download(repo_id='nomic-ai/nomic-embed-text-v1.5-GGUF', filename='nomic-embed-text-v1.5.Q8_0.gguf')
+shutil.copy(path, '$dest')
+print('[cc-soul] Embedding model installed from HuggingFace')
+" 2>/dev/null && return 0
+    fi
+
+    echo "[cc-soul] WARNING: Could not download embedding model — semantic recall will use LiteEncoder fallback"
+    return 1
+}
+
 # Locate cargo, preferring rustup's toolchain over conda/system cargo
 find_cargo() {
     # rustup gives us the toolchain-pinned cargo (respects rust-toolchain.toml)
@@ -817,6 +851,7 @@ main() {
     configure_hooks
 
     # Install Python packages (MCP server, TUI)
+    download_embed_model "$current_version"
     install_python_packages
 
     # Set up systemd user service (Linux only, no-op on macOS)

@@ -7,9 +7,6 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  ONNX_VERSION: "1.16.3"
-
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -28,7 +25,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.92.0"
+          toolchain: "1.93.0"
 
       - name: Build chitta-field
         env:
@@ -36,15 +33,6 @@ jobs:
         run: |
           cd chitta-field
           ./build.sh build --release
-
-      - name: Download ONNX Runtime
-        run: |
-          cd /tmp
-          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
-          tar xzf onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
-          mkdir -p /opt/onnxruntime/{include/onnxruntime/core/session,lib}
-          cp onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/include/*.h /opt/onnxruntime/include/onnxruntime/core/session/
-          cp onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/lib/* /opt/onnxruntime/lib/
 
       - name: Install nlohmann_json
         run: |
@@ -62,8 +50,7 @@ jobs:
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DPython3_EXECUTABLE=/usr/bin/python3.11 \
-            -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include/onnxruntime/core/session \
-            -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
+            -DCHITTA_WITH_LLAMA_CPP=ON \
             -DJSON_INCLUDE_DIR=/opt/nlohmann_json/include
           ninja
 
@@ -76,9 +63,6 @@ jobs:
 
       - name: Package binaries
         run: |
-          mkdir -p dist
-          cp /opt/onnxruntime/lib/libonnxruntime.so.${{ env.ONNX_VERSION }} bin/
-          ln -sf libonnxruntime.so.${{ env.ONNX_VERSION }} bin/libonnxruntime.so
           PYLIB=$(python3.11 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')/libpython3.11.so.1.0
           [ -f "$PYLIB" ] && cp "$PYLIB" bin/ && ln -sf libpython3.11.so.1.0 bin/libpython3.11.so
           for b in bin/chitta bin/chittad; do
@@ -90,6 +74,7 @@ jobs:
             ldd $b | grep -E "not found" || echo "All libs found"
           done
           tar -czvf dist/chitta-linux-x64.tar.gz -C bin .
+        working-directory: .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -107,39 +92,33 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Download ONNX model
+      - name: Download embedding model
         run: |
           pip install huggingface_hub
           python -c "
           from huggingface_hub import hf_hub_download
-          import shutil
-          import os
+          import shutil, os
 
-          # bge-base-en-v1.5: 768 dimensions, 110M params
+          # nomic-embed-text-v1.5: 768-dim, 137M params, llama.cpp GGUF
           model_path = hf_hub_download(
-              repo_id='BAAI/bge-base-en-v1.5',
-              filename='onnx/model.onnx'
-          )
-          vocab_path = hf_hub_download(
-              repo_id='BAAI/bge-base-en-v1.5',
-              filename='vocab.txt'
+              repo_id='nomic-ai/nomic-embed-text-v1.5-GGUF',
+              filename='nomic-embed-text-v1.5.Q8_0.gguf'
           )
 
           os.makedirs('models', exist_ok=True)
-          shutil.copy(model_path, 'models/model.onnx')
-          shutil.copy(vocab_path, 'models/vocab.txt')
-          print(f'Model: {os.path.getsize(\"models/model.onnx\")} bytes')
-          print(f'Vocab: {os.path.getsize(\"models/vocab.txt\")} bytes')
+          dest = 'models/nomic-embed-text-v1.5.gguf'
+          shutil.copy(model_path, dest)
+          print(f'Model: {os.path.getsize(dest)} bytes')
           "
 
       - name: Package models
-        run: tar -czvf onnx-models.tar.gz -C models .
+        run: tar -czvf embed-models.tar.gz -C models .
 
       - name: Upload models
         uses: actions/upload-artifact@v4
         with:
-          name: onnx-models
-          path: onnx-models.tar.gz
+          name: embed-models
+          path: embed-models.tar.gz
 
   release:
     needs: [build-linux, models]
