@@ -285,7 +285,7 @@ if(CHITTA_WITH_LLAMA_CPP)
         CPMAddPackage(
             NAME llama_cpp
             GITHUB_REPOSITORY ggml-org/llama.cpp
-            GIT_TAG b4990
+            GIT_TAG b9294
             OPTIONS
                 "LLAMA_BUILD_TESTS OFF"
                 "LLAMA_BUILD_EXAMPLES OFF"
@@ -293,7 +293,7 @@ if(CHITTA_WITH_LLAMA_CPP)
                 "LLAMA_CURL OFF"
                 "BUILD_SHARED_LIBS OFF"
         )
-        message(STATUS "llama.cpp enabled (tag b4990, GPU via -DGGML_CUDA=ON)")
+        message(STATUS "llama.cpp enabled (tag b9294, GPU via -DGGML_CUDA=ON)")
     endif()
     target_compile_definitions(chitta INTERFACE CHITTA_WITH_LLAMA_CPP=1)
 endif()
