@@ -73,6 +73,7 @@ jobs:
             echo "=== $b ==="
             ldd $b | grep -E "not found" || echo "All libs found"
           done
+          mkdir -p dist
           tar -czvf dist/chitta-linux-x64.tar.gz -C bin .
         working-directory: .
 
