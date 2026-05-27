@@ -724,6 +724,14 @@ setup_systemd_service() {
 
     mkdir -p "$service_dir"
 
+    # Preserve --embed-model from existing service if present
+    local embed_flag=""
+    if [[ -f "$service_file" ]]; then
+        local existing_embed
+        existing_embed=$(grep -oP '(?<=--embed-model )\S+' "$service_file" 2>/dev/null || true)
+        [[ -n "$existing_embed" ]] && embed_flag=" --embed-model $existing_embed"
+    fi
+
     # Write service file (always update to pick up path changes)
     cat > "$service_file" << EOF
 [Unit]
@@ -733,7 +741,7 @@ After=default.target
 [Service]
 Type=simple
 Environment="PATH=$HOME/.bun/bin:$HOME/.local/bin:$HOME/.claude/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground --no-autonomous --distill-interval 60 --no-enrich
+ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground --no-autonomous --distill-interval 60 --no-enrich${embed_flag}
 Restart=always
 RestartSec=10
 KillMode=mixed
