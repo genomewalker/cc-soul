@@ -153,7 +153,7 @@ def main() -> None:
     signal.signal(signal.SIGALRM, _timeout_handler)
     signal.alarm(30)
 
-    llm = Llama(model_path=args.model, n_ctx=N_CTX, n_gpu_layers=0, verbose=False)
+    llm = Llama(model_path=args.model, n_ctx=N_CTX, n_gpu_layers=0, n_threads=2, verbose=False)
 
     stored = 0
     for text in turns:
