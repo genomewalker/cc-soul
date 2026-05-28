@@ -1,7 +1,7 @@
 ---
-name: yajña
+name: yajna
 aliases: [yajna, autonomous, loop, agentic-loop, coordinate, ritual]
-description: Autonomous development ritual with role-based coordination. Loops until complete using specialized agents (hotṛ→research, adhvaryu→implement, udgātṛ→test).
+description: "Runs a fully autonomous, end-to-end development loop using role-based sub-agents for research, implementation, and testing. Use when the user requests autonomous feature development, multi-step bug fixes, refactoring, or any task requiring repeated research-implement-test cycles without manual coordination — e.g. 'build this feature autonomously', 'fix and test everything', 'run the full dev loop', or 'implement end-to-end'. Loops continuously until completion, stagnation, or a hard blocker (daemon failure, missing permissions, unresolvable errors). Coordinates three agent roles: hotr (research/exploration), adhvaryu (implementation in isolated worktree), and udgātr (validation/testing)."
 execution: direct
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(*), Task, mcp__chitta-mcp__*
 ---
@@ -16,17 +16,20 @@ allowed-tools: Read, Write, Edit, Grep, Glob, Bash(*), Task, mcp__chitta-mcp__*
 2. **NEVER pause between iterations** - loop automatically
 3. **STOP ONLY for**: Blockers | Completion | User interrupt
 4. **Blockers require user**: Daemon down, permissions, unresolvable errors
+5. **NEVER say**: "Let me check with you…", "Should I continue?", "I'll wait for confirmation…"
+6. **NEVER output** between every agent call or pause after each iteration
 
 ## Pre-Flight Check (REQUIRED)
 
 Before EVERY iteration, verify daemon is alive:
 
 ```javascript
+// Signature: mcp__chitta-mcp__health_check() → { status: "OK" | "ERROR", error?: string }
 health = mcp__chitta-mcp__health_check();
 if (health.error || health.status !== "OK") {
   // BLOCKER - stop and report
   output("[BLOCKER] Daemon unreachable. Run: pkill -9 chittad && chittad daemon");
-  long_task_event({ event_type: "blocker", description: "Daemon down" });
+  mcp__chitta-mcp__long_task_event({ event_type: "blocker", description: "Daemon down" });
   STOP;  // Do not continue
 }
 ```
@@ -37,10 +40,10 @@ if (health.error || health.status !== "OK") {
 WHILE tasks_remain AND no_blocker:
 
   1. PRE-FLIGHT
-     health_check → if fail → STOP with blocker
+     mcp__chitta-mcp__health_check() → if fail → STOP with blocker
 
   2. LOAD CONTEXT (silent, no output)
-     long_task_snapshot
+     mcp__chitta-mcp__long_task_snapshot({ task_id })
      read fix_plan.md
      count remaining tasks
 
@@ -66,7 +69,7 @@ WHILE tasks_remain AND no_blocker:
      If FAIL → log, continue (not a blocker)
 
   6. CHECKPOINT (silent)
-     long_task_update
+     mcp__chitta-mcp__long_task_update({ task_id, progress })
      Update fix_plan.md
 
   7. EVALUATE
@@ -94,21 +97,22 @@ Verify the file exists first with: ls -la /home/user/.claude/hooks/"
 
 ```javascript
 // After Adhvaryu returns
-result = Task({ ... });
+// Task signature: Task({ description: string, prompt: string }) → string
+result = Task({ description: "Implement dark mode CSS", prompt: "Edit /path/to/dark.css ..." });
 
 // Validate the work
 if (result.includes("Error") || result.includes("not found")) {
-  // Retry with more explicit instructions
   retry_count++;
   if (retry_count >= 3) {
     // BLOCKER
-    long_task_event({ event_type: "blocker", description: result });
+    mcp__chitta-mcp__long_task_event({ event_type: "blocker", description: result });
     STOP;
   }
   continue;  // Retry this iteration
 }
 
 // Check file was actually modified
+// Bash signature: Bash(cmd: string) → { stdout: string, stderr: string, error?: string }
 file_check = Bash(`ls -la ${target_file}`);
 if (file_check.error) {
   // File doesn't exist - agent edited wrong path
@@ -219,23 +223,14 @@ Files: 4 | Tests: 6 passing
 [NO USER INTERACTION NEEDED - FULLY AUTONOMOUS]
 ```
 
-## Anti-Patterns (NEVER DO)
-
-❌ "Let me check with you before proceeding..."
-❌ "Should I continue to the next task?"
-❌ "I'll wait for your confirmation..."
-❌ Outputting between every agent call
-❌ Asking which file to edit
-❌ Pausing after each iteration
-
 ## MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `health_check` | Pre-flight daemon check |
-| `long_task_start` | Initialize ritual |
-| `long_task_active` | Check for existing |
-| `long_task_snapshot` | Load context |
-| `long_task_update` | Record progress |
-| `long_task_event` | Log blockers/checkpoints |
-| `long_task_complete` | Mark done |
+| Tool | Signature / Purpose |
+|------|---------------------|
+| `mcp__chitta-mcp__health_check` | `() → { status: "OK"\|"ERROR", error?: string }` — Pre-flight daemon check |
+| `mcp__chitta-mcp__long_task_start` | `({ goal: string }) → { task_id: string }` — Initialize ritual |
+| `mcp__chitta-mcp__long_task_active` | `() → { task_id?: string }` — Check for existing task |
+| `mcp__chitta-mcp__long_task_snapshot` | `({ task_id: string }) → { context: object }` — Load context |
+| `mcp__chitta-mcp__long_task_update` | `({ task_id: string, progress: object }) → void` — Record progress |
+| `mcp__chitta-mcp__long_task_event` | `({ event_type: string, description: string }) → void` — Log blockers/checkpoints |
+| `mcp__chitta-mcp__long_task_complete` | `({ task_id: string }) → void` — Mark done |
