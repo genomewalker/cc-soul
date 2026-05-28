@@ -1274,19 +1274,19 @@ int main(int argc, char* argv[]) {
         bool success = run_distillation(field_store, yantra_raw, state, distill_config, nullptr, false);
         result = success ? 0 : 1;
     } else if (command == "re_embed") {
-        // Re-embed all memories through Ollama nomic-embed-text:v1.5 (768-d migration).
+        // Re-embed all memories using the configured LlamaYantra model (ssl_distiller_dpo 1536-d).
         // Marks every non-deleted memory embed_pending, then drains synchronously.
         if (!yantra_raw || !yantra_raw->ready()) {
-            std::cerr << "[re_embed] ERROR: Ollama not reachable — start Ollama and pull nomic-embed-text:v1.5\n";
+            std::cerr << "[re_embed] ERROR: embed model not ready — set CHITTA_EMBED_MODEL or pass --embed-model\n";
             return 1;
         }
-        const std::string model_id = "nomic-embed-text:v1.5";
+        const std::string model_id = "ssl_distiller_dpo";
         int64_t queued = field_store.requeue_all_embeddings(model_id.c_str(), model_id.size());
         if (queued < 0) {
             std::cerr << "[re_embed] ERROR: requeue_all_embeddings failed\n";
             return 1;
         }
-        std::cerr << "[re_embed] Queued " << queued << " memories for 768-d re-embedding\n";
+        std::cerr << "[re_embed] Queued " << queued << " memories for " << EMBED_DIM << "-d re-embedding\n";
 
         // Drain the queue using the same batched backfill logic as the daemon thread.
         size_t done = 0;
@@ -1336,7 +1336,7 @@ int main(int argc, char* argv[]) {
             if (done % 1000 < 64)
                 std::cerr << "[re_embed] " << done << "/" << queued << " embedded...\n";
         }
-        std::cerr << "[re_embed] Done: " << done << " memories re-embedded at 768-d\n";
+        std::cerr << "[re_embed] Done: " << done << " memories re-embedded at " << EMBED_DIM << "-d\n";
         result = 0;
     } else if (command == "hint_extract") {
         // Should have been caught by the early-exit above; only reached if built without llama.cpp

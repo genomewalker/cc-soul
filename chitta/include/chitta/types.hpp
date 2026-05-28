@@ -19,8 +19,8 @@
 
 namespace chitta {
 
-// Embedding dimension (nomic-embed-text v1.5 full 768-d)
-constexpr size_t EMBED_DIM = 768;
+// Embedding dimension (ssl_distiller_dpo 1536-d)
+constexpr size_t EMBED_DIM = 1536;
 
 // Timestamp as Unix millis
 using Timestamp = int64_t;
