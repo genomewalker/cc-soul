@@ -255,6 +255,7 @@ public:
     static bool is_subprocess_tool(const std::string& name) {
         static const std::unordered_set<std::string> kSubprocess = {
             "predicate_run",
+            "consolidation_pass",   // long-running Sequitur+FEP rebuild; manages own Rust RwLocks
         };
         return kSubprocess.count(name) > 0;
     }
