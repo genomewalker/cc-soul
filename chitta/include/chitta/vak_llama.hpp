@@ -1,6 +1,6 @@
 #pragma once
 // LlamaYantra — VakYantra backed by llama.cpp running a GGUF embedding model in-process.
-// Model: nomic-embed-text-v1.5 (768-d). No external server. GPU auto-used if built with CUDA.
+// Default model: ssl_distiller_dpo (1536-d). Fallback: nomic-embed-text-v1.5 (768-d). No external server.
 // Compile-time guard: only active when CHITTA_WITH_LLAMA_CPP is defined.
 #include "chitta/vak.hpp"
 #include <cstdlib>
