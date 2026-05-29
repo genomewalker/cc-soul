@@ -89,9 +89,7 @@ void NativeDistiller::precompute_dedup(PreparedDistillation& prep) {
         LearningPrep lp;
         std::string full_text = learning.title + "\n" + learning.content;
         if (embedder_) {
-            auto gloss = chitta::ssl::gloss_ssl_content(full_text);
-            auto retrieval_text = gloss.empty() ? full_text : full_text + "\n" + gloss;
-            lp.embedding = embedder_(retrieval_text);
+            lp.embedding = embedder_(chitta::ssl::retrieval_text(full_text));
         }
         if (!lp.embedding.empty() && config_.dedup_threshold > 0.0f) {
             auto hits = field_store_->recall(lp.embedding, 5, prep.realm);

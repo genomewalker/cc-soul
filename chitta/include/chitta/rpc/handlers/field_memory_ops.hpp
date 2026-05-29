@@ -4,6 +4,8 @@
     ToolResult tool_strengthen(const json& params);
     ToolResult tool_weaken(const json& params);
     ToolResult tool_forget(const json& params);
+    ToolResult tool_ack_memory(const json& params);
+    ToolResult tool_nack_memory(const json& params);
     ToolResult tool_batch_forget(const json& params);
     ToolResult tool_observe(const json& params);
     ToolResult tool_grow(const json& params);

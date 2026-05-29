@@ -992,9 +992,8 @@ void Subconscious::embed_loop() {
                 if (!running_.load()) break;
                 auto content = field_store_->get_content(id);
                 if (content.size() < 20) { unembed_ids.push_back(id); continue; }
-                auto gloss = chitta::ssl::gloss_ssl_content(content);
                 batch_ids.push_back(id);
-                batch_texts.push_back(prefix + (gloss.empty() ? content : content + "\n" + gloss));
+                batch_texts.push_back(prefix + chitta::ssl::retrieval_text(content));
             }
             if (!unembed_ids.empty())
                 field_store_->force_clear_embed_pending(unembed_ids);

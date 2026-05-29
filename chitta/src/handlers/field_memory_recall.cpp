@@ -379,7 +379,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     if (!realm.empty()) ss << " in realm '" << realm << "'";
     ss << ":\n";
     for (const auto& r : results_json) {
-        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "]";
         int64_t ts = r.value("ts_ms", int64_t(0));
         if (ts > 0) {
@@ -496,7 +496,7 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
     std::ostringstream ss;
     ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
     for (const auto& r : results_json) {
-        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        int pct = display_pct(r);
         ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
     }
     return ToolResult::ok(ss.str(), {{"results", results_json}});
@@ -550,7 +550,7 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     std::ostringstream ss;
     ss << "Hybrid recall: " << merged.size() << " results\n";
     for (const auto& r : merged) {
-        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        int pct = display_pct(r);
         ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
     }
     auto result = ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
@@ -649,7 +649,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     std::ostringstream ss;
     ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
     for (const auto& r : results) {
-        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
            << r.value("text", "").substr(0, 400) << "\n";
     }
@@ -840,7 +840,7 @@ ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     ss << "Found " << final_merged.size() << " results (" << passes_run << " pass"
        << (passes_run > 1 ? "es" : "") << "):\n";
     for (const auto& r : final_merged) {
-        int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+        int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
            << r.value("text", "").substr(0, 400) << "\n";
     }

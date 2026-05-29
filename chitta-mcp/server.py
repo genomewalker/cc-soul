@@ -844,12 +844,10 @@ def handle_ack_memory(arguments: dict) -> str:
     if not mem_id:
         return "Error: 'id' parameter required"
 
-    daemon_call("remember", {
-        "content": f"[ack] memory:{mem_id} score:+1",
-        "tags": ["ack-signal"],
-        "type": "episode",
-        "visibility": 2,
-    })
+    # Route to the daemon's ack_memory RPC so the ack actually updates ack_scores
+    # (the recall scoring input). Previously this stored an inert [ack] memory and
+    # ack_score stayed permanently 0.
+    daemon_call("ack_memory", {"id": mem_id})
 
     return json.dumps({"acked": mem_id})
 
@@ -863,12 +861,8 @@ def handle_nack_memory(arguments: dict) -> str:
     if not mem_id:
         return "Error: 'id' parameter required"
 
-    daemon_call("remember", {
-        "content": f"[nack] memory:{mem_id} score:-1",
-        "tags": ["nack-signal"],
-        "type": "episode",
-        "visibility": 2,
-    })
+    # Route to the daemon's nack_memory RPC so the nack actually updates ack_scores.
+    daemon_call("nack_memory", {"id": mem_id})
 
     return json.dumps({"nacked": mem_id})
 
@@ -1747,14 +1741,7 @@ Persistent sessions (variables survive across calls):
 
 def _rrf_merge(lists: list, k: int = 60, limit: int = 10) -> list:
     """Reciprocal Rank Fusion across multiple result lists."""
-    scores: dict = {}
-    for lst in lists:
-        for rank, item in enumerate(lst):
-            key = item.get("memory_id") or item.get("text", "")[:80]
-            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
-            if key not in scores:
-                scores[key] = {"score": 0.0, "item": item}
-    # Rebuild: collect best item per key
+    # Reciprocal-rank fusion: accumulate 1/(k+rank+1) per key across all lanes.
     key_items: dict = {}
     for lst in lists:
         for rank, item in enumerate(lst):

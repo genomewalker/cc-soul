@@ -356,7 +356,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
 #if defined(__linux__)
         ::nice(10);
 #endif
-        const std::string prefix = "search_document: ";
+        // NOTE: do NOT prepend "search_document: " here — EmbedQueue's worker calls
+        // VakYantra::transform(text) which defaults to EmbedMode::Document and adds the
+        // "search_document: " prefix itself. Prepending again double-prefixes every
+        // document ("search_document: search_document: …"), while queries get a single
+        // "search_query: " — that asymmetry collapses query↔document cosine at recall.
         // Initial delay: let WAL replay and HNSW load finish before hammering ONNX.
         for (int i = 0; i < 150 && daemon_running; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -377,11 +381,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                         std::cerr << "[backfill] Processing " << pending.size() << " memories\n";
                         for (size_t i = 0; i < pending.size() && daemon_running; ++i) {
                             if (contents[i].empty()) continue;
-                            auto gloss = chitta::ssl::gloss_ssl_content(contents[i]);
-                            auto text  = gloss.empty() ? contents[i] : contents[i] + "\n" + gloss;
+                            auto text  = chitta::ssl::retrieval_text(contents[i]);
                             // READ path with long timeout — gets vector back for persistence.
                             // Backfill runs at nice(10) so this 30s wait never blocks RPCs.
-                            auto emb = embed_queue->query(prefix + text,
+                            auto emb = embed_queue->query(text,
                                                           std::chrono::milliseconds(30000));
                             if (emb.size() == EMBED_DIM)
                                 field_store.backfill_embedding(pending[i], emb);
@@ -1031,6 +1034,9 @@ int main(int argc, char* argv[]) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
             subconscious_config.enable_hygiene = false;
+            // Sleep consolidation (Sequitur+FEP) is a background mutation in the same
+            // category; it holds a write lock during the rebuild and starves recall.
+            subconscious_config.enable_sleep_consolidation = false;
         } else if (strcmp(argv[i], "--embed-interval") == 0 && i + 1 < argc) {
             subconscious_config.enable_background_embedding = true;
             subconscious_config.embedding_interval = std::chrono::seconds(safe_stoi(argv[++i], "--embed-interval"));
@@ -1312,7 +1318,12 @@ int main(int argc, char* argv[]) {
                     if (!contents[i].empty()) {
                         nonempty_idx.push_back(i);
                         const auto& c = contents[i];
-                        batch_texts.push_back(c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c);
+                        // Mirror the live backfill document text EXACTLY: content + SSL gloss.
+                        // Do NOT prepend "search_document: " — transform_batch() defaults to
+                        // EmbedMode::Document and adds that prefix itself. Prepending here
+                        // double-prefixes and mismatches the single-prefixed query path.
+                        std::string body = c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c;
+                        batch_texts.push_back(chitta::ssl::retrieval_text(body));
                     } else {
                         not_backfilled.push_back(pending[i]);
                     }
@@ -1337,6 +1348,40 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[re_embed] " << done << "/" << queued << " embedded...\n";
         }
         std::cerr << "[re_embed] Done: " << done << " memories re-embedded at " << EMBED_DIM << "-d\n";
+        // Rebuild derived search structures (binary codes, coarse, LSH, HNSW) over the
+        // new embeddings — otherwise they stay built in the prior vector space.
+        std::cerr << "[re_embed] Rebuilding search indices...\n";
+        if (!field_store.force_reindex()) {
+            std::cerr << "[re_embed] ERROR: force_reindex failed\n";
+            return 1;
+        }
+        // Persist: backfill_embedding only mutates the in-memory store. Without an
+        // explicit snapshot the re-embedded vectors are lost on process exit.
+        std::cerr << "[re_embed] Persisting full snapshot + .emb sidecar...\n";
+        field_store.flush();
+        if (!field_store.save_full_snapshot()) {
+            std::cerr << "[re_embed] ERROR: save_full_snapshot failed — embeddings NOT persisted!\n";
+            return 1;
+        }
+        std::cerr << "[re_embed] Persisted " << done << " embeddings at " << EMBED_DIM << "-d\n";
+        result = 0;
+    } else if (command == "reindex") {
+        // Rebuild all derived search indices (binary codes + coarse + LSH + HNSW)
+        // from the current embeddings. Needed after an embedding-dimension migration,
+        // where re_embed updates float vectors but the ANN indices remain built in the
+        // old vector space. Runs on CPU; no embedding model required.
+        std::cerr << "[reindex] Rebuilding search indices from " << EMBED_DIM << "-d embeddings...\n";
+        if (!field_store.force_reindex()) {
+            std::cerr << "[reindex] ERROR: force_reindex failed\n";
+            return 1;
+        }
+        std::cerr << "[reindex] Persisting full snapshot + sidecars...\n";
+        field_store.flush();
+        if (!field_store.save_full_snapshot()) {
+            std::cerr << "[reindex] ERROR: save_full_snapshot failed\n";
+            return 1;
+        }
+        std::cerr << "[reindex] Done.\n";
         result = 0;
     } else if (command == "hint_extract") {
         // Should have been caught by the early-exit above; only reached if built without llama.cpp

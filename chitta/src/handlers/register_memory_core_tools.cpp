@@ -231,6 +231,20 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["forget"] = [this](const json& p) { return tool_forget(p); };
 
+    tools_.push_back({{"name","ack_memory"},{"description","Record a positive ack signal for a memory (raises its recall score)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Node ID to ack"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["ack_memory"] = [this](const json& p) { return tool_ack_memory(p); };
+
+    tools_.push_back({{"name","nack_memory"},{"description","Record a negative nack signal for a memory (lowers its recall score)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Node ID to nack"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["nack_memory"] = [this](const json& p) { return tool_nack_memory(p); };
+
     tools_.push_back({{"name","batch_forget"},{"description","Delete multiple nodes by ID"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"ids",{{"type","array"},{"items",{{"type","string"}}}}},

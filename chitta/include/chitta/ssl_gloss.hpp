@@ -276,6 +276,17 @@ inline std::string gloss_ssl_content(const std::string& content) {
     return result;
 }
 
+// Single source of truth for the text an SSL memory is embedded as:
+// canonical content with its NL gloss appended (when one exists). Every embed
+// path — live backfill, re_embed, ingester, distiller, recall-time query embed —
+// must build retrieval text this way so document and query vectors share a space.
+// The embedder-specific "search_document: " / "search_query: " prefix is applied
+// separately by each embedder (llama adds it internally; ONNX prepends manually).
+inline std::string retrieval_text(const std::string& content) {
+    auto gloss = gloss_ssl_content(content);
+    return gloss.empty() ? content : content + "\n" + gloss;
+}
+
 // Expand a natural-language query into SSL-shaped variants for RRF recall.
 // Returns up to 6 unique, non-trivial variants.
 inline std::vector<std::string> ssl_query_variants(const std::string& query) {

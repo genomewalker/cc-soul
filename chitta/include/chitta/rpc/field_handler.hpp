@@ -451,6 +451,21 @@ private:
         return arr;
     }
 
+    // Human-facing confidence percent. Prefers the raw semantic cosine
+    // ("similarity") — a true 0-1 relevance — and falls back to the composite
+    // "relevance" only for keyword-only hits that carry no cosine. The composite
+    // score is a product of ~20 cognitive factors, so its magnitude caps around
+    // 0.03 even for a cos-0.97 match; displaying it tripped the prompt-injection
+    // confidence gate and dropped every strong semantic hit.
+    static int display_pct(const nlohmann::json& r) {
+        float sim = r.value("similarity", 0.0f);
+        float rel = r.value("relevance", 0.0f);
+        float v = sim > 0.0f ? sim : rel;
+        if (v < 0.0f) v = 0.0f;
+        if (v > 1.0f) v = 1.0f;
+        return static_cast<int>(v * 100);
+    }
+
     // True when query likely contains entity tokens (caps, hyphens, domain keywords, length>15).
     // Used to gate SSL query expansion — short/generic queries don't benefit.
     static bool query_has_entities(const std::string& q) {
@@ -481,8 +496,7 @@ private:
                    || content.find("[GOTCHA]")      != std::string::npos
                    || content.find("[PATTERN]")     != std::string::npos;
         if (!is_ssl) return embed_text(content);
-        auto gloss = chitta::ssl::gloss_ssl_content(content);
-        return embed_text(gloss.empty() ? content : content + "\n" + gloss);
+        return embed_text(chitta::ssl::retrieval_text(content));
     }
 
     // Reciprocal Rank Fusion — scale-invariant across semantic (cosine) and BM25 scores.
