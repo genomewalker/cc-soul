@@ -271,9 +271,7 @@ void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& 
 
         std::vector<float> embedding;
         if (embedder_) {
-            auto gloss = chitta::ssl::gloss_ssl_content(full_text);
-            auto retrieval_text = gloss.empty() ? full_text : full_text + "\n" + gloss;
-            embedding = embedder_(retrieval_text);
+            embedding = embedder_(chitta::ssl::retrieval_text(full_text));
         }
 
         // Dedup check

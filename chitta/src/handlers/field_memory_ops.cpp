@@ -41,6 +41,26 @@ ToolResult FieldRpcHandler::tool_forget(const json& params) {
     return ToolResult::ok("Forgot memory #" + std::to_string(id));
 }
 
+ToolResult FieldRpcHandler::tool_ack_memory(const json& params) {
+    uint64_t id = extract_id(params);
+    if (id == 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
+    field_store_->ack_memory(id);
+    return ToolResult::ok("Acked memory #" + std::to_string(id));
+}
+
+ToolResult FieldRpcHandler::tool_nack_memory(const json& params) {
+    uint64_t id = extract_id(params);
+    if (id == 0) return ToolResult::error("id is required");
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
+    field_store_->nack_memory(id);
+    return ToolResult::ok("Nacked memory #" + std::to_string(id));
+}
+
 ToolResult FieldRpcHandler::tool_batch_forget(const json& params) {
     size_t count = 0;
     if (params.contains("ids") && params["ids"].is_array()) {

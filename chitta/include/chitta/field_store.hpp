@@ -32,6 +32,8 @@ size_t cf_requeue_ghost_embeddings(const struct CfHandle* h);
 int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
 int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
+int cf_ack_memory(struct CfHandle* h, uint64_t memory_id);
+int cf_nack_memory(struct CfHandle* h, uint64_t memory_id);
 int cf_select_route(struct CfHandle* h, const char* query,
     uint64_t* out_episode_id, uint8_t* out_route);
 int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
@@ -112,6 +114,7 @@ char* cf_fep_status(const struct CfHandle* h);
 char* cf_routed_recall(const struct CfHandle* h, const char* request_json);
 char* cf_witness_memory(const struct CfHandle* h, uint64_t memory_id, const char* witness_kind);
 char* cf_reconcile_pass(const struct CfHandle* h);
+int cf_force_reindex(const struct CfHandle* h);
 char* cf_harvest_scope(const struct CfHandle* h);
 char* cf_seed_hdc_geometry(const struct CfHandle* h, const char* json_path);
 
@@ -537,6 +540,12 @@ public:
     /// Soft-delete a memory.
     void forget(uint64_t id) {
         cf_forget(handle_, id);
+    }
+    void ack_memory(uint64_t id) {
+        cf_ack_memory(handle_, id);
+    }
+    void nack_memory(uint64_t id) {
+        cf_nack_memory(handle_, id);
     }
 
     /// Semantic recall — find k most similar memories to query embedding.
@@ -1358,6 +1367,12 @@ public:
     /// Save the full in-memory state to a binary snapshot file. Returns true on success.
     bool save_full_snapshot() const {
         return cf_save_full_snapshot(handle_);
+    }
+
+    /// Force a full rebuild of all search indices from current embeddings.
+    /// Required after an embedding-dimension migration. Returns true on success.
+    bool force_reindex() const {
+        return cf_force_reindex(handle_) == 0;
     }
 
     // ── Lite Encoder ─────────────────────────────────────────────────────────
