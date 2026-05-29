@@ -19,6 +19,10 @@ def _chitta_mcp_path() -> str:
     return shutil.which("chitta-mcp") or "chitta-mcp"
 
 
+def _chitta_cli_path() -> str | None:
+    return shutil.which("chitta") or str(Path.home() / ".claude" / "bin" / "chitta")
+
+
 def _codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 
@@ -201,7 +205,8 @@ def _install_codex():
         print(f"  Codex: hooks directory not found at {hooks_dir}")
         return False
 
-    if not shutil.which("chitta"):
+    chitta_cli = Path(_chitta_cli_path())
+    if not chitta_cli.is_file():
         print("  Codex: 'chitta' CLI not found in PATH — required for hooks")
         return False
 

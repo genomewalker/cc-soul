@@ -109,6 +109,10 @@ semver_gte() {
     [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" == "$2" ]]
 }
 
+has_cxx_compiler() {
+    command -v c++ &>/dev/null || command -v g++ &>/dev/null || command -v clang++ &>/dev/null
+}
+
 # Download source tarball for a given version into a temp dir.
 # Sets SOURCE_BUILD_DIR to the extracted directory containing chitta/.
 download_source_tarball() {
@@ -269,9 +273,18 @@ build_chitta_field() {
         return 1
     fi
 
+    local pyo3_python=""
+    if [[ -n "${PYO3_PYTHON:-}" && -x "${PYO3_PYTHON}" ]]; then
+        pyo3_python="${PYO3_PYTHON}"
+    elif command -v python3 &>/dev/null; then
+        pyo3_python="$(command -v python3)"
+    elif command -v python &>/dev/null; then
+        pyo3_python="$(command -v python)"
+    fi
+
     (cd "$cf_dir" && \
-        unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER LDFLAGS CFLAGS CXXFLAGS && \
-        RUSTC="$rustc_cmd" "$cargo_cmd" build --release 2>&1 | tail -8)
+        unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER LDFLAGS CFLAGS CXXFLAGS PYO3_ENVIRONMENT_SIGNATURE VIRTUAL_ENV CONDA_PREFIX && \
+        RUSTC="$rustc_cmd" PYO3_PYTHON="$pyo3_python" PYTHON_SYS_EXECUTABLE="$pyo3_python" "$cargo_cmd" build --release 2>&1 | tail -8)
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2
@@ -459,6 +472,18 @@ create_directories() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "${HOME}/.claude/bin"
     mkdir -p "${HOME}/.claude/hooks"
+}
+
+link_user_binaries() {
+    local user_bin="${HOME}/.local/bin"
+    mkdir -p "$user_bin"
+
+    for bin in chitta chittad; do
+        if [[ -x "$BIN_DIR/$bin" ]]; then
+            ln -sf "$BIN_DIR/$bin" "$user_bin/$bin"
+            echo "[cc-soul] Linked $bin → $user_bin/$bin"
+        fi
+    done
 }
 
 # Install hooks
@@ -747,8 +772,8 @@ RestartSec=10
 KillMode=mixed
 TimeoutStartSec=120
 TimeoutStopSec=30
-StandardOutput=append:/tmp/chittad.log
-StandardError=append:/tmp/chittad.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
@@ -756,7 +781,8 @@ EOF
 
     systemctl --user daemon-reload
     systemctl --user enable chittad 2>/dev/null || true
-    systemctl --user start chittad 2>/dev/null || true
+    systemctl --user reset-failed chittad 2>/dev/null || true
+    systemctl --user restart chittad 2>/dev/null || true
     echo "[cc-soul] systemd user service installed and enabled (chittad.service)"
 }
 
@@ -835,16 +861,29 @@ main() {
             fi
         fi
 
-        # Always build from source with llama.cpp; pre-built binaries don't include it
-        echo "[cc-soul] Building from source with llama.cpp embeddings..."
-        build_from_source "$src_root" || {
-            echo "[cc-soul] ERROR: Build failed" >&2
-            exit 1
-        }
+        if has_cxx_compiler; then
+            echo "[cc-soul] Building from source with llama.cpp embeddings..."
+            build_from_source "$src_root" || {
+                echo "[cc-soul] WARNING: Source build failed, trying pre-built binaries" >&2
+                download_binaries "$current_version" "$platform" || {
+                    echo "[cc-soul] ERROR: Build failed and no compatible pre-built binaries were found" >&2
+                    exit 1
+                }
+            }
+        else
+            echo "[cc-soul] No C++ compiler detected — installing pre-built binaries"
+            download_binaries "$current_version" "$platform" || {
+                echo "[cc-soul] ERROR: No C++ compiler detected and no compatible pre-built binaries were found" >&2
+                exit 1
+            }
+        fi
     fi
 
     # Create directories
     create_directories
+
+    # Expose the backend CLIs on the standard user PATH for Codex-side installers.
+    link_user_binaries
 
     # Install hooks
     install_hooks

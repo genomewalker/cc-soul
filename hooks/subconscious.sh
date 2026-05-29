@@ -148,7 +148,7 @@ is_responsive() {
 
     # Try health check with short timeout (CLI handles socket communication)
     local response
-    response=$(timeout 3 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+    response=$(timeout 3 "${HOME}/.claude/bin/chitta" --socket-path "$SOCKET_PATH" health_check 2>/dev/null || true)
     if [[ -n "$response" && "$response" == *"Status:"* ]]; then
         _responsive_cache="yes"
         return 0
@@ -228,7 +228,7 @@ cmd_start() {
         # Check if any are responsive (use CLI instead of netcat)
         if [[ -S "$SOCKET_PATH" ]]; then
             local response
-            response=$(timeout 2 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+            response=$(timeout 2 "${HOME}/.claude/bin/chitta" --socket-path "$SOCKET_PATH" health_check 2>/dev/null || true)
             if [[ -n "$response" && "$response" == *"Status:"* ]]; then
                 # Healthy daemon exists, nothing to do
                 return 0
@@ -258,7 +258,7 @@ cmd_start() {
             sleep 0.1
             if [[ -S "$SOCKET_PATH" ]]; then
                 local response
-                response=$(timeout 2 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+                response=$(timeout 2 "${HOME}/.claude/bin/chitta" --socket-path "$SOCKET_PATH" health_check 2>/dev/null || true)
                 if [[ -n "$response" && "$response" == *"Status:"* ]]; then
                     return 0
                 fi
@@ -315,7 +315,7 @@ cmd_start() {
         if [[ -S "$SOCKET_PATH" ]]; then
             # Socket exists, now verify daemon responds with heartbeat (CLI)
             local response
-            response=$(run_with_timeout "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+            response=$(run_with_timeout "${HOME}/.claude/bin/chitta" --socket-path "$SOCKET_PATH" health_check 2>/dev/null || true)
             if [[ -n "$response" && "$response" == *"Status:"* ]]; then
                 daemon_ready=true
                 break
