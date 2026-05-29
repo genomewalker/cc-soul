@@ -69,6 +69,9 @@ int cf_hopfield_co_retrieval(struct CfHandle* h, const uint64_t* ids, size_t cou
 char* cf_hopfield_stats(const struct CfHandle* h);
 int cf_adapt_vigilance(struct CfHandle* h, float avg_error);
 int cf_chain_head(const struct CfHandle* h, uint8_t* out);
+// Compiled store vector-space id (model/dim/text-format). Handle-less; used by the
+// self-update gate to detect an incompatible replacement binary before execv.
+uint64_t cf_compiled_vector_space_id(void);
 void cf_free_string(char* s);
 int cf_set_source_session(struct CfHandle* h, uint64_t memory_id, const char* session_id);
 int cf_recall_session(struct CfHandle* h,

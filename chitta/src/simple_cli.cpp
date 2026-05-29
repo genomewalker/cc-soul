@@ -34,6 +34,7 @@
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -296,17 +297,44 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                 try {
                     auto current_mtime = std::filesystem::last_write_time("/proc/self/exe");
                     if (current_mtime != startup_binary_mtime) {
-                        std::cerr << "[maint] Binary updated, restarting daemon...\n";
-                        { auto _lk = handler.acquire_lock(); field_store.flush(); }
-                        daemon_running = false;
-                        ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
+                        // PR4 self-update gate: probe the replacement binary's compiled
+                        // vector-space id. If it differs from ours, the new binary would
+                        // refuse this store's snapshots (.shdr fence) and restart-loop — so
+                        // do NOT auto-restart; ack the mtime and require an operator restart.
                         char self_path[PATH_MAX];
                         ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+                        bool compatible = true;
                         if (len > 0) {
                             self_path[len] = '\0';
-                            ::execv(self_path, nullptr);
+                            std::string probe = std::string(self_path) + " format-id 2>/dev/null";
+                            if (FILE* p = ::popen(probe.c_str(), "r")) {
+                                char buf[64];
+                                if (::fgets(buf, sizeof(buf), p)) {
+                                    unsigned long long new_vsid = std::strtoull(buf, nullptr, 10);
+                                    unsigned long long own_vsid =
+                                        (unsigned long long)cf_compiled_vector_space_id();
+                                    if (new_vsid != 0 && new_vsid != own_vsid) {
+                                        compatible = false;
+                                        std::cerr << "[maint] Binary updated but its store vector-space ("
+                                                  << new_vsid << ") differs from the running store ("
+                                                  << own_vsid << "); NOT auto-restarting — operator "
+                                                  << "restart required after store migration.\n";
+                                    }
+                                }
+                                ::pclose(p);
+                            }
                         }
-                        ::exit(0);
+                        if (compatible) {
+                            std::cerr << "[maint] Binary updated, restarting daemon...\n";
+                            { auto _lk = handler.acquire_lock(); field_store.flush(); }
+                            daemon_running = false;
+                            ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
+                            if (len > 0) { ::execv(self_path, nullptr); }
+                            ::exit(0);
+                        } else {
+                            // Ack the new mtime so we don't re-probe (and re-warn) every tick.
+                            startup_binary_mtime = current_mtime;
+                        }
                     }
                 } catch (...) {}
             }
@@ -1117,6 +1145,14 @@ int main(int argc, char* argv[]) {
         return ok ? 0 : 1;
     }
 
+    if (command == "format-id") {
+        // Print the compiled store vector-space id (model/dim/text-format). Handle-less —
+        // no FieldStore load. Used by the self-update gate to detect an incompatible
+        // replacement binary before execv (PR4).
+        std::cout << cf_compiled_vector_space_id() << "\n";
+        return 0;
+    }
+
     // Commands that need Mind - daemonize first if needed
     if (command == "daemon") {
         if (!foreground) {
@@ -1382,6 +1418,21 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cerr << "[reindex] Done.\n";
+        result = 0;
+    } else if (command == "migrate-store-format") {
+        // PR5: stamp the store with the .shdr identity sidecar (model/dim/text-format +
+        // lineage) so snapshot selection + WAL replay can fence foreign-vector data. No
+        // re-embed — save_full_snapshot writes a fresh instance family (each sidecar via
+        // tmp+rename, old families pruned only after the new one is durable = atomic
+        // rebuild) including the .shdr for the current compiled vector space. Legacy
+        // foreign-dim snapshots that lack a .shdr remain caught by the payload dim-fence.
+        std::cerr << "[migrate] Stamping store with .shdr identity sidecar (no re-embed)...\n";
+        field_store.flush();
+        if (!field_store.save_full_snapshot()) {
+            std::cerr << "[migrate] ERROR: save_full_snapshot failed\n";
+            return 1;
+        }
+        std::cerr << "[migrate] Done — .shdr written for the current vector space.\n";
         result = 0;
     } else if (command == "hint_extract") {
         // Should have been caught by the early-exit above; only reached if built without llama.cpp
