@@ -1015,6 +1015,11 @@ int main(int argc, char* argv[]) {
     std::string distill_session_id;
     std::string distill_realm = "brahman";
 
+    // prune-memories command args
+    std::string prune_match;       // comma-separated content substrings
+    bool prune_apply = false;      // dry-run unless set
+    int prune_action = 0;          // 0=delete (forget), 1=down-weight (archive)
+
     auto safe_stoi = [&](const char* arg, const char* option_name) -> int {
         try {
             return std::stoi(arg);
@@ -1082,6 +1087,14 @@ int main(int argc, char* argv[]) {
             distill_session_id = argv[++i];
         } else if (strcmp(argv[i], "--realm") == 0 && i + 1 < argc) {
             distill_realm = argv[++i];
+        } else if (strcmp(argv[i], "--match") == 0 && i + 1 < argc) {
+            prune_match = argv[++i];
+        } else if (strcmp(argv[i], "--apply") == 0) {
+            prune_apply = true;
+        } else if (strcmp(argv[i], "--delete") == 0) {
+            prune_action = 0;
+        } else if (strcmp(argv[i], "--background") == 0) {
+            prune_action = 1;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "chittad " << CHITTA_VERSION << "\n";
             return 0;
@@ -1434,6 +1447,49 @@ int main(int argc, char* argv[]) {
         }
         std::cerr << "[migrate] Done — .shdr written for the current vector space.\n";
         result = 0;
+    } else if (command == "prune-memories") {
+        // Maintenance: find memories whose content matches any of the comma-separated
+        // --match substrings (case-insensitive). Dry-run by default (preview); --apply with
+        // --delete (forget) or --background (down-weight to Archived status) to act.
+        if (prune_match.empty()) {
+            std::cerr << "[prune] --match \"pat1,pat2,...\" required (comma-separated content substrings)\n";
+            return 1;
+        }
+        json pats = json::array();
+        {
+            size_t start = 0;
+            while (start <= prune_match.size()) {
+                size_t comma = prune_match.find(',', start);
+                std::string item = prune_match.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                size_t a = item.find_first_not_of(" \t");
+                size_t b = item.find_last_not_of(" \t");
+                if (a != std::string::npos) pats.push_back(item.substr(a, b - a + 1));
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+        std::string res = field_store.prune_memories(pats.dump(), prune_apply, prune_action);
+        json matches = json::parse(res.empty() ? std::string("[]") : res, nullptr, false);
+        if (matches.is_discarded()) matches = json::array();
+        const char* act = (prune_action == 1) ? "down-weight (archive)" : "delete";
+        if (!prune_apply) {
+            std::cerr << "[prune] DRY-RUN: " << matches.size() << " memories match (action would be: " << act << ")\n";
+            for (auto& m : matches) {
+                std::cerr << "  #" << m.value("id", (uint64_t)0) << "  [" << m.value("kind", std::string()) << "]  "
+                          << m.value("content", std::string()) << "\n";
+            }
+            std::cerr << "[prune] Re-run with --apply and (--delete | --background) to act.\n";
+            result = 0;
+        } else {
+            std::cerr << "[prune] " << act << " applied to " << matches.size() << " memories. Persisting...\n";
+            field_store.flush();
+            if (!field_store.save_full_snapshot()) {
+                std::cerr << "[prune] ERROR: save_full_snapshot failed\n";
+                return 1;
+            }
+            std::cerr << "[prune] Done.\n";
+            result = 0;
+        }
     } else if (command == "hint_extract") {
         // Should have been caught by the early-exit above; only reached if built without llama.cpp
         std::cerr << "[hint_extract] built without CHITTA_WITH_LLAMA_CPP\n";
