@@ -132,3 +132,6 @@ scripts/ssl_model/llama.cpp
 .codex
 harvest_out.npz
 unsloth_compiled_cache/
+
+# Runtime lock — created by the scheduler at daemon start, never a source artifact
+.claude/scheduled_tasks.lock

@@ -72,6 +72,8 @@ int cf_chain_head(const struct CfHandle* h, uint8_t* out);
 // Compiled store vector-space id (model/dim/text-format). Handle-less; used by the
 // self-update gate to detect an incompatible replacement binary before execv.
 uint64_t cf_compiled_vector_space_id(void);
+// Compiled embedding model id (build.rs EMBED_MODEL_ID); borrowed static, do not free.
+const char* cf_embed_model_id(void);
 // Prune/down-weight memories by content pattern (prune-memories command). Returns a
 // malloc'd JSON array [{id,kind,content}] of matches (free with cf_free_string).
 char* cf_prune_memories(struct CfHandle* h, const char* patterns_json, int apply, int action);

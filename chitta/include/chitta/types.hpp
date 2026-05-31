@@ -19,8 +19,14 @@
 
 namespace chitta {
 
-// Embedding dimension (ssl_distiller_dpo 1536-d)
-constexpr size_t EMBED_DIM = 1536;
+// Embedding dimension. Defaults to the public-shipped nomic-embed-text-v1.5 (768-d);
+// CMake overrides CHITTA_EMBED_DIM at build time from env (the same env chitta-field's
+// build.rs reads) so a personal build (ssl_distiller_dpo, 1536-d) and the public release
+// stay in lockstep across the Rust and C++ layers.
+#ifndef CHITTA_EMBED_DIM
+#define CHITTA_EMBED_DIM 768
+#endif
+constexpr size_t EMBED_DIM = CHITTA_EMBED_DIM;
 
 // Timestamp as Unix millis
 using Timestamp = int64_t;
