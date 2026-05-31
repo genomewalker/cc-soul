@@ -1335,7 +1335,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "[re_embed] ERROR: embed model not ready — set CHITTA_EMBED_MODEL or pass --embed-model\n";
             return 1;
         }
-        const std::string model_id = "ssl_distiller_dpo";
+        const std::string model_id = cf_embed_model_id();
         int64_t queued = field_store.requeue_all_embeddings(model_id.c_str(), model_id.size());
         if (queued < 0) {
             std::cerr << "[re_embed] ERROR: requeue_all_embeddings failed\n";

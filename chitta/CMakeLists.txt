@@ -1,6 +1,27 @@
 cmake_minimum_required(VERSION 3.14)
 project(chitta VERSION 0.1.0 LANGUAGES C CXX)
 
+# Embedding identity — public default matches the bundled nomic-embed-text-v1.5 GGUF
+# (768-dim). Personal/local builds override via env CHITTA_EMBED_DIM (the same env var
+# chitta-field's build.rs reads), so one environment drives both the Rust and C++ layers
+# and the on-disk format never drifts between them. Cached so the value is seeded ONCE
+# (from env, on the first configure of a build dir) and then sticks — a later plain
+# `cmake --build` without the env cannot silently flip a 1536 personal build back to 768.
+# To change an existing build dir, pass -DCHITTA_EMBED_DIM=<n> or use a fresh dir.
+if(NOT DEFINED CHITTA_EMBED_DIM)
+    if(DEFINED ENV{CHITTA_EMBED_DIM})
+        set(CHITTA_EMBED_DIM "$ENV{CHITTA_EMBED_DIM}" CACHE STRING "Embedding dimension")
+    else()
+        set(CHITTA_EMBED_DIM "768" CACHE STRING "Embedding dimension")
+    endif()
+endif()
+math(EXPR _chitta_embed_mod "${CHITTA_EMBED_DIM} % 64")
+if(NOT _chitta_embed_mod EQUAL 0)
+    message(FATAL_ERROR "CHITTA_EMBED_DIM (${CHITTA_EMBED_DIM}) must be a multiple of 64")
+endif()
+add_compile_definitions(CHITTA_EMBED_DIM=${CHITTA_EMBED_DIM})
+message(STATUS "chitta embed dim: ${CHITTA_EMBED_DIM}")
+
 include(FetchContent)
 
 # CRoaring - compressed bitmaps for tag indices (100M+ scale)
