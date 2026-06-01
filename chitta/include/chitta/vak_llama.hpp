@@ -1,6 +1,7 @@
 #pragma once
 // LlamaYantra — VakYantra backed by llama.cpp running a GGUF embedding model in-process.
-// Default model: ssl_distiller_dpo (1536-d). Fallback: nomic-embed-text-v1.5 (768-d). No external server.
+// Public default model: bge-large-en-v1.5 (1024-d, BERT mean-pooled). Personal builds use
+// ssl_distiller_dpo (1536-d) via the CHITTA_EMBED_* build override. No external server.
 // Compile-time guard: only active when CHITTA_WITH_LLAMA_CPP is defined.
 #include "chitta/vak.hpp"
 #include <cstdlib>
@@ -84,7 +85,7 @@ private:
 
     static std::string discover_model_path(const std::string& mind_path = "") {
         namespace fs = std::filesystem;
-        static constexpr auto MODEL_FILE = "nomic-embed-text-v1.5.gguf";
+        static constexpr auto MODEL_FILE = "bge-large-en-v1.5.gguf";
 
         // 1) env override
         if (const char* env = std::getenv("CHITTA_EMBED_MODEL"))

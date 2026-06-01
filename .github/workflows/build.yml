@@ -100,14 +100,15 @@ jobs:
           from huggingface_hub import hf_hub_download
           import shutil, os
 
-          # nomic-embed-text-v1.5: 768-dim, 137M params, llama.cpp GGUF
+          # bge-large-en-v1.5: 1024-dim, 335M params, BERT mean-pooled, llama.cpp GGUF.
+          # Public default — best under chitta's mean pooling (see scripts/ssl_model bench).
           model_path = hf_hub_download(
-              repo_id='nomic-ai/nomic-embed-text-v1.5-GGUF',
-              filename='nomic-embed-text-v1.5.Q8_0.gguf'
+              repo_id='CompendiumLabs/bge-large-en-v1.5-gguf',
+              filename='bge-large-en-v1.5-q8_0.gguf'
           )
 
           os.makedirs('models', exist_ok=True)
-          dest = 'models/nomic-embed-text-v1.5.gguf'
+          dest = 'models/bge-large-en-v1.5.gguf'
           shutil.copy(model_path, dest)
           print(f'Model: {os.path.getsize(dest)} bytes')
           "

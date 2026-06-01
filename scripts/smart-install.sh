@@ -167,10 +167,10 @@ download_binaries() {
     return 1
 }
 
-# Download nomic embedding model from GitHub release or HuggingFace
+# Download bge-large-en-v1.5 embedding model from GitHub release or HuggingFace
 download_embed_model() {
     local version="$1"
-    local dest="$MODELS_DIR/nomic-embed-text-v1.5.gguf"
+    local dest="$MODELS_DIR/bge-large-en-v1.5.gguf"
     [[ -f "$dest" ]] && return 0
 
     mkdir -p "$MODELS_DIR"
@@ -191,7 +191,7 @@ download_embed_model() {
         python3 -c "
 from huggingface_hub import hf_hub_download
 import shutil, os
-path = hf_hub_download(repo_id='nomic-ai/nomic-embed-text-v1.5-GGUF', filename='nomic-embed-text-v1.5.Q8_0.gguf')
+path = hf_hub_download(repo_id='CompendiumLabs/bge-large-en-v1.5-gguf', filename='bge-large-en-v1.5-q8_0.gguf')
 shutil.copy(path, '$dest')
 print('[cc-soul] Embedding model installed from HuggingFace')
 " 2>/dev/null && return 0
