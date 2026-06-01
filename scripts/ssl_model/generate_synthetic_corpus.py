@@ -96,8 +96,52 @@ class OpenAITeacher(Teacher):
         return resp.choices[0].message.content
 
 
+class CodexCliTeacher(Teacher):
+    """Drives the local `codex exec` CLI, using its stored auth instead of an API key —
+    the path that works when OPENAI_API_KEY is unset. The final agent message (captured
+    via --output-last-message) is the generated text; surrounding agent chatter, if any,
+    is ignored by parse_examples."""
+
+    def __init__(self, model=None, codex_bin="codex", cwd=None, timeout=420):
+        self.name = f"codex-cli:{model or 'default'}"
+        self.model = model
+        self.codex_bin = codex_bin
+        self.cwd = cwd
+        self.timeout = timeout
+
+    def generate(self, prompt: str, max_tokens: int = 4096) -> str:
+        import subprocess
+        import tempfile
+
+        fd, outpath = tempfile.mkstemp(suffix=".txt", prefix="codex_corpus_")
+        os.close(fd)
+        try:
+            cmd = [self.codex_bin, "exec", "--skip-git-repo-check", "--ephemeral",
+                   "-s", "read-only", "--color", "never", "-o", outpath]
+            if self.model:
+                cmd += ["-m", self.model]
+            if self.cwd:
+                cmd += ["-C", self.cwd]
+            cmd.append("-")  # read prompt from stdin
+            subprocess.run(cmd, input=prompt, text=True, capture_output=True,
+                           timeout=self.timeout, check=True)
+            with open(outpath) as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(outpath)
+            except OSError:
+                pass
+
+
 def build_teachers(args) -> list:
+    import shutil
+
     teachers = []
+    if not args.no_codex and shutil.which(args.codex_bin):
+        teachers.append(CodexCliTeacher(args.codex_model, args.codex_bin, args.codex_cwd))
+    elif not args.no_codex:
+        print(f"[skip] codex: '{args.codex_bin}' not on PATH", file=sys.stderr)
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             teachers.append(AnthropicTeacher(args.anthropic_model))
@@ -160,6 +204,14 @@ def main():
     ap.add_argument("--target", type=int, default=2000, help="SFT examples to accumulate")
     ap.add_argument("--anthropic-model", default="claude-haiku-4-5")
     ap.add_argument("--openai-model", default="gpt-5.5")
+    ap.add_argument("--codex-bin", default="codex",
+                    help="codex CLI binary (uses its stored auth; no API key needed)")
+    ap.add_argument("--codex-model", default=None,
+                    help="model for `codex exec -m` (default: codex config default)")
+    ap.add_argument("--codex-cwd", default=None,
+                    help="working root for `codex exec -C` (a neutral dir avoids pulling "
+                         "repo context into each call)")
+    ap.add_argument("--no-codex", action="store_true", help="disable the codex CLI teacher")
     ap.add_argument("--rejected-relevance-frac", type=float, default=0.25,
                     help="fraction of DPO pairs whose rejected is an unrelated pool line "
                          "(relevance negative) rather than a perturbed-format negative")
