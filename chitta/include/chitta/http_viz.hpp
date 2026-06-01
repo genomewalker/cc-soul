@@ -180,7 +180,7 @@ public:
                 CfRecallHit hits[100];
                 size_t written = 0;
                 size_t max_hits = std::min(limit, size_t(100));
-                cf_recall_keyword(field_->handle(), query.c_str(), max_hits, hits, max_hits, &written);
+                cf_recall_keyword(field_->handle(), query.c_str(), max_hits, nullptr, hits, max_hits, &written);
                 json arr = json::array();
                 for (size_t i = 0; i < written; ++i) {
                     json m;
@@ -474,7 +474,7 @@ private:
 
             CfRecallHit hits[6];
             size_t written = 0;
-            cf_recall_keyword(field_->handle(), q.c_str(), 5, hits, 6, &written);
+            cf_recall_keyword(field_->handle(), q.c_str(), 5, nullptr, hits, 6, &written);
 
             for (size_t h = 0; h < written; ++h) {
                 uint64_t tgt_id = hits[h].memory_id;

@@ -19,8 +19,8 @@ namespace chitta {
 
 class LlamaYantra : public VakYantra {
 public:
-    static constexpr int N_CTX      = 8192;
-    static constexpr int MAX_TOKENS = 8000;   // truncate below n_ctx
+    static constexpr int N_CTX      = 8192;   // upper bound; clamped to the model's trained ctx
+    static constexpr int MAX_TOKENS = 8000;   // upper bound; clamped to the model's trained ctx
     static constexpr int N_GPU_LAYERS = 99;   // offload all if CUDA present; no-op on CPU build
 
     // model_path: if empty, discover via env/home. Pass mind_path to enable third search location.
@@ -74,6 +74,7 @@ private:
     bool           ready_  = false;
     bool           gpu_    = false;
     int            n_embd_ = 0;
+    int            n_ctx_eff_ = N_CTX;  // effective context = min(N_CTX, model trained ctx)
     llama_model*   model_  = nullptr;
     llama_context* ctx_    = nullptr;
     mutable std::mutex mtx_;  // llama_context is NOT thread-safe
@@ -121,12 +122,28 @@ private:
             return false;
         }
 
+        // Clamp the context to the model's trained context. BERT-style embedders (e.g.
+        // bge-large-en-v1.5) have only 512 learned position embeddings; feeding a longer
+        // sequence overflows the position-embedding gather (GGML_ASSERT i01 < ne01). Large
+        // decoder embedders (nomic 8192, ssl_distiller 32k) keep the full N_CTX.
+        {
+            int nct = llama_model_n_ctx_train(model_);
+            n_ctx_eff_ = (nct > 0 && nct < N_CTX) ? nct : N_CTX;
+        }
+
         llama_context_params cparams = llama_context_default_params();
-        cparams.n_ctx        = N_CTX;
-        cparams.n_batch      = N_CTX;
-        cparams.n_ubatch     = N_CTX;  // non-causal embedding requires n_ubatch >= n_tokens
+        cparams.n_ctx        = n_ctx_eff_;
+        cparams.n_batch      = n_ctx_eff_;
+        cparams.n_ubatch     = n_ctx_eff_;  // non-causal embedding requires n_ubatch >= n_tokens
         cparams.embeddings   = true;
         cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        // CHITTA_EMBED_THREADS overrides llama's conservative default thread count. The CPU
+        // embedder is compute-bound; on a many-core host this is a large throughput win
+        // (e.g. bulk re_embed). Unset → llama default (unchanged behavior).
+        if (const char* t = std::getenv("CHITTA_EMBED_THREADS")) {
+            int nt = std::atoi(t);
+            if (nt > 0) { cparams.n_threads = nt; cparams.n_threads_batch = nt; }
+        }
         ctx_ = llama_init_from_model(model_, cparams);
         if (!ctx_) return false;
 
@@ -161,7 +178,10 @@ private:
                                toks.data(), (int)toks.size(), true, false);
         }
         if (n <= 0) return v;
-        if (n > MAX_TOKENS) n = MAX_TOKENS;  // truncate to context limit
+        // Truncate to the effective context (= model trained ctx). Essential for BERT
+        // embedders whose position-embedding table is the hard upper bound on n_tokens.
+        int max_toks = std::min(MAX_TOKENS, n_ctx_eff_);
+        if (n > max_toks) n = max_toks;
         toks.resize(n);
 
         // Clear KV cache between sequences — essential for pooled embeddings.
