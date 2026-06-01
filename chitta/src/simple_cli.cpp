@@ -1020,6 +1020,9 @@ int main(int argc, char* argv[]) {
     bool prune_apply = false;      // dry-run unless set
     int prune_action = 0;          // 0=delete (forget), 1=down-weight (archive)
 
+    // export_content / import_embeddings command args (GPU re-embed migration)
+    std::string io_file;           // --out (export) or --in (import)
+
     auto safe_stoi = [&](const char* arg, const char* option_name) -> int {
         try {
             return std::stoi(arg);
@@ -1095,6 +1098,8 @@ int main(int argc, char* argv[]) {
             prune_action = 0;
         } else if (strcmp(argv[i], "--background") == 0) {
             prune_action = 1;
+        } else if ((strcmp(argv[i], "--out") == 0 || strcmp(argv[i], "--in") == 0) && i + 1 < argc) {
+            io_file = argv[++i];
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "chittad " << CHITTA_VERSION << "\n";
             return 0;
@@ -1417,6 +1422,78 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cerr << "[re_embed] Persisted " << done << " embeddings at " << EMBED_DIM << "-d\n";
+        result = 0;
+    } else if (command == "export_content") {
+        // GPU re-embed migration, phase 1: dump every content-bearing memory's id + content
+        // as JSONL ({"id":<u64>,"content":<str>}) so an external GPU embedder can produce
+        // vectors out-of-process. No embed model required. Run with CHITTA_MIGRATE_REEMBED=1
+        // when exporting from a foreign-vsid store.
+        if (io_file.empty()) { std::cerr << "[export_content] --out <file.jsonl> required\n"; return 1; }
+        int64_t marked = field_store.requeue_all_embeddings("export", 6);
+        if (marked < 0) { std::cerr << "[export_content] ERROR: requeue failed\n"; return 1; }
+        std::vector<uint64_t> ids = field_store.pending_embeddings(2000000);
+        std::ofstream out(io_file);
+        if (!out) { std::cerr << "[export_content] ERROR: cannot open " << io_file << "\n"; return 1; }
+        // Emit the EXACT string re_embed/live-backfill feed the embedder:
+        //   "search_document: " + ssl::retrieval_text(content[:6000])
+        // so the external GPU embedder lands in the same vector space as runtime queries
+        // (which embed "search_query: " + query through the same model). Token-truncation to
+        // the model's context is the GPU embedder's job, matching vak_llama.
+        static constexpr size_t MAX_CONTENT_BYTES = 6000;
+        size_t written = 0;
+        for (uint64_t id : ids) {
+            std::string c = field_store.get_content(id);
+            if (c.empty()) continue;
+            std::string body = c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c;
+            std::string doc = "search_document: " + chitta::ssl::retrieval_text(body);
+            json j; j["id"] = id; j["text"] = doc;
+            // replace error handler: 6000-byte truncation can split a multi-byte UTF-8 char
+            // (and some content may be non-UTF-8); replace invalid bytes instead of throwing.
+            out << j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
+            ++written;
+        }
+        out.flush();
+        std::cerr << "[export_content] wrote " << written << " memories to " << io_file << "\n";
+        result = out.good() ? 0 : 1;
+    } else if (command == "import_embeddings") {
+        // GPU re-embed migration, phase 3: read precomputed EMBED_DIM-d vectors and backfill
+        // them, then rebuild indices + snapshot. Binary record format (little-endian, native):
+        //   u64 id, then EMBED_DIM * f32. No embed model required. Run with
+        //   CHITTA_MIGRATE_REEMBED=1 to load a foreign-vsid store for the one-shot migration.
+        if (io_file.empty()) { std::cerr << "[import_embeddings] --in <file.bin> required\n"; return 1; }
+        std::ifstream in(io_file, std::ios::binary);
+        if (!in) { std::cerr << "[import_embeddings] ERROR: cannot open " << io_file << "\n"; return 1; }
+        // Mark all pending so backfill_embedding applies (it no-ops on non-pending memories).
+        int64_t marked = field_store.requeue_all_embeddings("import", 6);
+        if (marked < 0) { std::cerr << "[import_embeddings] ERROR: requeue failed\n"; return 1; }
+        std::cerr << "[import_embeddings] " << marked << " memories pending; importing "
+                  << EMBED_DIM << "-d vectors from " << io_file << "\n";
+        size_t imported = 0, missing = 0;
+        std::vector<float> emb(EMBED_DIM);
+        while (true) {
+            uint64_t id = 0;
+            if (!in.read(reinterpret_cast<char*>(&id), sizeof(id))) break;
+            if (!in.read(reinterpret_cast<char*>(emb.data()), (std::streamsize)(EMBED_DIM * sizeof(float)))) {
+                std::cerr << "[import_embeddings] WARNING: truncated record for id=" << id << "\n";
+                break;
+            }
+            try {
+                field_store.backfill_embedding(id, emb);
+                ++imported;
+            } catch (...) { ++missing; }
+            if (imported % 10000 == 0 && imported > 0)
+                std::cerr << "[import_embeddings] " << imported << " imported...\n";
+        }
+        std::cerr << "[import_embeddings] imported " << imported << " (" << missing << " skipped)\n";
+        std::cerr << "[import_embeddings] Rebuilding search indices...\n";
+        if (!field_store.force_reindex()) { std::cerr << "[import_embeddings] ERROR: force_reindex failed\n"; return 1; }
+        std::cerr << "[import_embeddings] Persisting snapshot + sidecars...\n";
+        field_store.flush();
+        if (!field_store.save_full_snapshot()) {
+            std::cerr << "[import_embeddings] ERROR: save_full_snapshot failed — NOT persisted!\n";
+            return 1;
+        }
+        std::cerr << "[import_embeddings] Done: " << imported << " embeddings at " << EMBED_DIM << "-d persisted\n";
         result = 0;
     } else if (command == "reindex") {
         // Rebuild all derived search indices (binary codes + coarse + LSH + HNSW)
