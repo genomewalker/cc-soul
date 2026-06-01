@@ -1185,14 +1185,18 @@ int main(int argc, char* argv[]) {
         namespace fs = std::filesystem;
         std::string gguf;
         const char* env_model = std::getenv("CHITTA_EMBED_MODEL");
+        // Default model filename follows the compiled embedding identity so auto-discovery
+        // and the bundled GGUF never drift: public build -> bge-large-en-v1.5.gguf, a personal
+        // build -> ssl_distiller_dpo.gguf, etc. (cf_embed_model_id() is build.rs-generated.)
+        const std::string model_file = std::string(cf_embed_model_id()) + ".gguf";
         if (env_model && *env_model && fs::exists(env_model)) {
             gguf = env_model;
         } else if (const char* home = std::getenv("HOME")) {
-            fs::path p = fs::path(home) / ".claude" / "models" / "nomic-embed-text-v1.5.gguf";
+            fs::path p = fs::path(home) / ".claude" / "models" / model_file;
             if (fs::exists(p)) gguf = p.string();
         }
         if (gguf.empty()) {
-            fs::path p = fs::path(mind_path) / ".." / ".." / "models" / "nomic-embed-text-v1.5.gguf";
+            fs::path p = fs::path(mind_path) / ".." / ".." / "models" / model_file;
             if (fs::exists(p)) gguf = fs::canonical(p).string();
         }
         if (!gguf.empty()) {
