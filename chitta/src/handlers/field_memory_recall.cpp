@@ -253,7 +253,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             }
         }
         // BM25 lane
-        rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20)));
+        rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20), realm));
         // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
         if (!params.value("disable_hdc", false)) {
             rrf_lane(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm));
@@ -332,6 +332,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                         h.kind         = m.value("kind", "episode");
                         h.realm        = m.value("realm", "");
                     } catch (...) {}
+                    // Realm scoping: this direct tagged-memory fetch bypasses the recall lanes,
+                    // so filter here too — never surface a tagged memory from another realm.
+                    if (!realm.empty() && h.realm != realm) continue;
                     hits.push_back(std::move(h));
                 }
             }

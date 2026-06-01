@@ -754,11 +754,14 @@ public:
     }
 
     /// BM25 keyword recall.
-    std::vector<FieldRecallHit> recall_keyword(const std::string& query, size_t k) {
+    std::vector<FieldRecallHit> recall_keyword(const std::string& query, size_t k,
+                                               const std::string& realm = "") {
         constexpr size_t MAX_HITS = 256;
         CfRecallHit buf[MAX_HITS];
         size_t written = 0;
-        int r = cf_recall_keyword(handle_, query.c_str(), k, buf, MAX_HITS, &written);
+        int r = cf_recall_keyword(handle_, query.c_str(), k,
+                                  realm.empty() ? nullptr : realm.c_str(),
+                                  buf, MAX_HITS, &written);
         if (r != 0) throw std::runtime_error(last_error());
         return hits_to_results(buf, written);
     }
