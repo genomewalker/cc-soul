@@ -283,14 +283,17 @@ case "$MATCHER" in
             # Scope recall to current project realm to prevent cross-session memory bleed.
             _recall_realm=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null || echo "")
             memories=""
-            for tag in ${tags//,/ }; do
-                if [[ -n "$_recall_realm" ]]; then
+            # If realm detection failed (daemon warming/slow → realm_detect times out and
+            # returns empty), SKIP injection entirely. Never fall back to an unscoped recall:
+            # that bleeds other projects' memories (e.g. bioinformatics corrections) into an
+            # unrelated session — the actual cause of the "hooks misfiring" noise. Honours the
+            # "No fallback unfiltered recall" intent below, which the old else-branch violated.
+            if [[ -n "$_recall_realm" ]]; then
+                for tag in ${tags//,/ }; do
                     result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --realm "$_recall_realm" --limit 1 --text-only 2>/dev/null | head -c 400)
-                else
-                    result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
-                fi
-                [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
-            done
+                    [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
+                done
+            fi
             # No fallback unfiltered recall — avoids cross-domain memory bleed
             if [[ -n "$memories" ]]; then
                 escaped_mem=$(json_escape "$memories")
