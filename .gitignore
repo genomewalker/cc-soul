@@ -138,3 +138,6 @@ unsloth_compiled_cache/
 
 # Local-only cargo env override (personal embed dim)
 /.cargo/
+
+# Stray in-source CMake configure output (conda host triple)
+/x86_64-conda-linux-gnu/
