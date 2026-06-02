@@ -3,6 +3,7 @@
 #include <chitta/rpc/sandbox.hpp>
 #include <chitta/vak.hpp>
 #include <iostream>
+#include <chrono>
 
 extern std::atomic<bool> daemon_running;
 extern std::atomic<bool> verbose_mode;
@@ -158,6 +159,23 @@ void QueueProcessor::run() {
                 if (tool != "distill_trigger") {
                     _lk = handler_.acquire_lock();
                 }
+                // Lock-hold profiler: log if this queued write holds the exclusive
+                // rpc_mutex_ (blocking all recall) longer than CHITTA_LOCKPROF_MS. The
+                // guard fires at end-of-iteration, covering every `continue` path.
+                auto _lp_h0 = std::chrono::steady_clock::now();
+                struct LockProfGuard {
+                    const std::string& tool;
+                    std::chrono::steady_clock::time_point t0;
+                    bool held;
+                    ~LockProfGuard() {
+                        long thr = FieldRpcHandler::lockprof_threshold_ms();
+                        if (!held || thr <= 0) return;
+                        long ms = FieldRpcHandler::ms_since(t0);
+                        if (ms >= thr)
+                            std::cerr << "[lockprof] EXCLUSIVE queue:" << tool << " held=" << ms
+                                      << "ms (blocks all readers/recall while held)\n";
+                    }
+                } _lp_guard{tool, _lp_h0, tool != "distill_trigger"};
 
                 if (tool == "observe") {
                     std::string category = args.value("category", "wisdom");

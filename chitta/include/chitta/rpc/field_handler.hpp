@@ -26,6 +26,7 @@
 #include <sstream>
 #include <chrono>
 #include <iomanip>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -281,6 +282,21 @@ public:
         return kReads.count(name) > 0;
     }
 
+    // Lock-hold profiler (diagnostic only, no behaviour change). Logs an exclusive
+    // rpc_mutex_ hold (readers/recall blocked for that long) or a long shared-lock wait
+    // (recall blocked waiting), over CHITTA_LOCKPROF_MS (default 250). Set =0 to disable.
+    static long lockprof_threshold_ms() {
+        static const long t = [] {
+            const char* e = std::getenv("CHITTA_LOCKPROF_MS");
+            return e ? std::atol(e) : 250L;
+        }();
+        return t;
+    }
+    static long ms_since(std::chrono::steady_clock::time_point t0) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+    }
+
     json handle(const json& request) {
         std::string method = request.value("method", "");
         json params = request.value("params", json::object());
@@ -320,15 +336,32 @@ public:
             }
 
             ToolResult result;
+            const long _lp_thr = lockprof_threshold_ms();
             if (is_subprocess_tool(name)) {
                 // No rpc_mutex_ held — tool manages its own Rust RwLock synchronisation.
                 result = it->second(args);
             } else if (is_read_only_tool(name)) {
+                auto _lp_w0 = std::chrono::steady_clock::now();
                 std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
+                if (_lp_thr > 0) {
+                    long _wait = ms_since(_lp_w0);
+                    if (_wait >= _lp_thr)
+                        std::cerr << "[lockprof] SHARED " << name << " waited=" << _wait
+                                  << "ms (recall/reader blocked by a writer)\n";
+                }
                 result = it->second(args);
             } else {
+                auto _lp_w0 = std::chrono::steady_clock::now();
                 std::unique_lock<std::shared_mutex> _lk(rpc_mutex_);
+                auto _lp_h0 = std::chrono::steady_clock::now();
                 result = it->second(args);
+                if (_lp_thr > 0) {
+                    long _held = ms_since(_lp_h0);
+                    if (_held >= _lp_thr)
+                        std::cerr << "[lockprof] EXCLUSIVE " << name << " held=" << _held
+                                  << "ms wait=" << (ms_since(_lp_w0) - _held)
+                                  << "ms (blocks all readers/recall while held)\n";
+                }
             }
             return make_tool_response(id, result);
         }
