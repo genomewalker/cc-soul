@@ -19,7 +19,12 @@ if ! pgrep -f "chittad daemon" >/dev/null; then
        command -v systemctl >/dev/null 2>&1; then
         systemctl --user start chittad 2>/dev/null || true
     else
-        "${HOME}/.claude/bin/chittad" daemon &
+        # Fallback (no systemd unit): never spawn with default flags — that enables
+        # hygiene/consolidation and races as an unmanaged second writer (store corruption).
+        _yj_model="${HOME}/.claude/bin/bge-large-en-v1.5.gguf"
+        _yj_flags="--path ${HOME}/.claude/mind --no-autonomous --no-distill --no-hygiene --no-enrich"
+        [[ -f "$_yj_model" ]] && _yj_flags="$_yj_flags --embed-model $_yj_model"
+        "${HOME}/.claude/bin/chittad" daemon $_yj_flags &
         disown
     fi
     sleep 2
