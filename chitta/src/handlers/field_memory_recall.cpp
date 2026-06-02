@@ -377,7 +377,20 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     bool explain = params.value("explain", false);
     json results_json = hits_to_results_json(hits, explain);
 
+    // Abstain signal: if no candidate clears the calibrated relevance bar, say so honestly
+    // instead of presenting a weak best-of-a-bad-batch as if confident. relevance(cos) =
+    // sigma(3.27*cos - 0.85) (the same Platt calibration the Rust scorer uses); tau=0.45 <=>
+    // centered cosine 0.20 (~1.85 sigma above the random-pair spread). Room room-f366bf5a.
+    float max_rel = 0.0f;
+    for (const auto& h : hits)
+        max_rel = std::max(max_rel,
+                           1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f))));
+    bool weak = !hits.empty() && max_rel < 0.45f;
+
     std::ostringstream ss;
+    if (weak)
+        ss << "[weak: no strongly-relevant memory (max relevance "
+           << static_cast<int>(max_rel * 100) << "%); results may be tangential]\n";
     ss << "Found " << hits.size() << " results";
     if (!realm.empty()) ss << " in realm '" << realm << "'";
     ss << ":\n";
@@ -395,8 +408,10 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         ss << " " << r.value("text", "").substr(0, 400) << "\n";
     }
 
-    std::string recall_status = results_json.empty() ? "empty" : "ok";
-    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}, {"status", recall_status}});
+    std::string recall_status = results_json.empty() ? "empty" : (weak ? "weak" : "ok");
+    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm},
+                                            {"status", recall_status},
+                                            {"abstain", weak}, {"max_relevance", max_rel}});
     fire_recall_callback(results_json, 1);
     return result;
 }
