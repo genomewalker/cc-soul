@@ -300,6 +300,27 @@ public:
         return kLockFreeWrites.count(name) > 0;
     }
 
+    // Hot read path that takes NO global rpc_mutex_ — so an index-mutating write
+    // (put_memory holds the exclusive lock ~270ms for observer/event_tape/hdc work)
+    // can never block recall. Safety rests entirely on the Rust store's per-component
+    // RwLocks plus publish ordering, NOT on this C++ lock:
+    //   * insert: payload + state are written BEFORE the semantic_idx upsert, so a
+    //     semantic hit always has its payload and state (store.rs put_memory);
+    //   * delete: state.deleted is set BEFORE semantic_idx.remove and the payload is
+    //     never removed (soft delete), so recall either filters the hit by .deleted or
+    //     never sees it — no torn read (store.rs forget);
+    //   * recall waits only on the brief per-upsert semantic_idx.read(), never a writer's
+    //     whole-handler hold.
+    // Precedent: consolidation_pass (is_subprocess_tool) already runs lock-free
+    // concurrent with recall on exactly these Rust locks — this extends that model to
+    // put_memory. Other reads keep the shared lock (not yet audited for this guarantee).
+    static bool is_lockfree_read(const std::string& name) {
+        static const std::unordered_set<std::string> kLockFreeReads = {
+            "recall", "smart_recall", "hybrid_recall",
+        };
+        return kLockFreeReads.count(name) > 0;
+    }
+
     // Lock-hold profiler (diagnostic only, no behaviour change). Logs an exclusive
     // rpc_mutex_ hold (readers/recall blocked for that long) or a long shared-lock wait
     // (recall blocked waiting), over CHITTA_LOCKPROF_MS (default 250). Set =0 to disable.
@@ -356,10 +377,11 @@ public:
             ToolResult result;
             bool _was_write = false;
             const long _lp_thr = lockprof_threshold_ms();
-            if (is_subprocess_tool(name) || is_lockfree_write(name)) {
-                // No rpc_mutex_ held — the Rust side fully self-synchronizes these, and
-                // (for lock-free writes) they touch no structure the read path consumes,
-                // so a slow or stuck one can never starve recall. See is_lockfree_write().
+            if (is_subprocess_tool(name) || is_lockfree_write(name) || is_lockfree_read(name)) {
+                // No rpc_mutex_ held. The Rust side fully self-synchronizes via per-component
+                // RwLocks: lock-free writes touch no read-path structure (is_lockfree_write),
+                // and the hot recall path relies on publish ordering rather than this lock so
+                // an index-mutating write can never block it (is_lockfree_read).
                 result = it->second(args);
             } else if (is_read_only_tool(name)) {
                 auto _lp_w0 = std::chrono::steady_clock::now();
