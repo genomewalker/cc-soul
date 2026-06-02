@@ -283,6 +283,23 @@ public:
         return kReads.count(name) > 0;
     }
 
+    // Writes whose Rust side is fully self-synchronized (per-component RwLocks) and that
+    // mutate ONLY structures the read path never consumes — the CEC event tape, CDAWG,
+    // decision tape, episode HDC, refutation ledger. No cross-component atomicity with
+    // readers is required, so these must NOT take the global exclusive rpc_mutex_: a slow
+    // or stuck one (e.g. log_event blocked on the CDAWG write lock held by a consolidation
+    // pass) would otherwise hold the exclusive lock and starve EVERY reader/recall despite
+    // sharing no data with them — the deadlock-reads-on-stuck-write gap. Index-mutating
+    // writes (put_memory) still take the exclusive lock: they mutate semantic_idx +
+    // payloads + time_idx together and a reader must not observe a half-applied write
+    // (a hit whose payload is not yet inserted).
+    static bool is_lockfree_write(const std::string& name) {
+        static const std::unordered_set<std::string> kLockFreeWrites = {
+            "log_event", "log_event_ex", "log_decision",
+        };
+        return kLockFreeWrites.count(name) > 0;
+    }
+
     // Lock-hold profiler (diagnostic only, no behaviour change). Logs an exclusive
     // rpc_mutex_ hold (readers/recall blocked for that long) or a long shared-lock wait
     // (recall blocked waiting), over CHITTA_LOCKPROF_MS (default 250). Set =0 to disable.
@@ -339,8 +356,10 @@ public:
             ToolResult result;
             bool _was_write = false;
             const long _lp_thr = lockprof_threshold_ms();
-            if (is_subprocess_tool(name)) {
-                // No rpc_mutex_ held — tool manages its own Rust RwLock synchronisation.
+            if (is_subprocess_tool(name) || is_lockfree_write(name)) {
+                // No rpc_mutex_ held — the Rust side fully self-synchronizes these, and
+                // (for lock-free writes) they touch no structure the read path consumes,
+                // so a slow or stuck one can never starve recall. See is_lockfree_write().
                 result = it->second(args);
             } else if (is_read_only_tool(name)) {
                 auto _lp_w0 = std::chrono::steady_clock::now();
