@@ -264,7 +264,8 @@ public:
     static bool is_read_only_tool(const std::string& name) {
         static const std::unordered_set<std::string> kReads = {
             "health_check", "version_check", "soul_context", "hygiene_stats",
-            "recall", "search_memories", "list_memories", "list_memories_brief",
+            "recall", "smart_recall", "hybrid_recall",
+            "search_memories", "list_memories", "list_memories_brief",
             "expand_memory", "get_memory_metadata", "explain_fact", "memory_stats",
             "find_symbol", "read_symbol", "read_function", "describe_symbol",
             "code_context", "codebase_overview", "smart_context",
