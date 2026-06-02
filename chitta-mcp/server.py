@@ -532,14 +532,32 @@ def ensure_daemon() -> bool:
 
     if we_hold_lock and lock_fd is not None:
         try:
-            # We hold the lock - start daemon
-            chittad = os.path.join(os.environ.get("HOME", ""), ".claude", "bin", "chittad")
-            if os.path.exists(chittad):
-                os.system(f"{chittad} daemon >/dev/null 2>&1 &")
-                for _ in range(50):
-                    time.sleep(0.1)
-                    if client.connect():
-                        return True
+            # Start the daemon. Prefer the systemd unit so there is exactly ONE managed
+            # writer with the correct embedder + flags. A raw `chittad daemon` with DEFAULT
+            # flags spawns an UNMANAGED SECOND writer: concurrent-writer family churn that
+            # corrupts the store, plus hygiene/consolidation ON (overriding the unit's
+            # --no-hygiene), which has caused recall stalls + poison snapshot families.
+            # Never spawn with default flags.
+            home = os.environ.get("HOME", "")
+            started = False
+            unit = os.path.join(home, ".config", "systemd", "user", "chittad.service")
+            if os.path.exists(unit):
+                started = (os.system("systemctl --user start chittad >/dev/null 2>&1") == 0)
+            if not started:
+                chittad = os.path.join(home, ".claude", "bin", "chittad")
+                if os.path.exists(chittad):
+                    # Fallback (no systemd unit): match the managed config; at minimum
+                    # never enable hygiene/distill, and pin the store path + embedder.
+                    mind  = os.path.join(home, ".claude", "mind")
+                    model = os.path.join(home, ".claude", "bin", "bge-large-en-v1.5.gguf")
+                    flags = f"--path {mind} --no-autonomous --no-distill --no-hygiene --no-enrich"
+                    if os.path.exists(model):
+                        flags += f" --embed-model {model}"
+                    os.system(f"{chittad} daemon {flags} >/dev/null 2>&1 &")
+            for _ in range(50):
+                time.sleep(0.1)
+                if client.connect():
+                    return True
         finally:
             # Release lock
             os.close(lock_fd)
