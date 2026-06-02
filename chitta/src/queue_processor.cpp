@@ -527,6 +527,10 @@ void QueueProcessor::run() {
             }
         }
 
+        // Durable fdatasync of this batch's WAL appends, OFF the rpc_mutex (put_memory only
+        // flush_buf()s under the lock now). One fsync per queue batch, not per item.
+        field_store_.sync();
+
         // Remove after successful processing — crash before this leaves .processing for recovery
         std::remove(processing_path.c_str());
 

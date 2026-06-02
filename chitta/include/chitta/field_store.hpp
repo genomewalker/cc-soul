@@ -23,6 +23,7 @@ struct CfSessionHit {
 // These ensure the symbols are visible even if chitta_field.h was included earlier
 // from a different path that predates these additions.
 extern "C" {
+int cf_sync(struct CfHandle* h);  // fdatasync WAL; call OFF the rpc_mutex (see field_handler)
 int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
     const float* embedding_ptr, size_t embedding_len);
 int cf_pending_embeddings(struct CfHandle* h,
@@ -735,6 +736,12 @@ public:
     /// Flush manifest to disk.
     void flush() {
         cf_flush(handle_);
+    }
+
+    /// fdatasync the WAL to disk (durable). Call this AFTER releasing the rpc_mutex so the
+    /// per-write disk sync doesn't block recall — put_memory only flush_buf()s under the lock.
+    void sync() {
+        cf_sync(handle_);
     }
 
     /// Ingest new ops from foreign-instance segment files on shared storage.
