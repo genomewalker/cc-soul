@@ -337,6 +337,7 @@ public:
             }
 
             ToolResult result;
+            bool _was_write = false;
             const long _lp_thr = lockprof_threshold_ms();
             if (is_subprocess_tool(name)) {
                 // No rpc_mutex_ held — tool manages its own Rust RwLock synchronisation.
@@ -352,6 +353,7 @@ public:
                 }
                 result = it->second(args);
             } else {
+                _was_write = true;
                 auto _lp_w0 = std::chrono::steady_clock::now();
                 std::unique_lock<std::shared_mutex> _lk(rpc_mutex_);
                 auto _lp_h0 = std::chrono::steady_clock::now();
@@ -363,6 +365,13 @@ public:
                                   << "ms wait=" << (ms_since(_lp_w0) - _held)
                                   << "ms (blocks all readers/recall while held)\n";
                 }
+            }
+            // Durable WAL fdatasync OFF the rpc_mutex: put_memory only flush_buf()s the
+            // append under the lock now, so we fsync here after it is released — recall is
+            // never blocked by the per-write disk sync (was ~200-330ms held). See
+            // store.rs put_memory / cf_sync / FieldStore::sync.
+            if (_was_write && field_store_) {
+                field_store_->sync();
             }
             return make_tool_response(id, result);
         }
