@@ -18,6 +18,7 @@ source "$SCRIPT_DIR/lib.sh" 2>/dev/null || true
 VERBOSE="${SHEPHERD_VERBOSE:-false}"
 DRY_RUN="${SHEPHERD_DRY_RUN:-false}"
 CHITTA="${HOME}/.claude/bin/chitta"
+SOCKET_PATH="${SOCKET_PATH:-$(get_socket_path)}"
 ZELLIJ_SESSION="${ZELLIJ_SESSION:-zellij-agent}"
 
 # Parse arguments
@@ -209,7 +210,7 @@ poll_once() {
     log "Starting poll cycle..."
 
     # Check if chitta daemon is running
-    if ! "$CHITTA" health_check --text-only 2>/dev/null | grep -q "daemon"; then
+    if ! "$CHITTA" --socket-path "$SOCKET_PATH" health_check --text-only 2>/dev/null | grep -q "daemon"; then
         log "Chitta daemon not running, skipping poll"
         return 0
     fi
