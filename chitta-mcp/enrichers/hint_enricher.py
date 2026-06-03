@@ -29,7 +29,14 @@ CHITTAD_BIN = os.environ.get("CHITTAD_BIN", os.path.expanduser("~/.claude/bin/ch
 DEFAULT_MIND = os.environ.get("MIND", os.path.expanduser("~/.claude/mind"))
 # chitta-hint-tuned is gemma4:e4b with the system prompt baked in (fast, 4B MoE).
 # Falls back to gemma4:26b if chitta-hint-tuned hasn't been created yet.
-DEFAULT_MODEL = os.environ.get("CHITTA_HINT_MODEL", "chitta-hint-tuned")
+# NOTE: CHITTA_HINT_OLLAMA_MODEL is the Ollama model *name* for this enricher.
+# Do NOT reuse CHITTA_HINT_MODEL here — that var is a GGUF *path* in the realtime
+# hook / HintYantra, and overloading it mis-routes the backend.
+DEFAULT_MODEL = os.environ.get("CHITTA_HINT_OLLAMA_MODEL", "chitta-hint-tuned")
+if os.environ.get("CHITTA_HINT_MODEL") and not os.environ.get("CHITTA_HINT_OLLAMA_MODEL"):
+    sys.stderr.write(
+        "[hint_enricher] note: CHITTA_HINT_MODEL is now a GGUF path elsewhere; "
+        "set CHITTA_HINT_OLLAMA_MODEL for this enricher's Ollama model name\n")
 FALLBACK_MODEL = "gemma4:26b"
 DEFAULT_LIMIT = 100
 LLM_TIMEOUT = 30  # chitta-hint is fast (~1-2s); 30s is generous
@@ -91,6 +98,7 @@ def generate_hint(endpoint: str, model: str, content: str) -> str:
         "model": model,
         "prompt": prompt,
         "stream": False,
+        "keep_alive": "30m",
         "options": {"temperature": 0.1, "num_predict": 64},
     }).encode()
     req = urllib.request.Request(

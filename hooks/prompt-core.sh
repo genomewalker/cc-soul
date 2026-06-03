@@ -781,6 +781,12 @@ fi
 # Save full exposed memory content for implicit resonance detection (stop-hook)
 if [[ ${COUNT:-0} -gt 0 && -n "${memories:-}" && -n "${MIND_PATH:-}" && -n "${SESSION_ID:-}" ]]; then
     printf '%s\n' "$memories" > "${MIND_PATH}/.exposed_memories_${SESSION_ID}"
+    # hint_recall_hit value signal (PR1): how often hint-origin memories surface in recall.
+    # The denominator (this line fires per recall) gates whether PR2 is worth building.
+    _hint_surf=$(printf '%s\n' "$memories" | grep -cF '[hint:realtime]' 2>/dev/null || true)
+    printf '{"ts":"%s","backend":"recall","outcome":"recall","hint_surfaced":%s,"mem_count":%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${_hint_surf:-0}" "${COUNT:-0}" \
+        >> "${MIND_PATH}/hint_metrics.jsonl" 2>/dev/null || true
 fi
 if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
     _append "[soul]"$'\n'
@@ -871,14 +877,18 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
     fi
 fi
 
-# Real-time hint extraction: every 4 turns starting at turn 4
-_HINT_INTERVAL=4
+# Real-time hint extraction: every 6 turns starting at turn 6
+_HINT_INTERVAL=6
 _HINT_MODEL="${CHITTA_HINT_MODEL:-$HOME/.claude/models/chitta-hint-qwen-q4_k_m.gguf}"
 _HINT_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/../scripts/hint_realtime.py"
-if [[ $((TURN_INDEX % _HINT_INTERVAL)) -eq 0 && ${TURN_INDEX:-0} -ge 4 \
+if [[ $((TURN_INDEX % _HINT_INTERVAL)) -eq 0 && ${TURN_INDEX:-0} -ge 6 \
       && -n "${TRANSCRIPT_PATH:-}" && -f "${TRANSCRIPT_PATH:-}" \
       && -f "$_HINT_MODEL" && -f "$_HINT_SCRIPT" ]]; then
-    python3 "$_HINT_SCRIPT" \
+    # timeout -k 5 35: hard wall-clock backstop. signal.alarm(30) inside the
+    # script cannot interrupt a native llama_cpp hang (GIL held), so without this
+    # a hung fire would hold the in-flight flock forever and disable hints all
+    # session. SIGTERM at 35s, SIGKILL 5s later → kernel reaps the lock.
+    timeout -k 5 35 python3 "$_HINT_SCRIPT" \
         --transcript "$TRANSCRIPT_PATH" \
         --session "$SESSION_ID" \
         --turns 5 \
