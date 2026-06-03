@@ -5,7 +5,10 @@
 cd chitta && cmake --build build --parallel
 install -m 0755 ../bin/chittad ~/.claude/bin/chittad
 install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
+# chitta_hintd exists only when built with CHITTA_WITH_LLAMA_CPP=ON
+[ -f ../bin/chitta_hintd ] && install -m 0755 ../bin/chitta_hintd ~/.claude/bin/chitta_hintd
 systemctl --user restart chittad
+systemctl --user try-restart chitta-hintd 2>/dev/null || true
 pkill -f "chitta mcp" 2>/dev/null; sleep 1
 ```
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.

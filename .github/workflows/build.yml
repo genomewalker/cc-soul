@@ -60,16 +60,18 @@ jobs:
           for b in chitta chittad; do
             test -x bin/$b || { echo "Missing: $b"; exit 1; }
           done
+          test -x bin/chitta_hintd && echo "chitta_hintd: present" || echo "chitta_hintd: absent (non-llama build)"
 
       - name: Package binaries
         run: |
           PYLIB=$(python3.11 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')/libpython3.11.so.1.0
           [ -f "$PYLIB" ] && cp "$PYLIB" bin/ && ln -sf libpython3.11.so.1.0 bin/libpython3.11.so
-          for b in bin/chitta bin/chittad; do
-            patchelf --set-rpath '$ORIGIN' $b 2>/dev/null || true
+          for b in bin/chitta bin/chittad bin/chitta_hintd; do
+            [ -f "$b" ] && patchelf --set-rpath '$ORIGIN' $b 2>/dev/null || true
           done
           echo "Checking library dependencies..."
-          for b in bin/chitta bin/chittad; do
+          for b in bin/chitta bin/chittad bin/chitta_hintd; do
+            [ -f "$b" ] || continue
             echo "=== $b ==="
             ldd $b | grep -E "not found" || echo "All libs found"
           done
