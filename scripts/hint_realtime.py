@@ -118,7 +118,7 @@ def _append_seen(seen_file: Path, h: str) -> None:
         pass
 
 
-BACKEND = "subprocess"
+BACKEND = os.environ.get("CHITTA_HINT_BACKEND", "subprocess")
 
 PREFILTER_KEYWORDS = re.compile(
     r"\b(prefer|rather|instead|use|switch to|go with|let'?s|decided|chose|chosen|"
@@ -198,6 +198,69 @@ def _would_prefilter_skip(text: str) -> bool:
     pure_q = t.endswith("?") and "." not in t and "\n" not in t
     no_kw = PREFILTER_KEYWORDS.search(t) is None
     return short and pure_q and no_kw
+def _hintd_extract(sock_path: str, text: str, timeout_s: float):
+    """Single-shot request to chitta_hintd. Returns the hint ("" if none), or
+    None when the daemon is unreachable/failed (the caller treats None as a SKIP
+    for the whole fire — it never falls back to the cold load). Any client-side
+    exception maps to None so the SKIP is deterministic."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout_s)
+        s.connect(sock_path)
+        s.sendall(text.encode("utf-8", "replace"))
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            b = s.recv(4096)
+            if not b:
+                break
+            chunks.append(b)
+        s.close()
+        hint = b"".join(chunks).decode("utf-8", "replace").strip()
+    except Exception:
+        return None
+    if not hint or hint in ("-", "--") or len(hint) < 6:
+        return ""
+    return hint[:200]
+def _run_hintd(args, mind_path: Path, emit) -> None:
+    """Resident-daemon backend (CHITTA_HINT_BACKEND=hintd): talk to chitta_hintd
+    instead of cold-loading llama_cpp. Fail-to-SKIP — an unreachable daemon stores
+    nothing and never reintroduces the 850 MB per-fire load we set out to remove."""
+    try:
+        turns = _last_user_turns(Path(args.transcript), args.turns)
+        if not turns:
+            emit("no_turns")
+            return
+        sock_path = os.environ.get("CHITTA_HINT_SOCK", str(mind_path / ".hintd.sock"))
+        deadline_ms = int(os.environ.get("CHITTA_HINT_DEADLINE_MS", "8000"))
+        # Floor the wait independently of the deadline: deadline_ms<=0 means the
+        # server runs unbounded, so a 2 s client timeout would wrongly call a healthy
+        # daemon "unreachable" on its first slow turn and drop the whole fire.
+        eff_ms = deadline_ms if deadline_ms > 0 else 30000
+        timeout_s = eff_ms / 1000.0 + 2.0
+        seen_file = mind_path / f".hint_seen_{args.session}"
+        seen = _load_seen(seen_file)
+        stored = 0
+        for text in turns:
+            hint = _hintd_extract(sock_path, text, timeout_s)
+            if hint is None:
+                emit("hintd_unreachable", hints_extracted=stored)
+                return
+            if not hint:
+                continue
+            h = _hint_hash(hint)
+            if h in seen:
+                continue
+            _remember(hint, args.session, Path(args.chitta_bin))
+            _append_seen(seen_file, h)
+            seen.add(h)
+            stored += 1
+            sys.stderr.write(f"[hint_realtime/hintd] stored: {hint[:80]}\n")
+        emit("stored" if stored else "empty", hints_extracted=stored)
+    except Exception as e:  # never raise out of the backgrounded fire; leave a metric row
+        sys.stderr.write(f"[hint_realtime/hintd] error: {e}\n")
+        emit("error")
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--transcript", required=True)
@@ -212,7 +275,7 @@ def main() -> None:
     t0 = time.monotonic()
     fp: dict = {}
     _term = {"done": False}
-    TERMINAL = {"no_turns", "inflight_skip", "lock_open_error",
+    TERMINAL = {"no_turns", "inflight_skip", "lock_open_error", "hintd_unreachable",
                 "llama_unavailable", "timeout", "error", "stored", "empty"}
 
     def _emit(outcome, hints_extracted=0, model_load_ms=None,
@@ -241,6 +304,12 @@ def main() -> None:
     transcript = Path(args.transcript)
     if not transcript.exists():
         _emit("no_turns")
+        sys.exit(0)
+
+    # Resident-daemon backend (DEFAULT-OFF). Selected by CHITTA_HINT_BACKEND=hintd;
+    # talks to chitta_hintd over a socket and skips the cold-load path entirely.
+    if BACKEND == "hintd":
+        _run_hintd(args, mind_path, _emit)
         sys.exit(0)
 
     # In-flight lock: collapse overlapping background fires into one cold load.

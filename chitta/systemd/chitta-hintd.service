@@ -1,0 +1,43 @@
+# chitta_hintd — resident hint-extraction daemon (cc-soul).
+#
+# DEFAULT-OFF feature. Nothing connects to this socket unless a session exports
+# CHITTA_HINT_BACKEND=hintd; scripts/hint_realtime.py keeps cold-loading llama_cpp
+# until you flip that env. Leaving this unit enabled is harmless — it just keeps
+# the hint GGUF resident so the realtime-hint path skips the ~850 MB per-fire load.
+#
+# Install (user service):
+#   install -m0755 bin/chitta_hintd ~/.claude/bin/chitta_hintd   # CMake outputs to cc-soul/bin/
+#   cp chitta/systemd/chitta-hintd.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chitta-hintd
+# Activate the backend for a session: export CHITTA_HINT_BACKEND=hintd
+# Disable:  systemctl --user disable --now chitta-hintd
+
+[Unit]
+Description=chitta_hintd — cc-soul resident hint-extraction daemon
+After=default.target
+# Cap restart rate so neither a missing model (exits non-zero) nor a persistent
+# OOM-kill can hot-loop reloading the ~850 MB model: give up after 5 fails / 5 min.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment="CHITTA_HINT_MODEL=%h/.claude/models/chitta-hint-qwen-q4_k_m.gguf"
+Environment="CHITTA_HINT_DEADLINE_MS=8000"
+ExecStart=%h/.claude/bin/chitta_hintd --socket %h/.claude/mind/.hintd.sock --deadline-ms 8000
+Restart=on-failure
+RestartSec=10
+# An OOM-kill stops the unit (vs. restarting into another OOM); StartLimit* above
+# still backstops other failure modes.
+OOMPolicy=stop
+# Hint model (~850 MB Q4_K_M) + llama runtime + tiny KV cache; cap with headroom.
+MemoryMax=3G
+KillMode=mixed
+TimeoutStartSec=120
+TimeoutStopSec=15
+StandardOutput=append:/tmp/chitta-hintd.log
+StandardError=append:/tmp/chitta-hintd.log
+
+[Install]
+WantedBy=default.target
