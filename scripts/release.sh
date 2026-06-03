@@ -225,6 +225,8 @@ if [[ "$LOCAL_BUILD" == "true" ]]; then
     # Install
     echo "Installing binaries..."
     cp "$REPO_DIR/bin/chitta" "$REPO_DIR/bin/chittad" ~/.claude/bin/
+    # chitta_hintd only exists when built with CHITTA_WITH_LLAMA_CPP=ON.
+    [ -f "$REPO_DIR/bin/chitta_hintd" ] && cp "$REPO_DIR/bin/chitta_hintd" ~/.claude/bin/
 
     # Verify
     INSTALLED=$("$HOME/.claude/bin/chitta" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')

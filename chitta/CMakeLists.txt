@@ -416,6 +416,15 @@ endif()
 list(APPEND CHITTA_RUNTIME_LIBS "${Python3_LIBRARY_DIRS}")
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 
+# Resident hint-extraction daemon (chitta_hintd) — wraps one HintYantra over a
+# Unix socket so the realtime-hint backend loads the hint GGUF once instead of
+# cold-loading ~850 MB on every fire. Only meaningful with llama.cpp compiled in.
+if(CHITTA_WITH_LLAMA_CPP)
+    add_executable(chitta_hintd src/hint_daemon.cpp)
+    target_link_libraries(chitta_hintd PRIVATE chitta llama ggml pthread)
+    install(TARGETS chitta_hintd DESTINATION bin)
+endif()
+
 # CLI tool for memory operations (thin client + MCP server)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
 if(CHITTA_BUILD_RPC)

@@ -4,6 +4,9 @@
 // Always available alongside chittad. Used by `chitta hint_extract`.
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -50,9 +53,17 @@ public:
     bool ready() const { return ready_; }
 
     // Extract a factual hint from a user message. Returns "" if nothing personal found.
-    std::string extract(const std::string& user_text) {
+    std::string extract(const std::string& user_text, int deadline_ms = 0) {
         if (!ready_) return "";
         std::lock_guard<std::mutex> lock(mtx_);
+
+        // Per-request wall-clock deadline (chitta_hintd). 0 = no deadline; the
+        // abort callback installed in load() enforces it during decode.
+        aborted_.store(false, std::memory_order_relaxed);
+        deadline_ns_.store(deadline_ms > 0
+            ? (std::chrono::steady_clock::now() +
+               std::chrono::milliseconds(deadline_ms)).time_since_epoch().count()
+            : 0, std::memory_order_relaxed);
 
         std::string prompt = build_prompt(user_text);
         const llama_vocab* vocab = llama_model_get_vocab(model_);
@@ -113,8 +124,12 @@ public:
         size_t e = result.find_last_not_of(" \t\n\r");
         result = result.substr(s, e - s + 1);
 
-        // Reject placeholder outputs
-        if (result.empty() || result == "-" || result.size() < 5) return "";
+        // A deadline-aborted decode must skip, not emit a truncated half-hint.
+        if (aborted_.load(std::memory_order_relaxed)) return "";
+
+        // Reject placeholder outputs. The <6 floor matches the Python client's
+        // _hintd_extract floor so neither end silently drops the other's hint.
+        if (result.empty() || result == "-" || result.size() < 6) return "";
 
         return result;
     }
@@ -125,6 +140,21 @@ private:
     llama_model*   model_  = nullptr;
     llama_context* ctx_    = nullptr;
     std::mutex     mtx_;
+    // Deadline as a lock-free steady_clock epoch count (0 = none). Atomic so the
+    // abort callback never races the writer even if a future llama.cpp polls it
+    // from a decode worker thread. aborted_ records that the deadline fired so
+    // extract() can return "" instead of a truncated half-hint.
+    std::atomic<long long> deadline_ns_{0};
+    std::atomic<bool>      aborted_{false};
+
+    static bool abort_cb_(void* data) {
+        auto* self = static_cast<HintYantra*>(data);
+        long long dl = self->deadline_ns_.load(std::memory_order_relaxed);
+        if (dl == 0) return false;
+        long long now = std::chrono::steady_clock::now().time_since_epoch().count();
+        if (now >= dl) { self->aborted_.store(true, std::memory_order_relaxed); return true; }
+        return false;
+    }
 
     static std::string discover(const std::string& mind_path) {
         namespace fs = std::filesystem;
@@ -163,6 +193,7 @@ private:
         // n_batch/n_ubatch: leave at defaults (2048/512); oversizing them to n_ctx
         // causes incorrect graph allocation for short prompts on Qwen3.
         ctx_ = llama_init_from_model(model_, cparams);
+        if (ctx_) llama_set_abort_callback(ctx_, &HintYantra::abort_cb_, this);
         return ctx_ != nullptr;
     }
 
