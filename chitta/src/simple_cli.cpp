@@ -1197,8 +1197,17 @@ int main(int argc, char* argv[]) {
         if (env_model && *env_model && fs::exists(env_model)) {
             gguf = env_model;
         } else if (const char* home = std::getenv("HOME")) {
-            fs::path p = fs::path(home) / ".claude" / "models" / model_file;
-            if (fs::exists(p)) gguf = p.string();
+            fs::path pm = fs::path(home) / ".claude" / "models" / model_file;
+            if (fs::exists(pm)) gguf = pm.string();
+            // Also probe ~/.claude/bin/ — the systemd unit keeps the GGUF beside the
+            // binaries there, so a daemon started WITHOUT --embed-model still finds the
+            // correct in-process model instead of silently falling back to the Ollama
+            // backend (a DIFFERENT vector space → wrong-dim vectors, corrupt recall, and
+            // concurrent-writer family churn). cf_embed_model_id() pins the right filename.
+            if (gguf.empty()) {
+                fs::path pb = fs::path(home) / ".claude" / "bin" / model_file;
+                if (fs::exists(pb)) gguf = pb.string();
+            }
         }
         if (gguf.empty()) {
             fs::path p = fs::path(mind_path) / ".." / ".." / "models" / model_file;
