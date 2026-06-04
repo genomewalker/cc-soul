@@ -1077,8 +1077,18 @@ if [[ -x "$CHITTA_BIN" ]]; then
     # CEC consolidation_pass: run Sequitur + promote rules + rebuild HypothesisMarket.
     # nohup detaches from hook timeout; log to tmp for debugging.
     _cec_log="${CHITTA_DB_PATH:-$HOME/.claude/mind}/.cec_consolidation.log"
-    nohup "$CHITTA_BIN" consolidation_pass >"$_cec_log" 2>&1 &
-    echo "[cec] consolidation_pass launched (pid $!, log: $_cec_log)" >&2
+    # Guard: a single consolidation_pass can take many minutes on a large/slow store, holding
+    # the daemon lock and starving recall. Firing one per Stop event with no guard piled up
+    # dozens of concurrent passes (observed: 20+, recall blocked for minutes). Skip when a
+    # disable marker/env is set, or when a pass is already running.
+    if [[ -f "${MIND_PATH:-$HOME/.claude/mind}/.disable_consolidation" || -n "${CHITTA_DISABLE_CONSOLIDATION:-}" ]]; then
+        echo "[cec] consolidation_pass disabled (marker/env) — skipping" >&2
+    elif pgrep -f "bin/chitta consolidation_pass" >/dev/null 2>&1; then
+        echo "[cec] consolidation_pass already running — skipping" >&2
+    else
+        nohup "$CHITTA_BIN" consolidation_pass >"$_cec_log" 2>&1 &
+        echo "[cec] consolidation_pass launched (pid $!, log: $_cec_log)" >&2
+    fi
 fi
 
 # Record stop timestamp for both session-specific and legacy global paths.
