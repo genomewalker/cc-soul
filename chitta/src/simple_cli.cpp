@@ -117,6 +117,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
 
     FieldRpcHandler handler(&field_store, yantra);
     if (embed_queue) handler.set_embed_queue(embed_queue);
+    handler.set_mind_path(mind_path);
     handler.set_distill_model(distill_config.model);
     handler.set_distill_enabled(distill_config.enabled);
 

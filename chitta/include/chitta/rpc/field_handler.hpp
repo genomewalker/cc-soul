@@ -77,6 +77,10 @@ public:
 
     void set_embed_queue(EmbedQueue* eq) { embed_queue_ = eq; }
 
+    // Base mind dir (parent of chitta-field). Used by tool_consolidation_pass to
+    // honor the .disable_consolidation marker at the same path the hooks check.
+    void set_mind_path(const std::string& p) { mind_path_ = p; }
+
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
     void set_queue_stats(std::atomic<size_t>* count, std::atomic<size_t>* fails,
@@ -430,6 +434,7 @@ private:
     RecallCallback recall_callback_;
     WriteNotifyCallback write_notify_fn_;
     EmbedQueue* embed_queue_ = nullptr;
+    std::string mind_path_;                  // base mind dir (parent of chitta-field)
 
     mutable std::shared_mutex rpc_mutex_;    // Reads share, writes exclusive; see is_read_only_tool()
     mutable std::mutex distill_mutex_;
