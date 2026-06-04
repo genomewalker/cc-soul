@@ -261,6 +261,16 @@ public:
         static const std::unordered_set<std::string> kSubprocess = {
             "predicate_run",
             "consolidation_pass",   // long-running Sequitur+FEP rebuild; manages own Rust RwLocks
+            // Long-running code index: NFS file-hashing (up to max_files) + tree-sitter parse +
+            // thousands of upsert_symbol/upsert_code_file/add_triplet calls — each self-synchronized
+            // by the Rust store's per-component RwLocks (symbol_idx, triplets, WAL log). Under the
+            // exclusive rpc_mutex_ it held the lock ~14s, starving EVERY shared reader (find_symbol,
+            // msg_inbox, queue_status). Bypassing rpc_mutex_ lets those reads proceed; find_symbol
+            // synchronizes against the writes via symbol_idx's own RwLock (no torn single-record
+            // read), and a code index tolerates mid-reindex partial visibility — strictly better
+            // than blocking every reader for the whole pass. Symbol embedding is already async
+            // (embed_text enqueues via EmbedQueue and returns empty), so no llama.cpp under any lock.
+            "learn_codebase",
         };
         return kSubprocess.count(name) > 0;
     }
