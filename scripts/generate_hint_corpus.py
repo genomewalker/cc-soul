@@ -488,25 +488,30 @@ NEGATIVE_TEMPLATES = [
 # Two-stage labeling
 # ---------------------------------------------------------------------------
 
-STAGE1_PROMPT = """You are a fact classifier. Given a user statement from a chat session, determine:
-1. Does it contain a stable personal fact about the speaker (name, location, occupation, education, health, habits, relationships, possessions, skills)?
-2. If yes, what category (name/location/occupation/education/health/diet/hobby/sport/family/language/possession/achievement/habit)?
+STAGE1_PROMPT = """You are a hint classifier. Given a user statement from a chat session, determine:
+1. Does it contain a useful retrievable fact about the speaker? This includes ANY of:
+   - Personal: name, location, occupation, education, health, habits, relationships, possessions
+   - Technical: preferred languages, editors, tools, frameworks, config choices, CLI habits
+   - Developer workflows: testing habits, commit practices, deployment preferences, build tooling
+   - Domain expertise: research area, specialization, known techniques, recurring projects
+   - Project facts: ongoing work, deadlines, collaborators, system names
+2. If yes, what category (name/location/occupation/education/health/diet/hobby/sport/family/language/possession/achievement/habit/tech-preference/dev-workflow/config/domain-expertise/project-fact)?
 3. What is the core fact in 5 words or less?
 
 Output JSON only: {{"is_fact": true/false, "category": "...", "core": "..."}}
-If no personal fact, output: {{"is_fact": false}}
+If no extractable fact, output: {{"is_fact": false}}
 
 Statement: "{text}"
 JSON:"""
 
-STAGE2_PROMPT = """Convert this personal fact to a 3rd-person retrieval hint (8-15 words, starting with "User", no first-person pronouns):
+STAGE2_PROMPT = """Convert this fact to a 3rd-person retrieval hint (8-15 words, starting with "User", no first-person pronouns):
 Category: {category}
 Core fact: {core}
 Original: "{text}"
 
 Output only the hint sentence (8-15 words):"""
 
-STAGE2_REPROMPT = """You must output a single sentence (8-15 words) starting with "User" that captures this personal fact.
+STAGE2_REPROMPT = """You must output a single sentence (8-15 words) starting with "User" that captures this fact.
 Do not use I/my/me. Output ONLY the sentence.
 Fact: {core}
 Original statement: "{text}"
@@ -527,9 +532,11 @@ def is_valid_hint(h: str) -> bool:
         return False
     return True
 COMBINED_PROMPT = (
-    'Given this user statement, determine if it contains a stable personal fact '
-    '(identity, location, occupation, education, health, habits, relationships, '
-    'possessions, skills). If yes, write a 3rd-person retrieval hint (8-15 words, '
+    'Given this user statement, determine if it contains a retrievable fact. '
+    'This includes personal facts (identity, location, occupation, health, habits) '
+    'AND technical facts (language/editor/tool preferences, developer workflows, '
+    'config choices, domain expertise, project facts). '
+    'If yes, write a 3rd-person retrieval hint (8-15 words, '
     'starting with "User", no first-person pronouns like I/my/me).\n\n'
     'Output JSON only:\n'
     '- With fact: {{"is_fact": true, "hint": "User ..."}}\n'
