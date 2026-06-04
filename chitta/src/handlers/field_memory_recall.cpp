@@ -2,6 +2,9 @@
 // chitta/include/chitta/rpc/handlers/field_memory_recall.hpp.
 #include <ctime>
 #include <iomanip>
+#include <atomic>
+#include <cstdlib>
+#include <filesystem>
 #include "chitta/speech_act.hpp"
 #include "chitta/ssl_gloss.hpp"
 
@@ -1039,6 +1042,37 @@ ToolResult FieldRpcHandler::tool_consolidation_pass(const json& params) {
         }
         return ToolResult::ok(ss.str(), {{"rules", arr}});
     }
+
+    // Binary-level self-guard (launcher-independent). consolidation_pass is an
+    // is_subprocess_tool: it runs in the daemon WITHOUT rpc_mutex_ while holding
+    // the Rust CDAWG write lock for the whole Sequitur+FEP rebuild (tens of
+    // minutes on a large store). Nothing serialized concurrent callers, so a
+    // Stop/PreCompact hook firing this RPC on every session boundary could pile
+    // up N simultaneous passes — each contending the CDAWG lock, blocking
+    // log_event and resource-starving recall. The launchers live in hook copies
+    // scattered across plugin versions; guarding each is unenforceable. This is
+    // the single choke point every caller funnels through, so the guard is here.
+    bool disabled = std::getenv("CHITTA_DISABLE_CONSOLIDATION") != nullptr;
+    if (!disabled && !mind_path_.empty()) {
+        std::error_code ec;
+        disabled = std::filesystem::exists(
+            std::filesystem::path(mind_path_) / ".disable_consolidation", ec);
+    }
+    if (disabled) {
+        return ToolResult::ok("Consolidation disabled (marker/env) — skipped.",
+                              {{"skipped", "disabled"}});
+    }
+    static std::atomic<bool> consolidation_in_flight{false};
+    bool expected = false;
+    if (!consolidation_in_flight.compare_exchange_strong(expected, true)) {
+        return ToolResult::ok("Consolidation already running — skipped (single-instance guard).",
+                              {{"skipped", "already_running"}});
+    }
+    struct InFlightGuard {
+        std::atomic<bool>& flag;
+        ~InFlightGuard() { flag.store(false, std::memory_order_release); }
+    } inflight_guard{consolidation_in_flight};
+
     std::string raw = field_store_->consolidation_pass_json();
     auto parsed = json::parse(raw, nullptr, false);
     size_t found    = parsed.is_object() ? parsed.value("rules_found",    0) : 0;
