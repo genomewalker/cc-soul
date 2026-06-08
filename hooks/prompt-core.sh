@@ -288,10 +288,23 @@ while IFS= read -r line; do
 
     # Code symbol filtering is now done server-side via --partnership-only flag
 
+    # Lifetime limit: skip memories already injected this session (they ride in history).
+    # First injection is kept; re-injection on every subsequent turn is suppressed.
+    # Uses a content hash (first 80 chars) since memory IDs aren't always present.
+    _INJECTED_FILE="${MIND_PATH}/.injected_hashes_${SESSION_ID}"
+    _line_hash=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
+    if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -f "$_INJECTED_FILE" ]]; then
+        grep -qF "$_line_hash" "$_INJECTED_FILE" 2>/dev/null && continue
+    fi
+
     # Truncate and add
     OUTPUT="$OUTPUT${line:0:150}
 "
     ((++COUNT))
+    # Record injected hash so this memory is suppressed on future turns
+    if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -n "${MIND_PATH:-}" ]]; then
+        printf '%s\n' "$_line_hash" >> "$_INJECTED_FILE" 2>/dev/null || true
+    fi
     [[ $COUNT -ge 3 ]] && break
 done <<< "$memories"
 
@@ -789,6 +802,12 @@ if [[ ${COUNT:-0} -gt 0 && -n "${memories:-}" && -n "${MIND_PATH:-}" && -n "${SE
         >> "${MIND_PATH}/hint_metrics.jsonl" 2>/dev/null || true
 fi
 if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
+    # #5: sqz intra-turn dedup — collapse repeated memory text seen earlier this session.
+    # Only applies within this single turn's recall batch; cross-turn suppression is #1.
+    _SQZ_BIN="${HOME}/.claude/bin/sqz"
+    if [[ -x "$_SQZ_BIN" ]]; then
+        OUTPUT=$(printf '%s' "$OUTPUT" | "$_SQZ_BIN" compress --cmd soul 2>/dev/null || printf '%s' "$OUTPUT")
+    fi
     _append "[soul]"$'\n'
     _append "$OUTPUT"
 fi
@@ -849,10 +868,12 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         if [[ $turns_since_store -ge $((STORE_INTERVAL * 2)) && -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"DISCIPLINE"* ]]; then
             SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }[DISCIPLINE] ${turns_since_store} turns without storing — call remember/learn/milestone NOW"
         fi
-        # Promote matched [correction] memories to systemMessage so model cannot ignore them
+        # Promote matched [correction] memories to systemMessage so model cannot ignore them.
+        # Guard: only short correction tags (<400 chars total) — never escalate bulk memory
+        # volume to systemMessage as that busts the prefix cache at 1.25× write cost.
         if [[ -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
             _corr_sys=$(printf '%s' "$_corr_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
-            [[ -n "$_corr_sys" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
+            [[ -n "$_corr_sys" && ${#_corr_sys} -lt 400 ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
         fi
 
         JSON_OUT=$(jq -n \
