@@ -759,12 +759,12 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
 fi
 
 # ===========================================
-# OUTPUT — Priority-ordered, budget-capped (~800 chars ≈ ~200 tokens)
+# OUTPUT — Priority-ordered, budget-capped (~500 chars ≈ ~125 tokens)
 # ===========================================
 # Token diet: accumulate into FINAL_OUTPUT, enforce hard cap.
 # Priority order (highest first): learning hints > cross-session msgs >
 # memories > narrative > goals > curiosity > habits > anticipations
-MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-800}"
+MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-500}"
 FINAL_OUTPUT=""
 
 _append() {
