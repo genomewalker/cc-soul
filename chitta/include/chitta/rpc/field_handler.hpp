@@ -1,6 +1,7 @@
 #pragma once
 // FieldRpcHandler: RPC handler backed by FieldStore + VakYantra.
 
+#include "protocol.hpp"
 #include "../ssl_gloss.hpp"
 #include "../field_store.hpp"
 #include "../vak.hpp"
@@ -111,6 +112,13 @@ public:
 
     // Serialize direct field_store access outside handle() (maintenance thread, queue processor).
     // Returns an exclusive lock — write-side use only.
+    //
+    // LOCK-DIRECTION INVARIANT (load-bearing): rpc_mutex_ is always OUTERMOST
+    // relative to chitta-field's internal Rust locks — C++ acquires it, then
+    // calls into Rust, and every cf_* call releases all Rust locks before
+    // returning. The FFI has no Rust→C++ callbacks; adding one would let the
+    // two lock domains interleave and deadlock across the language boundary.
+    // See the matching note at the top of field_store.hpp.
     std::unique_lock<std::shared_mutex> acquire_lock() { return std::unique_lock<std::shared_mutex>(rpc_mutex_); }
 
     // Shared lock for maintenance ops whose mutations are protected by their
@@ -354,7 +362,7 @@ public:
             json args = params.value("arguments", json::object());
             auto it = handlers_.find(name);
             if (it == handlers_.end()) {
-                return make_error(id, -32601, "Unknown tool: " + name);
+                return rpc::make_error(id, -32601, "Unknown tool: " + name);
             }
 
             // Write tools: skip synchronous embedding here — the backfill thread
@@ -420,7 +428,7 @@ public:
             }
             return make_tool_response(id, result);
         }
-        return make_error(id, -32601, "Unknown method: " + method);
+        return rpc::make_error(id, -32601, "Unknown method: " + method);
     }
 
 private:
@@ -850,9 +858,8 @@ private:
         return {{"jsonrpc", "2.0"}, {"id", id}, {"result", result}};
     }
 
-    json make_error(const json& id, int code, const std::string& msg) {
-        return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", msg}}}};
-    }
+    // JSON-RPC error envelopes come from the single definition in
+    // protocol.hpp (chitta::rpc::make_error) — do not re-implement here.
 
     json make_tool_response(const json& id, const ToolResult& result) {
         json content = json::array();

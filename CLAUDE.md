@@ -9,7 +9,7 @@ install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
 [ -f ../bin/chitta_hintd ] && install -m 0755 ../bin/chitta_hintd ~/.claude/bin/chitta_hintd
 systemctl --user restart chittad
 systemctl --user try-restart chitta-hintd 2>/dev/null || true
-pkill -f "chitta mcp" 2>/dev/null; sleep 1
+pkill -f "chitta m[c]p" 2>/dev/null; sleep 1   # [c] so pkill -f can't match this command's own shell
 ```
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.
 
