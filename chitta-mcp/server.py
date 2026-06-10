@@ -16,8 +16,10 @@ import os
 import json
 import socket
 import asyncio
+import itertools
 import logging
 import re
+import threading
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
@@ -413,6 +415,11 @@ class ChittaClient:
     def __init__(self, socket_path: str):
         self.socket_path = socket_path
         self.sock: Optional[socket.socket] = None
+        # One socket shared by the 4-worker executor: the lock keeps two
+        # threads from interleaving sendall/recv and reading each other's
+        # responses; monotonic ids let us detect a desynced connection.
+        self.lock = threading.Lock()
+        self._ids = itertools.count(1)
 
     def connect(self) -> bool:
         """Connect to daemon socket."""
@@ -425,23 +432,42 @@ class ChittaClient:
             self.sock = None
             return False
 
-    def request(self, data: str) -> Optional[str]:
-        """Send JSON-RPC request and get response."""
-        if not self.sock:
-            return None
-        try:
-            self.sock.sendall((data + "\n").encode())
-            response = b""
-            while True:
-                chunk = self.sock.recv(4096)
-                if not chunk:
-                    break
-                response += chunk
-                if b"\n" in response:
-                    break
-            return response.decode().strip()
-        except Exception:
-            return None
+    def call(self, req: dict) -> Optional[str]:
+        """Send one JSON-RPC request and return the matching response line.
+
+        Assigns a fresh monotonic id, serializes socket access, and verifies
+        the response id. A mismatched id means a stale response from a prior
+        timed-out request is still in the pipe — the connection is desynced,
+        so it is dropped and the caller's reconnect-once logic takes over.
+        """
+        with self.lock:
+            if not self.sock:
+                return None
+            req_id = next(self._ids)
+            req["id"] = req_id
+            try:
+                self.sock.sendall((json.dumps(req) + "\n").encode())
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = self.sock.recv(4096)
+                    if not chunk:
+                        return None
+                    buf += chunk
+                line, _, _ = buf.partition(b"\n")
+                response = line.decode().strip()
+                try:
+                    resp_id = json.loads(response).get("id")
+                    # id None is legal (e.g. parse-error responses); anything
+                    # else must echo our id.
+                    if resp_id is not None and resp_id != req_id:
+                        self.sock.close()
+                        self.sock = None
+                        return None
+                except (ValueError, AttributeError):
+                    pass
+                return response
+            except Exception:
+                return None
 
     def close(self):
         if self.sock:
@@ -609,19 +635,18 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
 
     req = {
         "jsonrpc": "2.0",
-        "id": 1,
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments}
     }
 
-    response = client.request(json.dumps(req))
+    response = client.call(req)
 
     # If no response, connection might be stale - try reconnecting once
     if not response:
         client.close()
         client = None
         if ensure_daemon():
-            response = client.request(json.dumps(req))
+            response = client.call(req)
 
     if not response:
         return "Error: No response from daemon"

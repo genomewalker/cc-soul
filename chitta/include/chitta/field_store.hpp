@@ -19,6 +19,15 @@ struct CfSessionHit {
     float max_chunk_score;
 };
 
+// ── FFI lock-direction invariant (load-bearing — do not break) ───────────────
+// The FFI is strictly unidirectional: C++ calls INTO Rust; Rust NEVER calls
+// back into C++. Cross-language deadlock is impossible only because of this:
+// C++-side locks (rpc_mutex_ in field_handler.hpp, queue/trace mutexes in
+// thread_pool.hpp) are always OUTERMOST, and Rust's internal parking_lot locks
+// are always INNERMOST and released before any cf_* call returns. Adding a
+// Rust→C++ callback (or holding a Rust lock across a call that re-enters C++)
+// would create a cross-language lock cycle that no tooling here can detect.
+
 // Explicit forward declarations for functions added in a later chitta-field version.
 // These ensure the symbols are visible even if chitta_field.h was included earlier
 // from a different path that predates these additions.
