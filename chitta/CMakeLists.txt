@@ -450,6 +450,14 @@ target_link_libraries(chitta_migrate PRIVATE chitta)
 target_include_directories(chitta_migrate PRIVATE "${CHITTA_FIELD_INCLUDE}")
 install(TARGETS chitta_migrate DESTINATION bin)
 
+# Unit tests (assert-style, no framework) — run with: ctest --test-dir build
+if(CHITTA_BUILD_TESTS)
+    enable_testing()
+    add_executable(thread_pool_test src/thread_pool_test.cpp)
+    target_link_libraries(thread_pool_test PRIVATE chitta)
+    add_test(NAME thread_pool_test COMMAND thread_pool_test)
+endif()
+
 # RPATH configuration for runtime library discovery
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
 set(CHITTA_RUNTIME_LIBS "")
