@@ -16,6 +16,11 @@ pkill -f "chitta m[c]p" 2>/dev/null; sleep 1   # [c] so pkill -f can't match thi
 ## Release
 `./scripts/release.sh patch|minor|major -y`
 
+⚠️ **Rollback floor: chitta-field v2.1.0.** Snapshots are written in the V23
+sectioned format since v2.1.0 — older daemons can't read the magic. Rollback
+below v2.1.0 only works while a pre-V23 snapshot family still exists on disk
+(`prune_old_snapshots` keeps 2 families, so ~2 save cycles after upgrade).
+
 ## Key files
 | | Path |
 |---|---|
