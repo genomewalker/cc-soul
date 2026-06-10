@@ -13,6 +13,7 @@
 #include <thread>
 #include <queue>
 #include <mutex>
+#include <optional>
 #include <condition_variable>
 #include <functional>
 #include <atomic>
@@ -35,15 +36,16 @@ struct RequestTrace {
     std::chrono::steady_clock::time_point start;
 };
 
-// Lock ordering: watchdog_mutex_ must always be acquired before trace_mutex_
-// to prevent deadlocks. All code paths follow this order:
+// Lock ordering: watchdog_mutex_ and queue_mutex_ must always be acquired
+// before trace_mutex_ to prevent deadlocks. All code paths follow this order:
 //   watchdog_loop(): locks watchdog_mutex_ first, then trace_mutex_
-//   submit()/get_active()/active_count(): only locks trace_mutex_
-// Never acquire watchdog_mutex_ while holding trace_mutex_.
+//   submit(): locks queue_mutex_ first, then trace_mutex_ (nested)
+//   get_active()/active_count(): only locks trace_mutex_
+// Never acquire watchdog_mutex_ or queue_mutex_ while holding trace_mutex_.
 class ThreadPool {
 public:
-    explicit ThreadPool(size_t min_threads = 2, size_t max_threads = 16)
-        : stop_(false), min_workers_(min_threads), max_workers_(max_threads) {
+    explicit ThreadPool(size_t min_threads = 2, size_t max_threads = 16, size_t max_queue_depth = 256)
+        : stop_(false), min_workers_(min_threads), max_workers_(max_threads), max_queue_depth_(max_queue_depth) {
         for (size_t i = 0; i < min_threads; ++i) {
             spawn_worker();
         }
@@ -70,21 +72,25 @@ public:
     ThreadPool(ThreadPool&&) = delete;
     ThreadPool& operator=(ThreadPool&&) = delete;
 
-    // Submit work, returns request ID for tracking
-    uint64_t submit(int client_fd, const std::string& method,
+    // Submit work, returns request ID for tracking, or nullopt when the queue
+    // is at max_queue_depth_. On rejection neither task nor on_complete is
+    // invoked — the caller is responsible for answering the client.
+    std::optional<uint64_t> submit(int client_fd, const std::string& method,
                     std::function<std::string()> task,
                     std::function<void(int, std::string)> on_complete) {
         uint64_t id = next_id_.fetch_add(1, std::memory_order_relaxed);
-
-        {
-            std::lock_guard<std::mutex> lock(trace_mutex_);
-            active_[id] = {id, method, std::chrono::steady_clock::now()};
-        }
 
         size_t queue_size;
         size_t worker_count;
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
+            if (tasks_.size() >= max_queue_depth_) {
+                return std::nullopt;
+            }
+            {
+                std::lock_guard<std::mutex> tlock(trace_mutex_);
+                active_[id] = {id, method, std::chrono::steady_clock::now()};
+            }
             tasks_.push({id, client_fd, std::move(task), std::move(on_complete)});
             queue_size = tasks_.size();
             worker_count = num_workers_.load();
@@ -254,6 +260,7 @@ private:
     std::atomic<size_t> num_workers_{0};
     size_t min_workers_;
     size_t max_workers_;
+    size_t max_queue_depth_;
 
     mutable std::mutex trace_mutex_;
     std::unordered_map<uint64_t, RequestTrace> active_;

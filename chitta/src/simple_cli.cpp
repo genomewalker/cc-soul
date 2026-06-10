@@ -16,6 +16,7 @@
 #include <chitta/mind/subconscious.hpp>
 #include <chitta/sadhana/sadhana_manager.hpp>
 #include <chitta/rpc/thread_pool.hpp>
+#include <chitta/rpc/protocol.hpp>
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/native_distiller.hpp>
@@ -624,8 +625,15 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                               queue_count, queue_distill_count, queue_fail_count);
     queue_proc.start();
 
-    // Thread pool for async RPC handling (scales 8-16 workers based on load)
-    ThreadPool pool(8, 16);
+    // Thread pool for async RPC handling (scales 8-16 workers based on load).
+    // The queue cap sheds load with a JSON-RPC error instead of queuing
+    // unboundedly (lock-convoy defence); tune via CHITTA_MAX_QUEUE_DEPTH.
+    size_t max_queue_depth = 256;
+    if (const char* qd = std::getenv("CHITTA_MAX_QUEUE_DEPTH")) {
+        size_t v = std::strtoul(qd, nullptr, 10);
+        if (v > 0) max_queue_depth = v;
+    }
+    ThreadPool pool(8, 16, max_queue_depth);
 
     // Dedup set for learn_codebase: key = path + "::" + project.
     // Prevents pool saturation when hooks fire multiple index requests for the same path.
@@ -778,7 +786,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                         server.respond(req.client_fd, resp.dump(-1, ' ', false, json::error_handler_t::replace));
                         continue;
                     }
-                    pool.submit(req.client_fd, tool_name,
+                    auto submitted = pool.submit(req.client_fd, tool_name,
                         [&handler, data = req.data]() {
                             auto request = json::parse(data);
                             auto response = handler.handle(request);
@@ -790,12 +798,22 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                             inflight_learn_codebase.erase(lk);
                         }
                     );
+                    if (!submitted) {
+                        {
+                            std::lock_guard<std::mutex> lk2(inflight_lc_mutex);
+                            inflight_learn_codebase.erase(lc_key);
+                        }
+                        server.respond(req.client_fd,
+                            rpc::make_error(req_json.value("id", json()),
+                                            rpc::error::INTERNAL_ERROR,
+                                            "server overloaded").dump());
+                    }
                     continue;
                 }
             }
 
             // All other requests go to thread pool (health_check included — main thread must not block on rpc_mutex_)
-            pool.submit(req.client_fd, tool_name,
+            auto submitted = pool.submit(req.client_fd, tool_name,
                 [&handler, &pool, data = req.data, tname = tool_name]() {
                     auto request = json::parse(data);
                     auto response = handler.handle(request);
@@ -810,6 +828,12 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                     server.queue_response(fd, std::move(response));
                 }
             );
+            if (!submitted) {
+                server.respond(req.client_fd,
+                    rpc::make_error(parsed.value("id", json()),
+                                    rpc::error::INTERNAL_ERROR,
+                                    "server overloaded").dump());
+            }
         }
 
         // 3. Write queued responses from thread pool (non-blocking)
