@@ -7,6 +7,8 @@
 #include <cstring>
 #include <chrono>
 #include <cstdint>
+#include <atomic>
+#include <iostream>
 #include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -368,7 +370,7 @@ public:
             confidence, decay_rate, authored_at_ms,
             &id
         );
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return id;
     }
 
@@ -418,7 +420,7 @@ public:
     /// Return JSON with staged memory count and oldest staged age.
     std::string write_gate_stats_json() const {
         char* s = cf_write_gate_stats(handle_);
-        if (!s) return "{}";
+        if (!s) { cf_soft(-1, __func__); return "{}"; }
         std::string r(s);
         cf_free_string(s);
         return r;
@@ -430,7 +432,7 @@ public:
 
     std::string query_symbol_events(const std::string& params_json) const {
         char* s = cf_query_symbol_events(handle_, params_json.c_str());
-        if (!s) return "[]";
+        if (!s) { cf_soft(-1, __func__); return "[]"; }
         std::string r(s);
         cf_free_string(s);
         return r;
@@ -442,7 +444,7 @@ public:
 
     std::string query_cross_harness_conflicts(const std::string& realm, uint32_t limit, float min_score) const {
         char* s = cf_query_cross_harness_conflicts(handle_, realm.c_str(), limit, min_score);
-        if (!s) return "[]";
+        if (!s) { cf_soft(-1, __func__); return "[]"; }
         std::string r(s); cf_free_string(s); return r;
     }
 
@@ -454,7 +456,7 @@ public:
 
     std::string memory_claim_info_json(uint64_t memory_id, int64_t now_ms) const {
         char* s = cf_memory_claim_info(handle_, memory_id, now_ms);
-        if (!s) return "{}";
+        if (!s) { cf_soft(-1, __func__); return "{}"; }
         std::string r(s); cf_free_string(s); return r;
     }
 
@@ -500,7 +502,7 @@ public:
     void backfill_embedding(uint64_t id, const std::vector<float>& embedding) {
         int r = cf_backfill_embedding(handle_, id,
             embedding.data(), embedding.size());
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
     }
 
     /// Return IDs of memories waiting for an embedding (embed_pending=true).
@@ -594,7 +596,7 @@ public:
             realm_ptr, k,
             buf, MAX_HITS, &written
         );
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -619,7 +621,7 @@ public:
             query_valence, query_arousal,
             buf, MAX_HITS, &written
         );
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -637,7 +639,7 @@ public:
         const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
         int r = cf_recall_temporal(handle_, start_ms, end_ms, realm_ptr, limit,
                                    buf, MAX_HITS, &written);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -652,7 +654,7 @@ public:
         size_t written = 0;
         int r = cf_recall_temporal_events(handle_, start_ms, end_ms, limit,
                                           buf, MAX_HITS, &written);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -667,7 +669,7 @@ public:
 
         int r = cf_recall_artifact(handle_, path.c_str(), limit,
                                    buf, MAX_HITS, &written);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -685,7 +687,7 @@ public:
             seed_ids.data(), seed_ids.size(),
             max_hops, limit,
             buf, MAX_HITS, &written);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -792,7 +794,7 @@ public:
         int r = cf_recall_keyword(handle_, query.c_str(), k,
                                   realm.empty() ? nullptr : realm.c_str(),
                                   buf, MAX_HITS, &written);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return hits_to_results(buf, written);
     }
 
@@ -805,7 +807,7 @@ public:
         int r = cf_recall_hdc(handle_, query.c_str(),
                               realm.empty() ? nullptr : realm.c_str(),
                               k, buf, MAX_HITS, &written);
-        if (r != 0) return {};
+        if (!cf_soft(r, __func__)) return {};
         return hits_to_results(buf, written);
     }
 
@@ -823,14 +825,14 @@ public:
         size_t written = 0;
         int r = cf_recall_last_action(handle_, tool.c_str(), entity.c_str(),
                                       k, buf, MAX_HITS, &written);
-        if (r != 0) return {};
+        if (!cf_soft(r, __func__)) return {};
         return hits_to_results(buf, written);
     }
 
     /// Return top-k failure patterns as JSON string — best-effort, caller frees with cf_free_string.
     std::string recall_failure_pattern_json(size_t k) {
         char* raw = cf_recall_failure_pattern(handle_, k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -842,7 +844,7 @@ public:
                                               const std::string& entity,
                                               size_t k) {
         char* raw = cf_recall_causal_antecedent(handle_, tool.c_str(), entity.c_str(), k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -854,7 +856,7 @@ public:
                                     size_t k) {
         char* raw = cf_recall_hdcbind(handle_, known_role.c_str(), known_val.c_str(),
                                       query_role.c_str(), k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -864,7 +866,7 @@ public:
                                            const std::string& entity,
                                            uint8_t outcome, size_t k) {
         char* raw = cf_recall_counterfactual(handle_, tool.c_str(), entity.c_str(), outcome, k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -872,7 +874,7 @@ public:
 
     std::string consolidation_preview_json(size_t k = 5) {
         char* raw = cf_consolidation_preview(handle_, k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -880,7 +882,7 @@ public:
 
     std::string consolidation_pass_json() {
         char* raw = cf_consolidation_pass(handle_);
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -896,7 +898,7 @@ public:
 
     std::string recall_motif_value_json(const std::string& tool, const std::string& entity, size_t k = 5) {
         char* raw = cf_recall_motif_value(handle_, tool.c_str(), entity.c_str(), k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -904,7 +906,7 @@ public:
 
     std::string executor_flush_json() {
         char* raw = cf_executor_flush(handle_);
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -912,7 +914,7 @@ public:
 
     std::string list_policies_json(bool active_only = false) {
         char* raw = cf_list_policies(handle_, active_only);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -936,7 +938,7 @@ public:
                                                 const std::string& entity,
                                                 uint8_t outcome = 0, size_t k = 5) {
         char* raw = cf_recall_true_counterfactual(handle_, tool.c_str(), entity.c_str(), outcome, k);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -944,7 +946,7 @@ public:
 
     std::string hypothesis_probes_json(size_t k = 10) {
         char* raw = cf_hypothesis_probes(handle_, k);
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -1167,7 +1169,7 @@ public:
     /// Query triplets for subject valid at world_ms, excluding superseded. Returns JSON string.
     std::string query_subject_as_of(const std::string& subject, int64_t world_ms) {
         char* s = cf_triplet_query_as_of(handle_, subject.c_str(), world_ms);
-        if (!s) return "[]";
+        if (!s) { cf_soft(-1, __func__); return "[]"; }
         std::string result(s);
         cf_free_string(s);
         return result;
@@ -1183,7 +1185,7 @@ public:
                                size_t max_hops, size_t max_results, const std::string& direction) {
         char* s = cf_graph_traverse(handle_, start.c_str(), edge_types_json.c_str(),
                                     max_hops, max_results, direction.c_str());
-        if (!s) return "[]";
+        if (!s) { cf_soft(-1, __func__); return "[]"; }
         std::string result(s);
         cf_free_string(s);
         return result;
@@ -1194,7 +1196,7 @@ public:
                                float damping, uint8_t iterations, size_t top_k) {
         char* s = cf_graph_pagerank(handle_, seeds_json.c_str(), edge_types_json.c_str(),
                                     damping, iterations, top_k);
-        if (!s) return "[]";
+        if (!s) { cf_soft(-1, __func__); return "[]"; }
         std::string result(s);
         cf_free_string(s);
         return result;
@@ -1227,7 +1229,7 @@ public:
             line_start, line_end, repo_id,
             embedding.data(), embedding.size(),
             desc_ptr, memory_id, &id);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         // Auto-log symbol event for code-intel tracking
         {
             nlohmann::json ev;
@@ -1317,7 +1319,7 @@ public:
     uint64_t upsert_code_file(const std::string& path, const std::string& project, int64_t mtime) {
         uint64_t id = 0;
         int r = cf_upsert_code_file(handle_, path.c_str(), project.c_str(), mtime, &id);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return id;
     }
 
@@ -1327,7 +1329,7 @@ public:
     /// Returns raw JSON string (caller must free with cf_free_string) or "" on error.
     std::string detect_contradictions(uint64_t memory_id, const std::string& realm) {
         char* raw = cf_detect_contradictions(handle_, memory_id, realm.c_str());
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -1336,7 +1338,7 @@ public:
     /// Background scan of entire realm for contradictions.
     std::string scan_contradictions(const std::string& realm, uint32_t limit = 100) {
         char* raw = cf_scan_contradictions(handle_, realm.c_str(), limit);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -1346,7 +1348,7 @@ public:
     std::string resolve_contradiction(uint64_t winner_id, uint64_t loser_id,
                                       const std::string& reason = "manual") {
         char* raw = cf_resolve_contradiction(handle_, winner_id, loser_id, reason.c_str());
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -1367,7 +1369,7 @@ public:
         int r = cf_upsert_code_file_v2(handle_, path.c_str(), project.c_str(), mtime,
             hash_ptr, commit_ptr, author_ptr, git_timestamp_ms,
             &changed, &id);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return {id, changed != 0};
     }
 
@@ -1513,7 +1515,7 @@ public:
             reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size(),
             realm.empty() ? nullptr : realm.c_str(),
             fencing_token, &event_id);
-        if (r != 0) throw std::runtime_error(last_error());
+        cf_checked(r, __func__);
         return event_id;
     }
 
@@ -1712,7 +1714,7 @@ public:
         size_t written = 0;
         const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
         int r = cf_memory_stats(handle_, realm_ptr, buf.data(), buf.size(), &written);
-        if (r != 0) return "{}";
+        if (!cf_soft(r, __func__)) return "{}";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1721,7 +1723,7 @@ public:
         std::vector<uint8_t> buf(65536);
         size_t written = 0;
         int r = cf_spectral_stats_by_realm(handle_, buf.data(), buf.size(), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1735,7 +1737,7 @@ public:
         std::vector<uint8_t> buf(4096);
         size_t written = 0;
         int r = cf_save_spectral_snapshot(handle_, buf.data(), buf.size(), &written);
-        if (r != 0) return "";
+        if (!cf_soft(r, __func__)) return "";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1744,7 +1746,7 @@ public:
         std::vector<uint8_t> buf(65536);
         size_t written = 0;
         int r = cf_spectral_drift(handle_, buf.data(), buf.size(), &written);
-        if (r != 0) return "{}";
+        if (!cf_soft(r, __func__)) return "{}";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1770,7 +1772,7 @@ public:
         size_t written = 0;
         int r = cf_session_list(handle_, active_only ? 1 : 0,
                                 buf.data(), buf.size(), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1779,7 +1781,7 @@ public:
         std::vector<uint8_t> buf(65536);
         size_t written = 0;
         int r = cf_transcript_list(handle_, limit, buf.data(), buf.size(), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1808,7 +1810,7 @@ public:
         size_t written = 0;
         int r = cf_list_triplets_for_entity(handle_, entity.c_str(), limit,
                                             buf.data(), buf.size(), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(buf.data(), written);
     }
 
@@ -1843,7 +1845,7 @@ public:
         std::vector<uint8_t> buf(32768);
         size_t written = 0;
         int r = cf_realm_list(handle_, buf.data(), buf.size(), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
@@ -1894,7 +1896,7 @@ public:
         size_t written = 0;
         int r = cf_get_assoc_edges(handle_, memory_id, limit,
                                     buf, sizeof(buf), &written);
-        if (r != 0) return "[]";
+        if (!cf_soft(r, __func__)) return "[]";
         return std::string(buf, written);
     }
 
@@ -1905,7 +1907,7 @@ public:
         size_t written = 0;
         int r = cf_get_memory_embeddings_batch(handle_,
             ids.data(), ids.size(), buf, sizeof(buf), &written);
-        if (r != 0) return "{}";
+        if (!cf_soft(r, __func__)) return "{}";
         return std::string(buf, written);
     }
 
@@ -1930,7 +1932,7 @@ public:
     /// List all skills as JSON array.
     std::string skill_list() {
         char* json = cf_skill_list(handle_);
-        if (!json) return "[]";
+        if (!json) { cf_soft(-1, __func__); return "[]"; }
         std::string result(json);
         cf_free_string(json);
         return result;
@@ -1939,7 +1941,7 @@ public:
     /// Search skills by query. Returns JSON array.
     std::string skill_search(const std::string& query, size_t limit = 20) {
         char* json = cf_skill_search(handle_, query.c_str(), limit);
-        if (!json) return "[]";
+        if (!json) { cf_soft(-1, __func__); return "[]"; }
         std::string result(json);
         cf_free_string(json);
         return result;
@@ -1981,7 +1983,7 @@ public:
     /// List all agents as JSON array.
     std::string agent_list() {
         char* json = cf_agent_list(handle_);
-        if (!json) return "[]";
+        if (!json) { cf_soft(-1, __func__); return "[]"; }
         std::string result(json);
         cf_free_string(json);
         return result;
@@ -2012,7 +2014,7 @@ public:
 
     std::string repl_session_list() {
         char* json = cf_repl_session_list(handle_);
-        if (!json) return "[]";
+        if (!json) { cf_soft(-1, __func__); return "[]"; }
         std::string result(json);
         cf_free_string(json);
         return result;
@@ -2038,13 +2040,13 @@ public:
     uint64_t ledger_append(const std::string& json_in) {
         uint64_t event_id = 0;
         int rc = cf_ledger_append(handle_, json_in.c_str(), &event_id);
-        if (rc != 0) throw std::runtime_error("cf_ledger_append failed");
+        cf_checked(rc, "cf_ledger_append");
         return event_id;
     }
 
     std::string ledger_query_json(const std::string& json_in = "{}") {
         char* raw = cf_ledger_query(handle_, json_in.c_str());
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -2058,7 +2060,7 @@ public:
 
     std::string ledger_contradictions_json() {
         char* raw = cf_ledger_contradictions(handle_);
-        if (!raw) return "[]";
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -2070,7 +2072,7 @@ public:
 
     std::string predicate_run_json(uint64_t memory_id) {
         char* raw = cf_predicate_run(handle_, memory_id);
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -2078,7 +2080,7 @@ public:
 
     std::string predicate_list_json(uint64_t memory_id) {
         char* raw = cf_predicate_list(handle_, memory_id);
-        if (!raw) return "{}";
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;
@@ -2091,6 +2093,23 @@ private:
         if (!handle_) return "handle is null";
         const char* e = cf_last_error(handle_);
         return e ? e : "unknown error";
+    }
+
+    // ── FFI error policy (single envelope; see ffi.rs json_null/err) ─────
+    // rc != 0 (or a NULL JSON pointer) means cf_last_error() carries context.
+    //   cf_checked — must-succeed calls: throw with call-site context.
+    //   cf_soft    — read paths where empty-result degradation is acceptable:
+    //                log (budgeted per process) and return false. Never silent.
+    void cf_checked(int rc, const char* what) const {
+        if (rc != 0)
+            throw std::runtime_error(std::string(what) + ": " + last_error());
+    }
+    bool cf_soft(int rc, const char* what) const {
+        if (rc == 0) return true;
+        static std::atomic<int> budget{500};
+        if (budget.fetch_sub(1, std::memory_order_relaxed) > 0)
+            std::cerr << "[field_store] " << what << " failed: " << last_error() << "\n";
+        return false;
     }
 
     /// Enrich CfRecallHit with content/kind/realm strings.
