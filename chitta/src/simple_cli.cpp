@@ -1105,8 +1105,10 @@ int main(int argc, char* argv[]) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
             subconscious_config.enable_hygiene = false;
-            // Sleep consolidation (Sequitur+FEP) is a background mutation in the same
-            // category; it holds a write lock during the rebuild and starves recall.
+            // Also disables sleep consolidation (encode + snapshot + demotion +
+            // CW sweep). The recall starvation that once made this the default
+            // posture is fixed (dirty-skipped saves, lock-ordered store,
+            // per-memory encode); the flag remains as an explicit opt-out.
             subconscious_config.enable_sleep_consolidation = false;
         } else if (strcmp(argv[i], "--embed-interval") == 0 && i + 1 < argc) {
             subconscious_config.enable_background_embedding = true;

@@ -666,6 +666,12 @@ bool Subconscious::time_for_theme_maintenance() const {
 void Subconscious::run_sleep_consolidation() {
     stats_.last_sleep_consolidation_at = now_ms();
     try {
+        // Consolidation-as-merge (THEORY.md §6): refresh stale competitive
+        // weights in the background so recalls (budget 16) rarely pay it.
+        size_t refreshed = field_store_->cw_refresh_sweep(256);
+        if (refreshed > 0) {
+            std::cerr << "[subconscious] CW refresh sweep: " << refreshed << " memories\n";
+        }
         size_t encoded = field_store_->encode_all();
         bool snapped      = field_store_->save_snapshot();
         bool full_snapped = field_store_->save_full_snapshot();
