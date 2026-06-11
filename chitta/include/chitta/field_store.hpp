@@ -33,6 +33,7 @@ struct CfSessionHit {
 // from a different path that predates these additions.
 extern "C" {
 int cf_sync(struct CfHandle* h);  // fdatasync WAL; call OFF the rpc_mutex (see field_handler)
+int64_t cf_cw_refresh_sweep(struct CfHandle* h, size_t budget);
 int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
     const float* embedding_ptr, size_t embedding_len);
 int cf_pending_embeddings(struct CfHandle* h,
@@ -716,6 +717,12 @@ public:
                 return std::string(reinterpret_cast<char*>(big.data()), written);
         }
         return "";
+    }
+
+    /// Budgeted background competitive-weight refresh (consolidation sweep).
+    size_t cw_refresh_sweep(size_t budget) {
+        int64_t n = cf_cw_refresh_sweep(handle_, budget);
+        return n > 0 ? static_cast<size_t>(n) : 0;
     }
 
     /// Number of live memories.
