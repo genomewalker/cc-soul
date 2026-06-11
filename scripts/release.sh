@@ -109,6 +109,13 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
+# FFI declaration drift gate: the hand-rolled extern block in field_store.hpp
+# must match ffi.rs by name AND arity (C linkage makes arity drift silent UB).
+if ! python3 "$REPO_DIR/tools/ffi_decl_check.py"; then
+    echo "Error: FFI declaration drift — fix field_store.hpp vs chitta-field/src/ffi.rs."
+    exit 1
+fi
+
 # Ensure all hook scripts are executable (git on some filesystems strips the bit)
 chmod +x hooks/*.sh 2>/dev/null || true
 
