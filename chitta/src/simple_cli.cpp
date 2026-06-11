@@ -281,7 +281,17 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
             if (seg_event || (now_time - last_foreign_sync >= foreign_sync_interval)) {
                 last_foreign_sync = now_time;
                 try {
-                    auto _lk = handler.acquire_shared_lock();
+                    // EXCLUSIVE rpc lock, not shared: sync_foreign acquires
+                    // ~40 Rust write guards in canonical order, which makes it
+                    // a deadlock partner for ANY tool path holding one lock
+                    // while acquiring an earlier-ordered one (production
+                    // deadlock 2026-06-11: recall CW-refresh Phase A held
+                    // semantic_idx.read wanting states.read while sync held
+                    // states.write wanting semantic_idx readers drained).
+                    // Mutual exclusion with tools removes the multi-holder
+                    // from every such cycle. Batches are small (~ms) outside
+                    // restart storms.
+                    auto _lk = handler.acquire_lock();
                     int applied = field_store.sync_foreign();
                     if (verbose_mode && applied > 0) {
                         std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
