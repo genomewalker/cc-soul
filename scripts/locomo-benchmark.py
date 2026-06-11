@@ -1124,7 +1124,7 @@ def recall_for_question(question: str, sample_id: str, category: int = 0) -> str
     hybrid_result = chitta_rpc("hybrid_recall", query=search_query, tag=sample_id, k=25)
 
     if hybrid_result and 'structured' in hybrid_result:
-        for mem in hybrid_result['structured'].get('memories', [])[:20]:
+        for mem in ((hybrid_result.get('structured') or {}).get('memories') or [])[:20]:
             content = mem.get('content', '')
             if content:
                 results.append(content[:400])
