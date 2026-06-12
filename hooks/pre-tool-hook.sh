@@ -132,7 +132,10 @@ safety_check() {
 # 4. expand         → allow if CC_SOUL_DEEP_SEARCH=1
 find_strategy() {
     local cmd="$1"
-    echo "$cmd" | grep -qE '\bfind\b' || return 1
+    # Only when find is invoked as a command (start of line or after ; | && &).
+    # A bare \bfind\b substring match hijacked python heredocs containing
+    # .find( / "find" — the entire command got replaced by the fallback.
+    echo "$cmd" | grep -qE '(^|[;&|][[:space:]]*)find[[:space:]]' || return 1
     echo "$cmd" | grep -qE '\-maxdepth\s+[0-3]\b' && return 1
     [[ "${CC_SOUL_DEEP_SEARCH:-0}" == "1" ]] && return 1
     # Inline env var: CC_SOUL_DEEP_SEARCH=1 find ... — not exported to hook env.
@@ -186,7 +189,9 @@ find_strategy() {
 
     local new_cmd ctx new_cmd_json term_label
     new_cmd=$(_rewrite_find_root "$cmd" ".")
-    echo "$new_cmd" | grep -qE '\-maxdepth' || new_cmd="find . -maxdepth 3"
+    # Rewriter is anchored to commands starting with find; if it didn't match,
+    # pass through unchanged — NEVER substitute a synthetic find for the command.
+    [[ "$new_cmd" == "$cmd" ]] && return 1
     term_label="${term:-(pattern)}"
     ctx=$(jq -Rn --arg t "$term_label" '"[search-strategy] No memory hit for \($t). Scoped to cwd -maxdepth 3. CC_SOUL_DEEP_SEARCH=1 to expand."')
     new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
