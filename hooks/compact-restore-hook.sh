@@ -77,11 +77,28 @@ LEDGER_JSON=$(timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_load --project "$REALM" -
 CONTEXT_PARTS=()
 
 if [[ -n "$LEDGER_JSON" && "$LEDGER_JSON" != "{}" ]]; then
+    # ── Resume directive (imperative, high-salience) ───────────────────────
+    # Fires FIRST so it isn't buried under state blocks.
+    SNAPSHOT=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty')
+    _resume_goal=$(echo "$SNAPSHOT" | grep -m1 '^Goal:' | sed 's/^Goal:[[:space:]]*//' | head -c 200)
+    [[ -z "$_resume_goal" ]] && _resume_goal=$(echo "$SNAPSHOT" | head -1 | head -c 200)
+    _resume_next=$(echo "$LEDGER_JSON" | jq -r '.next_steps // [] | .[0] // empty' 2>/dev/null | head -c 150)
+    _resume_done=$(echo "$LEDGER_JSON" | jq -r '.discoveries // [] | .[0] // empty' 2>/dev/null | head -c 100)
+
+    if [[ -n "$_resume_goal" || -n "$_resume_next" ]]; then
+        _directive="[resume-directive] Session resumed after compaction."
+        _directive="${_directive} Start your FIRST reply with one sentence: \""
+        [[ -n "$_resume_goal" ]] && _directive="${_directive}We were working on: ${_resume_goal}."
+        [[ -n "$_resume_done" ]] && _directive="${_directive} Done: ${_resume_done}."
+        [[ -n "$_resume_next" ]] && _directive="${_directive} Next: ${_resume_next}."
+        _directive="${_directive}\" Then continue from that next step immediately."
+        _directive="${_directive} If the user's message clearly starts a new topic, skip the recap. [/resume-directive]"
+        CONTEXT_PARTS+=("$_directive")
+    fi
+
     # ── Structured state restoration ──────────────────────────────────────
     RESTORE_TEXT="[session-state]"
 
-    # Snapshot = goal + data + commands + progress (structured by pre-compact)
-    SNAPSHOT=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty')
     if [[ -n "$SNAPSHOT" && ${#SNAPSHOT} -gt 20 ]]; then
         RESTORE_TEXT="${RESTORE_TEXT}\n${SNAPSHOT:0:1500}"
     fi

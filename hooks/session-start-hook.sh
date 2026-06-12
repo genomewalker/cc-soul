@@ -209,6 +209,23 @@ IS_POST_COMPACT=false
 [[ "$HOOK_SOURCE" == "compact" ]] && IS_POST_COMPACT=true
 [[ "$MOOD" == "pre-compact" ]] && IS_POST_COMPACT=true
 
+# /clear: new session_id but same project — inject a bounded resume card
+# so the chain of work isn't lost. Only fires when ledger is fresh (<4h).
+IS_POST_CLEAR=false
+if [[ "$HOOK_SOURCE" == "clear" ]]; then
+    _ledger_ts=$(echo "$LEDGER_JSON" | jq -r '.updated_at // empty' 2>/dev/null)
+    _now_s=$(date +%s)
+    _age_s=99999
+    if [[ -n "$_ledger_ts" ]]; then
+        _ledger_s=$(date -d "$_ledger_ts" +%s 2>/dev/null || echo 0)
+        _age_s=$(( _now_s - _ledger_s ))
+    fi
+    # Treat as resumable if mood is in_progress/pre-compact and age < 4h
+    if [[ "$MOOD" == "in_progress" || "$MOOD" == "pre-compact" ]] && [[ "$_age_s" -lt 14400 ]]; then
+        IS_POST_CLEAR=true
+    fi
+fi
+
 if [[ "$IS_POST_COMPACT" == "true" ]]; then
     # This is a continuation after compaction - inject full state
     echo ""
@@ -274,6 +291,21 @@ if [[ "$IS_POST_COMPACT" == "true" ]]; then
 
     echo "[/session-restored]"
     echo ""
+elif [[ "$IS_POST_CLEAR" == "true" ]]; then
+    # /clear with a recent in-progress ledger — inject bounded resume hint
+    _clear_goal=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty' | grep -m1 '^Goal:' | sed 's/^Goal:[[:space:]]*//' | head -c 200)
+    [[ -z "$_clear_goal" ]] && _clear_goal=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty' | head -1 | head -c 200)
+    _clear_next=$(echo "$LEDGER_JSON" | jq -r '.next_steps // [] | .[0] // empty' 2>/dev/null | head -c 150)
+    _clear_files=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | .[:5] | join(", ")' 2>/dev/null)
+    _clear_updated=$(echo "$LEDGER_JSON" | jq -r '.updated_at // empty' 2>/dev/null)
+
+    _card="[last-session]"
+    [[ -n "$_clear_goal" ]] && _card="${_card}\nPrevious task: ${_clear_goal}"
+    [[ -n "$_clear_next" ]] && _card="${_card}\nNext step: ${_clear_next}"
+    [[ -n "$_clear_files" ]] && _card="${_card}\nActive files: ${_clear_files}"
+    [[ -n "$_clear_updated" ]] && _card="${_card}\nSaved: ${_clear_updated}"
+    _card="${_card}\nRun /recap for full context. [/last-session]"
+    echo -e "$_card"
 else
     # Normal session start - just show minimal info
     # ── Task ledger: inbox + active tasks ─────────────────────────────────
