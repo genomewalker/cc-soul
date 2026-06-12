@@ -38,7 +38,7 @@ _strict_mode_enabled() {
 # Phase 2 (auto):    once shadow log has ≥100 entries AND is ≥3 days old, the
 #                    hook flips to enforce mode automatically. No env var needed.
 #                    Explicit CC_SOUL_HOOK_ENFORCE=0 disables; =1 forces on early.
-# Escape hatch:      CC_SOUL_ALLOW_EDIT=1 or CC_SOUL_ALLOW_READ=1 bypass per env.
+# Escape hatch:      CC_SOUL_ALLOW_READ=1 bypasses per env.
 #                    Also honoured if ~/.claude/mind/.allow_read_<session_id> exists
 #                    (use when env var can't persist across hook invocations).
 _should_enforce() {
@@ -201,10 +201,10 @@ case "$MATCHER" in
 
         # Advisory: nudge away from temp patch scripts toward file_patch.
         if echo "$command" | grep -qE '(python3?|bash)\s+(/tmp/|/maps/[^[:space:]]*/scratch/)[^[:space:]]+\.(py|sh)'; then
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str) — no script needed."}}\n'
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Use the Edit tool directly — no script needed."}}\n'
         elif echo "$command" | grep -qE "python3?\s+-c\s+['\"]" && \
              echo "$command" | grep -qE "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\()"; then
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Inline Python file-write detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str)."}}\n'
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Inline Python file-write detected. Use the Edit tool directly."}}\n'
         fi
 
         # Stage 1a: Safety blocks
@@ -305,23 +305,13 @@ case "$MATCHER" in
         file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
         [[ -z "$file_path" || ! -f "$file_path" ]] && exit 0
 
-        # Check patch manifest — advisory if file was patched this session
-        FP_BIN="${HOME}/.claude/bin/fp"
-        if [[ -x "$FP_BIN" ]]; then
-            manifest_out=$(echo "$STDIN_DATA" | "$FP_BIN" --read-hook 2>/dev/null)
-            if [[ -n "$manifest_out" ]]; then
-                echo "$manifest_out"
-                exit 0
-            fi
-        fi
-
         # Code intelligence advisory: if chitta has this file's directory indexed, suggest smart_context/read_symbol
         advisory=""
         if [[ -x "$CHITTA_BIN" ]] && daemon_available; then
             dir_path=$(dirname "$file_path")
             dir_syms=$(timeout 1 "$CHITTA_BIN" code_context --path "$dir_path" --json 2>/dev/null | jq -r '.dir_symbols // 0' 2>/dev/null || echo 0)
             if [[ "$dir_syms" -gt 0 ]]; then
-                advisory="[code-intel] File is indexed in chitta ($dir_syms symbols in dir). Prefer: smart_context(task) → read_symbol(file,symbol) → symbol_patch/file_patch. Saves 60-90% tokens vs Read+Edit."
+                advisory="[code-intel] File is indexed in chitta ($dir_syms symbols in dir). For large files prefer smart_context(task) → read_symbol(file,symbol) over full Read. Whole-symbol rewrites: symbol_patch(file,symbol,body)."
             fi
         fi
 
@@ -347,7 +337,7 @@ case "$MATCHER" in
         esac
         if _strict_mode_enabled && [[ "$is_indexed" == "1" && "$_allow_read" != "1" && "$_is_system_path" == "0" ]]; then
             _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "strict-indexed-read" 0
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Indexed file. Prefer mcp__chitta-bridge__read_symbol/smart_context over Read. To edit: file_patch(file,old_str,new_str) — no Read required."}}\n'
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Indexed file. Prefer mcp__chitta-bridge__read_symbol/smart_context over full Read for large files."}}\n'
         fi
 
         # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
@@ -412,49 +402,18 @@ case "$MATCHER" in
         ;;
 
     Edit)
-        # Code intelligence advisory / enforcement
-        file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
-        old_str_len=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' | wc -c)
-        is_indexed=0
-        dir_syms=0
-        if [[ -n "$file_path" && -x "$CHITTA_BIN" ]] && daemon_available; then
-            dir_path=$(dirname "$file_path")
-            dir_syms=$(timeout 1 "$CHITTA_BIN" code_context --path "$dir_path" --json 2>/dev/null | jq -r '.dir_symbols // 0' 2>/dev/null || echo 0)
-            [[ "$dir_syms" -gt 0 ]] && is_indexed=1
-        fi
-
-        # Advisory only for large edits on indexed files — hard deny removed.
-        # Python patch scripts (the real anti-pattern) are blocked in Write+Bash hooks instead.
-        if [[ "$is_indexed" == "1" && "$old_str_len" -gt 500 ]]; then
-            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "advisory" "indexed-large-old_str" 0
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Large Edit on indexed file (%d chars). Prefer mcp__chitta-bridge__symbol_patch or file_patch — no Read required, fewer tokens."}}\n' "$old_str_len"
-        fi
-
-        if [[ "$is_indexed" == "1" ]]; then
-            _shadow_log "Edit" "$file_path" 0 "$is_indexed" "advise" "indexed" 0
-            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] File is indexed. Prefer symbol_patch(file,symbol,body) or file_patch(file,old_str,new_str) — no Read needed, fewer tokens."}}\n'
-        fi
-
-        # ─── Edit → symbol_patch redirect ─────────────────────────────────────────────
+        # Built-in Edit is the supported path (file_patch mandate removed — measured
+        # cost-neutral on tokens, net-negative on errors; see hook-stats).
+        # One cheap hint: whole-symbol rewrites are ~50% cheaper as symbol_patch
+        # (body only, no old_str).
         FILE_PATH=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
         OLD_STR=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' 2>/dev/null)
-        NEW_STR=$(echo "$STDIN_DATA" | jq -r '.tool_input.new_string // empty' 2>/dev/null)
-
-        if [[ -x "$CHITTA_BIN" && -n "$FILE_PATH" && -n "$OLD_STR" && -n "$NEW_STR" ]]; then
+        if [[ -n "$FILE_PATH" && -n "$OLD_STR" ]]; then
             SYMBOL=$(echo "$OLD_STR" | grep -m1 -oE '(def |fn |class |pub fn |pub struct )[a-zA-Z_][a-zA-Z0-9_]*' | awk '{print $NF}' 2>/dev/null || true)
             if [[ -n "$SYMBOL" ]]; then
-                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[fp] symbol_patch available for $SYMBOL in $FILE_PATH — prefer mcp__chitta-bridge__symbol_patch over Edit for this change\"}}"
-                exit 0
+                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[fp] symbol_patch available for $SYMBOL in $FILE_PATH — body-only rewrite, cheaper than Edit for whole-symbol changes\"}}"
             fi
         fi
-        # ──────────────────────────────────────────────────────────────────────────────
-
-        FP_BIN="${HOME}/.claude/bin/fp"
-        [[ ! -x "$FP_BIN" ]] && exit 0
-        # fp --hook reads the full tool JSON, applies patch, exits 2 with confirmation.
-        # exit 2 → Claude skips its own Edit execution (fp already wrote the file).
-        echo "$STDIN_DATA" | "$FP_BIN" --hook
-        exit $?
         ;;
 
     Write)
@@ -473,7 +432,7 @@ case "$MATCHER" in
                 _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)
                 if echo "$_wp_content" | grep -qE \
                     "(open\([^)]*['\"][wa]['\"]|\.write_text\(|Path\([^)]*\)\.write\(|\.write\()"; then
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Prefer mcp__chitta-bridge__file_patch(file,old_str,new_str) — no script needed, fewer tokens."}}\n'
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Temp patch script detected. Use the Edit tool directly — no script needed."}}\n'
                 fi
             fi
         fi
