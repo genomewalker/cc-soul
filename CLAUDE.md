@@ -43,7 +43,6 @@ Enforce mode auto-activates once shadow log has ≥100 entries AND is
 | `CC_SOUL_HOOK_ENFORCE=1` | Force enforce on early (skip wait) |
 | `CC_SOUL_HOOK_ENFORCE=0` | Force shadow only (disable enforcement) |
 | `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session |
-| `CC_SOUL_ALLOW_EDIT=1`   | Bypass Edit deny for this session |
 | `CC_SOUL_AGENT_NO_FORCE=1` | Disable haiku-force on research subagents (advisory only) |
 | `CC_SOUL_AGENT_WARN=N` | Subagent count to warn at (default 20) |
 | `CC_SOUL_AGENT_LIMIT=N` | Subagent count for hard advisory (default 50) |
