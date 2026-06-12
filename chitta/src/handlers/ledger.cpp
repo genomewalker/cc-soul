@@ -64,7 +64,22 @@ ToolResult FieldRpcHandler::tool_ledger_load(const json& params) {
     std::string project = params.value("project", "");
     std::string key = ledger_key(session_id, project);
 
-    auto payload_str = field_store_->get_latest_event("ledger", "save", key);
+    std::optional<std::string> payload_str = field_store_->get_latest_event("ledger", "save", key);
+
+    // Project-scope fallback: when session_id is empty, search all "ledger"/"save"
+    // events (newest-first) for the most recent one matching the requested project.
+    if (!payload_str && session_id.empty() && !project.empty()) {
+        std::string all_json = field_store_->get_events_by_domain_kind("ledger", "save", 200);
+        json all = parse_json_array_safe(all_json);
+        for (auto& ev : all) {
+            if (!ev.contains("payload") || !ev["payload"].is_object()) continue;
+            if (ev["payload"].value("project", "") == project) {
+                payload_str = ev["payload"].dump();
+                break;
+            }
+        }
+    }
+
     if (!payload_str) {
         return ToolResult::ok("No checkpoint found", {{"found", false}});
     }
@@ -125,17 +140,29 @@ ToolResult FieldRpcHandler::tool_ledger_list(const json& params) {
 
     field_store_->iterate_log(0, [&](const std::string& op_json, uint64_t seqno) {
         json op = parse_json_safe(op_json);
+        // WAL serializes MsgEvent as {"MsgEvent": {...}} — unwrap it.
+        if (op.contains("MsgEvent")) op = op["MsgEvent"];
         if (op.value("domain", "") != "ledger") return;
 
         std::string kind = op.value("kind", "");
-        std::string entity_id = op.value("entity_id", "");
+        std::string entity_id = op.value("target", op.value("entity_id", ""));
 
         if (kind == "delete") {
             deleted.insert(entity_id);
             latest.erase(entity_id);
         } else if (kind == "save") {
             if (deleted.count(entity_id)) return;
-            json payload = parse_json_safe(op.value("payload", ""));
+            // payload_json is stored as a byte array in the WAL; try both forms.
+            json payload;
+            if (op.contains("payload_json") && op["payload_json"].is_string()) {
+                payload = parse_json_safe(op["payload_json"].get<std::string>());
+            } else if (op.contains("payload_json") && op["payload_json"].is_array()) {
+                // bytes array — convert to string
+                auto bytes = op["payload_json"].get<std::vector<uint8_t>>();
+                payload = parse_json_safe(std::string(bytes.begin(), bytes.end()));
+            } else {
+                payload = parse_json_safe(op.value("payload", ""));
+            }
             if (!filter_project.empty() && payload.value("project", "") != filter_project) return;
             latest[entity_id] = {entity_id, seqno, payload};
         }
