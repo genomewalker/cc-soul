@@ -275,30 +275,41 @@ fi
 # Check for active TaskList todos
 # ═══════════════════════════════════════════════════════════════════════════
 
-TASK_INFO=$(grep -oE '"subject"\s*:\s*"[^"]*".*"status"\s*:\s*"(pending|in_progress)"' "$TRANSCRIPT_PATH" 2>/dev/null | head -5 || true)
-if [[ -n "$TASK_INFO" ]]; then
-    TODOS=$(echo "$TASK_INFO" | while read -r line; do
-        subj=$(echo "$line" | grep -oE '"subject"\s*:\s*"[^"]*"' | sed 's/"subject"\s*:\s*"//' | sed 's/"$//')
-        stat=$(echo "$line" | grep -oE '"status"\s*:\s*"[^"]*"' | sed 's/"status"\s*:\s*"//' | sed 's/"$//')
-        echo "{\"content\":\"$subj\",\"status\":\"$stat\"}"
-    done | jq -s .)
-fi
+# Use jq to safely extract task subjects from any JSON object in the transcript
+# that has subject+status fields — avoids manual string interpolation issues.
+TODOS=$(jq -sc '[
+    .. | objects |
+    select(has("subject") and has("status")) |
+    select(.status == "pending" or .status == "in_progress") |
+    {content: (.subject | tostring), status: .status}
+] | unique_by(.content) | .[-5:]' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Queue comprehensive ledger save
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Validate each JSON array; fall back to [] if invalid/empty
+_safe_arr() { echo "${1:-[]}" | jq -c 'if type=="array" then . else [] end' 2>/dev/null || echo "[]"; }
+_AF=$(  _safe_arr "$ACTIVE_FILES")
+_DEC=$( _safe_arr "$DECISIONS")
+_TOD=$( _safe_arr "$TODOS")
+_BLK=$( _safe_arr "$BLOCKERS")
+_DIS=$( _safe_arr "$DISCOVERIES")
+_NS=$(  _safe_arr "$NEXT_STEPS")
+# Sanitize snapshot: strip control chars, keep under 2000 chars
+_SNAP=$(printf '%s' "${SNAPSHOT:-}" | tr -d '\000-\010\013\014\016-\037' | head -c 2000)
+
 LEDGER_ARGS=$(jq -n \
     --arg session_id "$SESSION_ID" \
     --arg project "$REALM" \
     --arg mood "pre-compact" \
-    --argjson active_files "$ACTIVE_FILES" \
-    --argjson decisions "$DECISIONS" \
-    --argjson todos "$TODOS" \
-    --argjson blockers "$BLOCKERS" \
-    --argjson discoveries "$DISCOVERIES" \
-    --argjson next_steps "$NEXT_STEPS" \
-    --arg snapshot "$SNAPSHOT" \
+    --argjson active_files "$_AF" \
+    --argjson decisions "$_DEC" \
+    --argjson todos "$_TOD" \
+    --argjson blockers "$_BLK" \
+    --argjson discoveries "$_DIS" \
+    --argjson next_steps "$_NS" \
+    --arg snapshot "$_SNAP" \
     '{
         session_id: $session_id,
         project: $project,
