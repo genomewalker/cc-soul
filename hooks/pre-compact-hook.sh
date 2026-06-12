@@ -184,10 +184,11 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
         DECISION_LINES=$(printf '%s\n%s' "$DECISION_LINES" "$MARKER_DECISIONS")
     fi
 
-    # Build JSON arrays
-    DECISIONS=$(printf '%s\n' "$DECISION_LINES" | grep -v '^\s*$' | head -10 | jq -R . | jq -s .)
-    BLOCKERS=$(printf '%s\n' "$BLOCKER_LINES" | grep -v '^\s*$' | head -8 | jq -R . | jq -s .)
-    NEXT_STEPS=$(printf '%s\n' "$NEXT_LINES" | grep -v '^\s*$' | head -8 | jq -R . | jq -s .)
+    # Build JSON arrays — strip control chars before jq sees them
+    _sanitize() { tr -d '\000-\010\013\014\016-\037' | sed 's/[^[:print:]\t]//g'; }
+    DECISIONS=$(printf '%s\n' "$DECISION_LINES" | grep -v '^\s*$' | head -10 | _sanitize | jq -R . | jq -s .)
+    BLOCKERS=$(printf '%s\n' "$BLOCKER_LINES"   | grep -v '^\s*$' | head -8  | _sanitize | jq -R . | jq -s .)
+    NEXT_STEPS=$(printf '%s\n' "$NEXT_LINES"    | grep -v '^\s*$' | head -8  | _sanitize | jq -R . | jq -s .)
 
     # ── Build discoveries: what's already been done/tested ────────────────
     # This is the ANTI-CONFABULATION field — things that must not be suggested as pending
@@ -206,7 +207,7 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
             ALREADY_DONE+=("$line")
         done <<< "$(echo "$DONE_LINES" | head -5)"
     fi
-    DISCOVERIES=$(printf '%s\n' "${ALREADY_DONE[@]}" | grep -v '^\s*$' | jq -R . | jq -s .)
+    DISCOVERIES=$(printf '%s\n' "${ALREADY_DONE[@]}" | grep -v '^\s*$' | _sanitize | jq -R . | jq -s .)
 
     # ── Build structured snapshot ─────────────────────────────────────────
     # User intent from last meaningful user messages
@@ -311,7 +312,11 @@ LEDGER_ARGS=$(jq -n \
         snapshot: $snapshot
     }')
 
-queue_write "ledger_save" "$LEDGER_ARGS"
+if [[ -n "$LEDGER_ARGS" ]]; then
+    queue_write "ledger_save" "$LEDGER_ARGS"
+else
+    echo "[ledger_save] skipped: jq failed to build args (control chars in transcript?)" >&2
+fi
 
 # Report what was captured
 file_count=$(echo "$ACTIVE_FILES" | jq 'length')
