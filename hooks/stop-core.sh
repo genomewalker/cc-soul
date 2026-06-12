@@ -403,6 +403,44 @@ EVENT_CHECKPOINT=false
 EVENT_MOOD=""
 EVENT_SNAPSHOT=""
 
+# ── Per-turn lightweight ledger save (mood=in_progress) ──────────────────
+# Runs every turn so /clear can find a recent ledger even without a pre-compact.
+# Extract user's last message as the snapshot goal for the resume card.
+_last_user=$(python3 - "$TRANSCRIPT_PATH" <<'PY' 2>/dev/null | tail -1 | head -c 300
+import json, sys
+p = sys.argv[1]
+msgs = []
+with open(p, "r", errors="ignore") as f:
+    for line in f:
+        try:
+            d = json.loads(line.strip())
+        except Exception:
+            continue
+        if d.get("type") == "user":
+            c = d.get("message", {}).get("content", "")
+            if isinstance(c, list):
+                c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+            if isinstance(c, str) and c.strip():
+                msgs.append(c.strip())
+if msgs:
+    print(msgs[-1])
+PY
+)
+_next_line=$(echo "$RESPONSE" | grep -iEm1 'next[: ].{10,}|TODO[: ].{10,}' | head -c 150 || true)
+_snap_text=""
+[[ -n "$_last_user" ]] && _snap_text="Goal: ${_last_user}"
+[[ -n "$_next_line" ]] && _snap_text="${_snap_text}\nNext: ${_next_line}"
+_updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+queue_write "ledger_save" "$(jq -n \
+    --arg session_id "$SESSION_ID" \
+    --arg project "$REALM" \
+    --arg mood "in_progress" \
+    --arg snapshot "$_snap_text" \
+    --arg updated_at "$_updated" \
+    '{session_id: $session_id, project: $project, mood: $mood, snapshot: $snapshot, updated_at: $updated_at}')" 2>/dev/null || true
+# ─────────────────────────────────────────────────────────────────────────
+
 # Error checkpoint
 if [[ "$HAS_ERROR" == "true" ]]; then
     EVENT_CHECKPOINT=true
