@@ -384,9 +384,10 @@ void QueueProcessor::run() {
                     }
                 } else if (tool == "ledger_save") {
                     std::string session_id = args.value("session_id", "");
+                    std::string project = args.value("project", "default");
                     if (!session_id.empty()) {
-                        field_store_.emit_event("admin", "ledger_save",
-                                                session_id, args.dump());
+                        std::string key = session_id + ":" + project;
+                        field_store_.emit_event("ledger", "save", key, args.dump());
                         queue_count_++;
                     }
                 } else if (tool == "ledger_append") {
