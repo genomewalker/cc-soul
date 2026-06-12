@@ -309,6 +309,9 @@ case "$MATCHER" in
     Read)
         file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
         [[ -z "$file_path" || ! -f "$file_path" ]] && exit 0
+        # Assigned up-front: used by the .allow_read_<id> escape hatch below (was
+        # previously referenced before assignment → flag-file path lost its suffix).
+        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null || true)
 
         # Code intelligence advisory: if chitta has this file's directory indexed, suggest smart_context/read_symbol
         advisory=""
@@ -347,7 +350,6 @@ case "$MATCHER" in
 
         # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
         # Forces sqz_read_file which returns a 13-token §ref§ for cached content.
-        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null || true)
         if [[ "$line_count" -gt 200 && -n "$_session_id" && "$_allow_read" != "1" ]]; then
             _file_mtime=$(stat -c %Y "$file_path" 2>/dev/null || echo 0)
             _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
