@@ -413,14 +413,25 @@ else
             [[ -n "$_snap" ]] && _recall_query="$_snap"
         fi
 
+        # Pass 1: realm-filtered (exact match; works when memories are properly tagged)
         _recall_raw=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall \
             --query "$_recall_query" \
             --realm "$REALM" \
             --limit 6 \
             --text-only 2>/dev/null || true)
 
-        # Only emit if we got substantive content (not just "No memories" or episode stubs)
         _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -v '^\[episode\]' | wc -l)
+
+        # Pass 2: unfiltered fallback — covers projects whose memories live under brahman
+        if [[ "${_recall_lines:-0}" -le 1 ]]; then
+            _project_kw=$(basename "${PROJECT_DIR:-$REALM}")
+            _recall_raw=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall \
+                --query "${_project_kw} ${_recall_query}" \
+                --limit 6 \
+                --text-only 2>/dev/null || true)
+            _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -v '^\[episode\]' | wc -l)
+        fi
+
         if [[ "${_recall_lines:-0}" -gt 1 ]]; then
             echo ""
             echo "[recall:${REALM}]"
