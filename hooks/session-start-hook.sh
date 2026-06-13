@@ -400,6 +400,38 @@ else
     fi
 
     # ===========================================
+    # RECALL: Surface actual memory content for the current realm.
+    # This fills the gap between topology (counts) and actionable context.
+    # Uses ledger snapshot as query seed if available, falls back to realm name.
+    # Runs for any non-brahman realm; content is capped to keep context lean.
+    # ===========================================
+    if [[ -n "${REALM:-}" && "${REALM}" != "brahman" ]]; then
+        # Build query seed: ledger snapshot first word/line, else realm
+        _recall_query="$REALM"
+        if [[ -n "$LEDGER_JSON" && "$LEDGER_JSON" != "{}" ]]; then
+            _snap=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty' | head -1 | head -c 120)
+            [[ -n "$_snap" ]] && _recall_query="$_snap"
+        fi
+
+        _recall_raw=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall \
+            --query "$_recall_query" \
+            --realm "$REALM" \
+            --limit 6 \
+            --text-only 2>/dev/null || true)
+
+        # Only emit if we got substantive content (not just "No memories" or episode stubs)
+        _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -v '^\[episode\]' | wc -l)
+        if [[ "${_recall_lines:-0}" -gt 1 ]]; then
+            echo ""
+            echo "[recall:${REALM}]"
+            echo "$_recall_raw" | grep -v '^\[episode\]' | grep -v 'No memories' | head -c 1200
+            echo ""
+            echo "[/recall:${REALM}]"
+            echo "[soul] If context above is sparse for the current task, call mcp__chitta__recall or mcp__chitta__smart_context for deeper retrieval."
+        fi
+    fi
+
+    # ===========================================
     # CORRECTIONS RECAP: Surface recent corrections (with suppression after N surfaces)
     # Corrections tagged 'wontfix' or 'verified' are suppressed.
     # Others are suppressed after CORRECTION_MAX_SURFACES sessions without action.
