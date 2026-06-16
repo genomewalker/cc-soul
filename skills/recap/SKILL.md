@@ -2,7 +2,6 @@
 name: recap
 description: "Token-savvy session continuation. Rebuilds working context from transcript + soul memories in ~1500 tokens instead of replaying full history. Use when starting a new session to continue previous work."
 execution: direct
-aliases: [resume]
 ---
 
 # Recap: Token-Savvy Session Continuation
