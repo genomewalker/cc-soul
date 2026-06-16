@@ -1,7 +1,7 @@
 ---
 name: tasks
 description: Browse and resume tasks, threads, and background jobs across sessions
-execution: inline
+execution: direct
 ---
 
 Interactive task browser. Shows active threads, pending inbox items, and running jobs across all sessions. Also supports registering new tasks.

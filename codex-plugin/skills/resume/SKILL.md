@@ -1,7 +1,7 @@
 ---
 name: resume
 description: Resume a thread by loading its ~800-token context capsule
-execution: inline
+execution: direct
 ---
 
 Load the resume capsule for a thread and surface it as context for continuing work.

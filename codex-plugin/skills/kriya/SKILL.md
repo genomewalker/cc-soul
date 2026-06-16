@@ -3,7 +3,6 @@ name: kriya
 aliases: [apply-fixes, materialize, review-fixes, ship]
 description: Review soul discoveries (fixes, improvements, corrections) one by one, accept or discard each, implement accepted ones, build chitta, and optionally release.
 execution: direct
-allowed-tools: Read, Edit, Write, Bash, Glob, Grep, AskUserQuestion, mcp__chitta__*
 ---
 
 # Kriya (क्रिया) — Materialise Soul Discoveries into Code

@@ -1,6 +1,6 @@
 ---
 name: prog-review
-description: "First-principles programming review: question requirements, delete unnecessary parts, simplify what remains, optimize with evidence, automate last. Use for code review, refactor, performance, architecture cleanup, or automation planning."
+description: "First-principles review — question requirements, delete unnecessary parts, simplify, optimize with evidence, automate last. Use for code review, refactor, performance, or architecture."
 execution: direct
 ---
 
