@@ -1,6 +1,6 @@
 ---
 name: hint-corpus
-description: "Build, convert, and fine-tune the Qwen3-0.6B hint model for personal fact extraction. Covers corpus generation, ChatML conversion, LoRA fine-tuning with unsloth, GGUF export, and Ollama registration."
+description: "Fine-tune the Qwen3-0.6B hint model — corpus gen, LoRA/unsloth, GGUF export, Ollama"
 execution: direct
 aliases: [hint-finetune, corpus-gen, build-hint-model]
 ---

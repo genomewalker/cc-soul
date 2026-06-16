@@ -3,7 +3,6 @@ name: yajña
 aliases: [yajna, autonomous, loop, agentic-loop, coordinate, ritual]
 description: Autonomous development ritual with role-based coordination. Loops until complete using specialized agents (hotṛ→research, adhvaryu→implement, udgātṛ→test).
 execution: direct
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash(*), Task, mcp__chitta-mcp__*
 ---
 
 # Yajña (यज्ञ) - Autonomous Development Ritual

@@ -3,7 +3,6 @@ name: dream
 aliases: [svapna, wander, explore-idle, curiosity]
 description: Trigger autonomous curiosity-driven exploration. The soul picks a topic from memory gaps or curiosity seeds, searches the web, and stores what it finds as dream-tagged memories.
 execution: direct
-allowed-tools: mcp__chitta-mcp__*
 ---
 
 # Dream (स्वप्न) - Autonomous Curiosity-Driven Exploration

@@ -3,7 +3,6 @@ name: shepherd
 aliases: [watch, monitor, tend, guard, pipeline]
 description: Autonomous pipeline monitor using sense-think-act loop. Watches snakemake/nextflow jobs, detects errors, applies fixes from memory, restarts on failure.
 execution: direct
-allowed-tools: Read, Grep, Glob, Bash, mcp__chitta__*, mcp__zellij-mcp__*
 hooks:
   Stop:
     - matcher: ""
