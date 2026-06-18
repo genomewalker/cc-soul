@@ -241,6 +241,10 @@ ToolResult FieldRpcHandler::tool_dream_cancel(const json& params) {
         ? std::stoll(params["id"].get<std::string>())
         : params["id"].get<int64_t>();
 
+    // Stop the underlying sadhana so it doesn't keep ticking after cancel.
+    if (sadhana_manager_)
+        sadhana_manager_->stop(dream_id, /*success=*/false, "cancelled");
+
     field_store_->emit_event("dream", "cancelled", std::to_string(dream_id), "");
 
     return ToolResult::ok("Cancelled dream #" + std::to_string(dream_id),
@@ -254,6 +258,10 @@ ToolResult FieldRpcHandler::tool_dream_force_woke(const json& params) {
     int64_t dream_id = params["id"].is_string()
         ? std::stoll(params["id"].get<std::string>())
         : params["id"].get<int64_t>();
+
+    // Stop the underlying sadhana as successfully completed.
+    if (sadhana_manager_)
+        sadhana_manager_->stop(dream_id, /*success=*/true, "force-woke");
 
     field_store_->emit_event("dream", "force_woke", std::to_string(dream_id), "[force-woke]");
 
@@ -274,6 +282,16 @@ ToolResult FieldRpcHandler::tool_dream_start(const json& params) {
     const auto& cfg = sadhana_manager_->config();
     std::string brain_provider = params.value("brain_provider", cfg.default_brain_provider);
     std::string brain_model    = params.value("brain_model",    cfg.default_brain_model);
+
+    // Auto-infer provider from model name: if caller passes a Claude model name
+    // ("haiku", "sonnet", "opus", or "claude-*") without an explicit provider,
+    // routing it to "local" silently fails. Pin to "claude" instead.
+    if (brain_provider == cfg.default_brain_provider) {
+        if (brain_model == "haiku" || brain_model == "sonnet" || brain_model == "opus"
+            || brain_model.rfind("claude", 0) == 0) {
+            brain_provider = "claude";
+        }
+    }
 
     json goal_dsl = {{"kind", "dream"}, {"topic", topic}};
     if (!publish_path.empty()) goal_dsl["publish_path"] = publish_path;
@@ -404,16 +422,35 @@ ToolResult FieldRpcHandler::tool_dream_status(const json& params) {
         ? std::stoll(params["id"].get<std::string>())
         : params["id"].get<int64_t>();
 
-    // In chitta-field, dream state is tracked via sadhana
-    json dream = {{"sadhana_id", dream_id}, {"status", "unknown"}};
+    // Dream state: start from sadhana state, then overlay dream-level events.
+    // dream_cancel sets sadhana→failed + emits "cancelled" event.
+    // dream_force_woke sets sadhana→done + emits "force_woke" event.
+    // "dreaming" = sadhana is running.
+    std::string target = std::to_string(dream_id);
+    std::string dream_status = "unknown";
+
+    json dream = {{"sadhana_id", dream_id}};
     if (sadhana_manager_) {
         auto opt = sadhana_manager_->get(dream_id);
         if (opt) {
-            dream["state"] = sadhana_state_to_string(opt->state);
+            dream["state"]      = sadhana_state_to_string(opt->state);
             dream["iterations"] = opt->iterations;
             dream["last_action"] = opt->last_action;
+            // Derive semantic dream_status from sadhana state + event overlay.
+            if (opt->state == SadhanaState::Running)
+                dream_status = "dreaming";
+            else if (opt->state == SadhanaState::Done) {
+                auto ev = field_store_->get_events_by_target("dream", "force_woke", target, 1);
+                dream_status = (ev != "[]" && !ev.empty()) ? "woke" : "done";
+            } else if (opt->state == SadhanaState::Failed) {
+                auto ev = field_store_->get_events_by_target("dream", "cancelled", target, 1);
+                dream_status = (ev != "[]" && !ev.empty()) ? "cancelled" : "failed";
+            } else {
+                dream_status = sadhana_state_to_string(opt->state);
+            }
         }
     }
+    dream["status"] = dream_status;
 
     return ToolResult::ok("Dream/sadhana #" + std::to_string(dream_id), dream);
 }
