@@ -206,6 +206,35 @@ public:
             }
         });
 
+        // ── Memory mutation API ──────────────────────────────────────────
+        svr_.Delete(R"(/api/memories/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+            uint64_t id = 0;
+            try { id = std::stoull(req.matches[1]); } catch (...) {
+                res.status = 400; res.set_content(R"({"error":"invalid id"})", "application/json"); return;
+            }
+            field_->forget(id);
+            res.set_content(R"({"ok":true})", "application/json");
+        });
+
+        svr_.Patch(R"(/api/memories/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+            uint64_t id = 0;
+            try { id = std::stoull(req.matches[1]); } catch (...) {
+                res.status = 400; res.set_content(R"({"error":"invalid id"})", "application/json"); return;
+            }
+            try {
+                auto body = json::parse(req.body);
+                if (body.contains("content")) {
+                    std::string content = body["content"].get<std::string>();
+                    if (field_->update_memory_content(id, content) != 0) {
+                        res.status = 500; res.set_content(R"({"error":"update failed"})", "application/json"); return;
+                    }
+                }
+                res.set_content(fetch_memory_detail(id), "application/json");
+            } catch (...) {
+                res.status = 400; res.set_content(R"({"error":"invalid json"})", "application/json");
+            }
+        });
+
         // ── Triplet graph API ────────────────────────────────────────────
         svr_.Get("/api/triplets", [this](const httplib::Request& req, httplib::Response& res) {
             std::string entity = req.has_param("entity") ? req.get_param_value("entity") : "";
