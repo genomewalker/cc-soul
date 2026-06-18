@@ -112,4 +112,51 @@ while IFS= read -r jsonl_path; do
 
 done < <(find ~/.claude/projects -name '*.jsonl' ! -name '*.thinking_pos' -newer "$PROCESSED_FILE" 2>/dev/null | sort)
 
+# Synthesis pass: only when we actually distilled something this run.
+# Recall top memories shaped by this sweep, build a synthetic 4-turn
+# transcript, and run chittad distill so gemma4:26b generates meta-patterns
+# that span multiple sessions.
+if (( processed > 0 )); then
+    log "synthesis pass (${processed} transcripts distilled)"
+    synth=$(mktemp --suffix=.jsonl)
+
+    # Recall cross-session memories from recent distillation topics
+    memories=$("$CHITTA_BIN" recall \
+        --query "patterns solutions gotchas cross-session insights" \
+        --limit 20 2>/dev/null || echo "")
+
+    python3 - "$memories" "$processed" > "$synth" <<'PYEOF'
+import json, sys
+memories = sys.argv[1] if len(sys.argv) > 1 else ""
+n = sys.argv[2] if len(sys.argv) > 2 else "?"
+
+def turn(role, text):
+    return json.dumps({"type": role, "message": {"role": role, "content": text}})
+
+print(turn("user",
+    f"You are synthesizing cross-session learnings. {n} recent Claude sessions were just distilled. "
+    f"Here are the most relevant memories across those sessions:\n\n{memories}\n\n"
+    "What are the recurring patterns, cross-cutting insights, and meta-level lessons?"))
+print(turn("assistant",
+    "Let me identify the cross-session patterns from these distilled memories."))
+print(turn("user",
+    "Extract the highest-value meta-insights as SSL format learnings. "
+    "Focus on patterns that appear across multiple sessions, not single-session facts."))
+print(turn("assistant",
+    "Based on the cross-session analysis, here are the meta-patterns:"))
+PYEOF
+
+    synth_id="dream-sweep-synthesis-$(date +%Y%m%d)"
+    if timeout 120 "$CHITTAD_BIN" distill \
+            --transcript-path "$synth" \
+            --session-id "$synth_id" \
+            --realm brahman \
+            >>"$LOG_FILE" 2>&1; then
+        log "synthesis ok → $synth_id"
+    else
+        log "synthesis failed (exit $?)"
+    fi
+    rm -f "$synth"
+fi
+
 log "dream-sweep done: processed=$processed skipped_done=$skipped_done skipped_short=$skipped_short"
