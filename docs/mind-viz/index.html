@@ -300,6 +300,10 @@ body::before {
   font-size: 14px; line-height: 1; transition: color 0.1s;
 }
 .insp-close:hover { color: var(--red); }
+.mem-btn { background:none;border:1px solid var(--dim2);color:var(--dim);font-family:inherit;font-size:10px;padding:3px 10px;border-radius:3px;cursor:pointer;letter-spacing:.05em; }
+.mem-btn:hover { border-color:var(--fg);color:var(--fg); }
+.mem-btn-red { border-color:var(--red);color:var(--red); }
+.mem-btn-red:hover { background:rgba(255,80,80,0.12); }
 .insp-content {
   color: var(--text); line-height: 1.55; margin-bottom: 8px;
   word-break: break-word; font-size: 10.5px;
@@ -446,8 +450,25 @@ body::before {
     </div>
     <div class="insp-content" id="insp-content">—</div>
     <div class="insp-meta" id="insp-meta"></div>
+    <div style="display:flex;gap:6px;margin:6px 0 4px;">
+      <button class="mem-btn" onclick="openEdit()">edit</button>
+      <button class="mem-btn mem-btn-red" onclick="deleteMemory()">forget</button>
+    </div>
     <div class="insp-assoc-hdr">▸ associations</div>
     <div class="assoc-list" id="insp-assocs"><span style="color:var(--dim)">—</span></div>
+  </div>
+</div>
+
+<!-- Memory edit modal -->
+<div id="mem-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0d1117;border:1px solid var(--cyan);border-radius:4px;padding:18px;width:520px;max-width:90vw;font-family:inherit;">
+    <div style="color:var(--cyan);font-size:11px;letter-spacing:.1em;margin-bottom:10px;">EDIT MEMORY <span id="modal-id" style="color:var(--dim)"></span></div>
+    <textarea id="modal-content" style="width:100%;height:180px;background:#111;color:var(--fg);border:1px solid var(--dim2);border-radius:3px;padding:8px;font-family:inherit;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">
+      <button class="mem-btn" onclick="closeEdit()">cancel</button>
+      <button class="mem-btn" style="border-color:var(--cyan);color:var(--cyan);" onclick="saveEdit()">save</button>
+    </div>
+    <div id="modal-status" style="color:var(--dim);font-size:10px;margin-top:6px;min-height:14px;"></div>
   </div>
 </div>
 
@@ -1026,6 +1047,63 @@ function loadAgents() {
 
 // ── Triplet Explorer ─────────────────────────────────────────────────────────
 let tripletTimer = null;
+// ── Memory edit / delete ─────────────────────────────────────────────────────
+function openEdit() {
+  if (!selectedNode) return;
+  document.getElementById('modal-id').textContent = '#' + selectedNode.id;
+  document.getElementById('modal-content').value = selectedNode.label || '';
+  document.getElementById('modal-status').textContent = '';
+  const m = document.getElementById('mem-modal');
+  m.style.display = 'flex';
+}
+
+function closeEdit() {
+  document.getElementById('mem-modal').style.display = 'none';
+}
+
+async function saveEdit() {
+  if (!selectedNode) return;
+  const content = document.getElementById('modal-content').value.trim();
+  if (!content) return;
+  document.getElementById('modal-status').textContent = 'saving…';
+  try {
+    const r = await fetch(`${serverUrl}/api/memories/${selectedNode.id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({content})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    selectedNode.label = content;
+    document.getElementById('insp-content').textContent = content;
+    document.getElementById('modal-status').textContent = 'saved';
+    setTimeout(closeEdit, 600);
+  } catch(e) {
+    document.getElementById('modal-status').textContent = 'error: ' + e.message;
+  }
+}
+
+async function deleteMemory() {
+  if (!selectedNode) return;
+  if (!confirm(`Forget memory #${selectedNode.id}?\n\n"${(selectedNode.label||'').slice(0,120)}"`)) return;
+  try {
+    const r = await fetch(`${serverUrl}/api/memories/${selectedNode.id}`, {method:'DELETE'});
+    if (!r.ok) throw new Error(await r.text());
+    // Remove from graph
+    graphData.nodes = graphData.nodes.filter(n => String(n.id) !== String(selectedNode.id));
+    graphData.links = graphData.links.filter(l =>
+      String(l.source?.id ?? l.source) !== String(selectedNode.id) &&
+      String(l.target?.id ?? l.target) !== String(selectedNode.id));
+    graph.graphData(graphData);
+    closeInspector();
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+document.getElementById('mem-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('mem-modal')) closeEdit();
+});
+
 document.getElementById('triplet-search').addEventListener('input', e => {
   clearTimeout(tripletTimer);
   tripletTimer = setTimeout(() => searchTriplets(e.target.value), 400);
