@@ -103,6 +103,22 @@ SadhanaManager::SadhanaManager(FieldStore& field_store, SadhanaConfig config)
             RunningState rs;
             rs.next_run_at = now_ms();
             rs.brain = create_brain(s.brain_provider, s.brain_model);
+            if (!rs.brain) {
+                // Brain creation failed (model unavailable, bad provider, etc.).
+                // Pause rather than insert a null brain that will crash on next tick.
+                std::cerr << "[sadhana] Brain creation failed for sadhana " << s.id
+                          << " (provider=" << s.brain_provider << " model=" << s.brain_model
+                          << ") — pausing instead of resuming\n";
+                s.state = SadhanaState::Paused;
+                s.updated_at = now_ms();
+                json payload = sadhana_to_payload(s);
+                field_store_.task_update_payload(std::to_string(s.id), payload.dump(), now_ms());
+                field_store_.task_transition(std::to_string(s.id), "pause", now_ms());
+                log_event(s.id, SadhanaEventType::Paused,
+                    {{"reason", "brain_creation_failed_on_load"},
+                     {"provider", s.brain_provider}, {"model", s.brain_model}});
+                continue;
+            }
             running_[s.id] = std::move(rs);
         }
     }
