@@ -92,14 +92,23 @@ void NativeDistiller::precompute_dedup(PreparedDistillation& prep) {
             lp.embedding = embedder_(chitta::ssl::retrieval_text(full_text));
         }
         if (!lp.embedding.empty() && config_.dedup_threshold > 0.0f) {
-            auto hits = field_store_->recall(lp.embedding, 5, prep.realm);
-            for (const auto& hit : hits) {
-                if (hit.semantic_score >= config_.dedup_threshold) {
-                    lp.is_dup       = true;
-                    lp.dup_mem_id   = hit.memory_id;
-                    lp.dup_confidence = hit.confidence;
-                    break;
+            auto check_hits = [&](const std::vector<FieldRecallHit>& hits) {
+                for (const auto& hit : hits) {
+                    if (hit.semantic_score >= config_.dedup_threshold) {
+                        lp.is_dup         = true;
+                        lp.dup_mem_id     = hit.memory_id;
+                        lp.dup_confidence = hit.confidence;
+                        return true;
+                    }
                 }
+                return false;
+            };
+            // Primary: realm-filtered search.
+            if (!check_hits(field_store_->recall(lp.embedding, 5, prep.realm))) {
+                // Fallback: cross-realm search catches duplicates from other realms
+                // (e.g. dream-sweep distilling with brahman when memories live in cc-soul).
+                if (!prep.realm.empty())
+                    check_hits(field_store_->recall(lp.embedding, 5, ""));
             }
         }
         prep.learning_preps.push_back(std::move(lp));
