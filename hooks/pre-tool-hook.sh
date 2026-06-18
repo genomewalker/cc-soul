@@ -408,21 +408,6 @@ case "$MATCHER" in
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":%s}}' "$updated"
         ;;
 
-    Edit)
-        # Built-in Edit is the supported path (file_patch mandate removed — measured
-        # cost-neutral on tokens, net-negative on errors; see hook-stats).
-        # One cheap hint: whole-symbol rewrites are ~50% cheaper as symbol_patch
-        # (body only, no old_str).
-        FILE_PATH=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
-        OLD_STR=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' 2>/dev/null)
-        if [[ -n "$FILE_PATH" && -n "$OLD_STR" ]]; then
-            SYMBOL=$(echo "$OLD_STR" | grep -m1 -oE '(def |fn |class |pub fn |pub struct )[a-zA-Z_][a-zA-Z0-9_]*' | awk '{print $NF}' 2>/dev/null || true)
-            if [[ -n "$SYMBOL" ]]; then
-                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[fp] symbol_patch available for $SYMBOL in $FILE_PATH — body-only rewrite, cheaper than Edit for whole-symbol changes\"}}"
-            fi
-        fi
-        ;;
-
     Write)
         FP_BIN="${HOME}/.claude/bin/fp"
         # Block Python/shell patch scripts written to temp/scratch locations.
