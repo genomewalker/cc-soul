@@ -344,44 +344,46 @@ else
     # ═══════════════════════════════════════════
     TOPOLOGY_PARTS=()
 
-    # Top 3 active themes (show representative memory content, not internal UUID names)
-    theme_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+    # Four independent sql_query calls — run in parallel.
+    _tf=$(mktemp); _kf=$(mktemp); _cf=$(mktemp); _rf=$(mktemp)
+    timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
         --query "SELECT t.memory_count, substr(m.content, 1, 60) as label FROM theme t JOIN memory m ON t.representative_id = m.id WHERE t.memory_count > 0 ORDER BY t.updated_at DESC LIMIT 3" \
-        --json 2>/dev/null || true)
+        --json >"$_tf" 2>/dev/null &
+    timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+        --query "SELECT kind, COUNT(*) as cnt FROM memory WHERE access_count > 1 GROUP BY kind ORDER BY cnt DESC LIMIT 6" \
+        --json >"$_kf" 2>/dev/null &
+    timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+        --query "SELECT COUNT(*) as total, COUNT(CASE WHEN priority_tier = 2 THEN 1 END) as critical, COUNT(CASE WHEN pinned = true THEN 1 END) as pinned FROM memory" \
+        --json >"$_cf" 2>/dev/null &
+    if [[ -n "${REALM:-}" && "${REALM}" != "brahman" ]]; then
+        timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+            --query "SELECT id, kind, content FROM memory WHERE realm = '${REALM}' ORDER BY accessed_at DESC LIMIT 3" \
+            --json >"$_rf" 2>/dev/null &
+    fi
+    wait
+    theme_out=$(cat "$_tf"); kind_out=$(cat "$_kf"); count_out=$(cat "$_cf"); recent_out=$(cat "$_rf")
+    rm -f "$_tf" "$_kf" "$_cf" "$_rf"
+
     if [[ -n "$theme_out" ]]; then
         theme_str=$(echo "$theme_out" | jq -r '[.rows[]? | "\(.memory_count)m: \(.label)"] | join(" | ")' 2>/dev/null || true)
         [[ -n "$theme_str" ]] && TOPOLOGY_PARTS+=("Themes: $theme_str")
     fi
 
-    # Memory kind distribution (most active)
-    kind_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
-        --query "SELECT kind, COUNT(*) as cnt FROM memory WHERE access_count > 1 GROUP BY kind ORDER BY cnt DESC LIMIT 6" \
-        --json 2>/dev/null || true)
     if [[ -n "$kind_out" ]]; then
         kind_str=$(echo "$kind_out" | jq -r '[.rows[]? | "\(.kind):\(.cnt)"] | join(", ")' 2>/dev/null || true)
         [[ -n "$kind_str" ]] && TOPOLOGY_PARTS+=("Active: $kind_str")
     fi
 
-    # Recent project memories (only if REALM is set and not brahman)
-    if [[ -n "${REALM:-}" && "${REALM}" != "brahman" ]]; then
-        recent_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
-            --query "SELECT id, kind, content FROM memory WHERE realm = '${REALM}' ORDER BY accessed_at DESC LIMIT 3" \
-            --json 2>/dev/null || true)
-        if [[ -n "$recent_out" ]]; then
-            recent_str=$(echo "$recent_out" | jq -r '.rows[]? | "#\(.id) [\(.kind)] \(.content[0:80])"' 2>/dev/null || true)
-            if [[ -n "$recent_str" ]]; then
-                TOPOLOGY_PARTS+=("Recent (${REALM}):")
-                while IFS= read -r line; do
-                    [[ -n "$line" ]] && TOPOLOGY_PARTS+=("  $line")
-                done <<< "$recent_str"
-            fi
+    if [[ -n "$recent_out" ]]; then
+        recent_str=$(echo "$recent_out" | jq -r '.rows[]? | "#\(.id) [\(.kind)] \(.content[0:80])"' 2>/dev/null || true)
+        if [[ -n "$recent_str" ]]; then
+            TOPOLOGY_PARTS+=("Recent (${REALM}):")
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && TOPOLOGY_PARTS+=("  $line")
+            done <<< "$recent_str"
         fi
     fi
 
-    # Summary counts
-    count_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
-        --query "SELECT COUNT(*) as total, COUNT(CASE WHEN priority_tier = 2 THEN 1 END) as critical, COUNT(CASE WHEN pinned = true THEN 1 END) as pinned FROM memory" \
-        --json 2>/dev/null || true)
     if [[ -n "$count_out" ]]; then
         total_mem=$(echo "$count_out" | jq -r '.rows[0]?.total // 0' 2>/dev/null || echo "0")
         critical_mem=$(echo "$count_out" | jq -r '.rows[0]?.critical // 0' 2>/dev/null || echo "0")
