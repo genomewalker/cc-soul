@@ -1,90 +1,197 @@
 #!/usr/bin/env python3
-"""G0 golden-set recall grader.
+"""G0 recall grader — nDCG@10 scoring against memory-ID ground truth.
 
-Runs each golden query against the live chitta daemon, scores hit@5
-(case-insensitive OR-match of expected keywords against the top-5 result
-text), aggregates the mean as precision@5, writes a timestamped JSON
-report, and prints a colored summary.
+Two-phase design:
+  --bootstrap   Discover gold memory IDs by running bootstrap queries, save to
+                grade-recall-goldids.json. Must be run once (or after memories
+                change significantly) before grading.
+  (default)     Load gold IDs, run natural-language queries, compute nDCG@10.
 
-Usage: grade-recall.py [--limit 5] [--min 0.7] [--quiet]
-Exit code: 0 if precision@5 >= --min, else 1.
+nDCG@10: for each query, rank position of gold memories in recall@LIMIT results.
+DCG = sum(1/log2(pos+2) for gold hits in top LIMIT). nDCG = DCG/IDCG.
+Binary relevance (1 if gold ID in results, 0 otherwise).
+
+Usage:
+  grade-recall.py --bootstrap [--limit 20]
+  grade-recall.py [--limit 20] [--min 0.7] [--quiet]
+
+Exit 0 if mean_nDCG@LIMIT >= --min, else 1.
 """
-import argparse
-import json
-import subprocess
-import sys
-import os
+import argparse, json, math, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-GOLDEN_VERSION = 1
+GOLDEN_VERSION = 2
 
+# Natural-language queries a user would actually type, paired with:
+#   bootstrap_query: a targeted query to find the gold memory during bootstrap
+#   gold_signature:  unique string that ONLY appears in the target memory (not in the query)
+#   desc:            human label
 GOLDEN_SET = [
-    {"query": "chaos nodes", "expected": ["dandycomp", "dandycomp01fl", "dandycomp*fl"], "desc": "cluster alias"},
-    {"query": "provenance dedup signal write-gate done", "expected": ["provenance", "signal", "write-gate", "done", "dedup"], "desc": "prov dedup gate"},
-    {"query": "domain reliability recurrence correction realm recovery", "expected": ["reliability", "domain", "recurrence", "realm", "correction"], "desc": "reliability wiring"},
-    {"query": "recall sampler realm cap compliance stratified", "expected": ["realm", "sampler", "cap", "recall", "compliance"], "desc": "sampler fix"},
-    {"query": "NFS resurrection", "expected": ["Isilon", "snapshot", "resurrection"], "desc": "NFS gotcha"},
-    {"query": "dream wander gap filling", "expected": ["gap", "dream", "curiosity"], "desc": "dream sweep"},
-    {"query": "forward bet prediction", "expected": ["prediction", "horizon", "status:open", "wisdom"], "desc": "forward bet"},
-    {"query": "chitta-field build cmake cargo rust", "expected": ["chitta-field", "cmake", "cargo", "build", "rust"], "desc": "build toolchain"},
-    {"query": "HNSW semantic search", "expected": ["semantic", "embedding", "hnsw", "cosine"], "desc": "search arch"},
-    {"query": "distillation wisdom episode", "expected": ["distill", "wisdom", "episode", "ssl"], "desc": "distillation pipeline"},
+    {
+        "query": "chaos nodes",
+        "bootstrap_query": "dandycomp ssh direct no slurm chaos nodes",
+        "gold_signature": "dandycomp*fl",
+        "desc": "cluster alias",
+    },
+    {
+        "query": "how does provenance deduplication work",
+        "bootstrap_query": "content_prov_idx done signal write-gate dedup hash provenance",
+        "gold_signature": "[done] provenance",
+        "desc": "prov dedup gate",
+    },
+    {
+        "query": "how does domain reliability work",
+        "bootstrap_query": "record_partial_success domain reliability recurrence beta prior",
+        "gold_signature": "record_partial_success",
+        "desc": "reliability wiring",
+    },
+    {
+        "query": "why does recall get capped per realm",
+        "bootstrap_query": "stratify recall realm cap compliance stratified sampler",
+        "gold_signature": "stratify_recall_hits",
+        "desc": "sampler fix",
+    },
+    {
+        "query": "NFS resurrection problem",
+        "bootstrap_query": "Isilon NFS resurrection snapshot deleted files resurrect",
+        "gold_signature": "Isilon",
+        "desc": "NFS gotcha",
+    },
+    {
+        "query": "dream sweep gap filling",
+        "bootstrap_query": "dream wander gap curiosity cross-session distillation sweep",
+        "gold_signature": "dream-sweep",
+        "desc": "dream sweep",
+    },
+    {
+        "query": "forward bet prediction horizon",
+        "bootstrap_query": "prediction horizon status:open forward bet wisdom testable",
+        "gold_signature": "status:open",
+        "desc": "forward bet",
+    },
+    {
+        "query": "how to build chitta-field",
+        "bootstrap_query": "chitta-field build cmake cargo rust toolchain 1.93.0",
+        "gold_signature": "1.93.0",
+        "desc": "build toolchain",
+    },
+    {
+        "query": "how does semantic search work",
+        "bootstrap_query": "HNSW semantic search embedding cosine similarity recall chitta-field",
+        "gold_signature": "semantic similarity",
+        "desc": "search arch",
+    },
+    {
+        "query": "distillation pipeline wisdom episode",
+        "bootstrap_query": "distill wisdom episode ssl synthesis pipeline",
+        "gold_signature": "distill",
+        "desc": "distillation pipeline",
+    },
 ]
 
-RESULTS_PATH = Path(__file__).resolve().parent / "grade-recall-results.json"
+RESULTS_PATH    = Path(__file__).resolve().parent / "grade-recall-results.json"
+GOLD_IDS_PATH   = Path(__file__).resolve().parent / "grade-recall-goldids.json"
 
-GREEN = "\033[32m"
-RED = "\033[31m"
-BOLD = "\033[1m"
-RESET = "\033[0m"
+GREEN = "\033[32m"; RED = "\033[31m"; YELLOW = "\033[33m"
+BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
 
 
-def recall(query, limit):
+def recall(query: str, limit: int) -> list[dict]:
     env = dict(os.environ, SQZ_NO_DEDUP="1")
     out = subprocess.run(
         ["chitta", "recall", "--query", query, "--limit", str(limit), "--json"],
         capture_output=True, text=True, timeout=30, env=env,
     )
-    data = json.loads(out.stdout)
-    return [r.get("text", "") for r in data.get("results", [])]
+    try:
+        return json.loads(out.stdout).get("results", [])
+    except Exception:
+        return []
 
 
-def grade_one(item, limit):
-    texts = recall(item["query"], limit)
-    blob = "\n".join(texts).lower()
-    hits = [kw for kw in item["expected"] if kw.lower() in blob]
+def ndcg(positions: list[int], n_gold: int, k: int) -> float:
+    dcg = sum(1.0 / math.log2(p + 2) for p in positions if p < k)
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(min(n_gold, k)))
+    return dcg / idcg if idcg > 0 else 0.0
+
+
+def bootstrap(limit: int) -> dict[str, list[str]]:
+    """Discover gold memory IDs for each golden query. Returns {desc: [id, ...]}."""
+    gold_ids: dict[str, list[str]] = {}
+    for item in GOLDEN_SET:
+        sig = item["gold_signature"].lower()
+        results = recall(item["bootstrap_query"], limit)
+        hits = [r for r in results if sig in r.get("text", "").lower()]
+        if not hits:
+            # fallback: try the natural query
+            results2 = recall(item["query"], limit)
+            hits = [r for r in results2 if sig in r.get("text", "").lower()]
+        ids = [h["id"] for h in hits]
+        gold_ids[item["desc"]] = ids
+        status = f"{GREEN}found {len(ids)} gold(s){RESET}" if ids else f"{RED}NOT FOUND{RESET}"
+        print(f"  {item['desc']:35} {status}")
+        if ids:
+            for h in hits[:2]:
+                print(f"    {DIM}{h['text'][:80]}{RESET}")
+    return gold_ids
+
+
+def grade_one(item: dict, gold_ids: dict, limit: int) -> dict:
+    ids = gold_ids.get(item["desc"], [])
+    results = recall(item["query"], limit)
+    result_ids = [r["id"] for r in results]
+
+    positions = [result_ids.index(gid) for gid in ids if gid in result_ids]
+    score = ndcg(positions, max(len(ids), 1), limit)
+
     return {
         "query": item["query"],
         "desc": item["desc"],
-        "expected": item["expected"],
-        "hits": hits,
-        "n_results": len(texts),
-        "score": 1.0 if hits else 0.0,
-        "pass": bool(hits),
+        "gold_ids": ids,
+        "n_gold": len(ids),
+        "n_results": len(results),
+        "gold_positions": positions,
+        "ndcg": score,
+        "pass": score >= 0.5,
     }
 
 
 def main():
-    ap = argparse.ArgumentParser(description="G0 golden-set recall grader")
-    ap.add_argument("--limit", type=int, default=5)
+    ap = argparse.ArgumentParser(description="G0 recall grader (nDCG@10)")
+    ap.add_argument("--bootstrap", action="store_true", help="discover gold IDs and save")
+    ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
-    records = [grade_one(it, a.limit) for it in GOLDEN_SET]
-    npass = sum(r["pass"] for r in records)
-    precision = npass / len(records)
+    if a.bootstrap:
+        print(f"{BOLD}Bootstrapping gold memory IDs (limit={a.limit})...{RESET}")
+        gold_ids = bootstrap(a.limit)
+        GOLD_IDS_PATH.write_text(json.dumps({"version": GOLDEN_VERSION, "ids": gold_ids}, indent=2) + "\n")
+        print(f"\n{GREEN}Saved: {GOLD_IDS_PATH}{RESET}")
+        found = sum(1 for v in gold_ids.values() if v)
+        print(f"{found}/{len(GOLDEN_SET)} queries have gold IDs.")
+        return
+
+    # Load gold IDs
+    if not GOLD_IDS_PATH.exists():
+        print(f"{RED}No gold IDs file. Run: grade-recall.py --bootstrap{RESET}", file=sys.stderr)
+        sys.exit(2)
+
+    stored = json.loads(GOLD_IDS_PATH.read_text())
+    gold_ids = stored.get("ids", {})
+
+    records = [grade_one(it, gold_ids, a.limit) for it in GOLDEN_SET]
+    mean_ndcg = sum(r["ndcg"] for r in records) / len(records) if records else 0.0
     ts = datetime.now(timezone.utc).isoformat()
 
     report = {
         "ts": ts,
         "version": GOLDEN_VERSION,
         "limit": a.limit,
-        "precision_at_5": precision,
+        "metric": "mean_nDCG",
+        "score": mean_ndcg,
         "n": len(records),
-        "pass": npass,
-        "fail": len(records) - npass,
         "records": records,
     }
     RESULTS_PATH.write_text(json.dumps(report, indent=2) + "\n")
@@ -93,14 +200,15 @@ def main():
         for r in records:
             color = GREEN if r["pass"] else RED
             mark = "PASS" if r["pass"] else "FAIL"
-            print(f"{color}[{mark}]{RESET} {r['query']!r:42} hits={r['hits']}")
-        verdict = GREEN if precision >= a.min else RED
-        print(f"{BOLD}{verdict}precision@{a.limit} = {precision:.3f} "
-              f"({npass}/{len(records)}){RESET}")
+            pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
+            no_gold = f"{YELLOW}(no gold IDs){RESET}" if not r["n_gold"] else ""
+            print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str} {no_gold}")
+        verdict = GREEN if mean_ndcg >= a.min else RED
+        print(f"\n{BOLD}{verdict}mean nDCG@{a.limit} = {mean_ndcg:.3f}{RESET}  (min={a.min})")
         print(f"report: {RESULTS_PATH}")
 
-    print(f"SCORE={precision:.4f}")
-    sys.exit(0 if precision >= a.min else 1)
+    print(f"SCORE={mean_ndcg:.4f}")
+    sys.exit(0 if mean_ndcg >= a.min else 1)
 
 
 if __name__ == "__main__":
