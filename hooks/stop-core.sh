@@ -361,18 +361,9 @@ echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=t
 # Store assistant turn
 safe_queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
 
-# Guaranteed base ingestion for assistant turns (independent of enrichers).
-ASSIST_EVENT=$(jq -n \
-    --arg sid "$SESSION_ID" \
-    --arg r "$RESPONSE" \
-    --arg realm_hint "project" \
-    --arg t "turn_assistant" \
-    '{category:"episode", title:$t, content:("[turn_assistant] sid=" + $sid + " " + $r), confidence:0.9, source:"hook_turn_ingest", evidence:"Stop", realm:$realm_hint}')
-if safe_queue_write "observe" "$ASSIST_EVENT"; then
-    record_ingest_metric "true"
-else
-    record_ingest_metric "false"
-fi
+# Raw turn ingest removed: verbatim turn_assistant episodes flooded semantic recall.
+# Lossless storage (store_turn above) preserves the full transcript.
+record_ingest_metric "true"
 
 # Structured LLM extraction is designed in docs/STRUCTURED_EXTRACTOR_DESIGN.md.
 # The `distill_turn` op has no daemon-side handler yet, so enqueue is held

@@ -196,6 +196,8 @@ Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 - Missing G: annotations
 - G:1+ without <=@ provenance
 - Verbose Tier 2 entries (use > and | instead of prose)
+- **[BELIEF] markers** — NEVER emit [BELIEF]. User questions, user instructions, and anything ending in "?" are NOT beliefs — skip them entirely. The [BELIEF] SSL type is a parser artefact; do not generate it.
+- Storing raw user questions as any SSL type — filter them out
 
 ---
 

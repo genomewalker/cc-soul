@@ -100,18 +100,10 @@ TURN_INDEX=$(get_next_turn "$SESSION_ID")
 # Store user turn in lossless conversation storage (uses lib.sh queue_write with ack_id)
 safe_queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX}"
 
-# Guaranteed base ingestion for user turns (independent of enrichers).
-USER_EVENT=$(jq -n \
-    --arg sid "$SESSION_ID" \
-    --arg q "$QUERY" \
-    --arg realm_hint "project" \
-    --arg t "turn_user" \
-    '{category:"episode", title:$t, content:("[turn_user] sid=" + $sid + " " + $q), confidence:0.9, source:"hook_turn_ingest", evidence:"UserPromptSubmit", realm:$realm_hint}')
-if safe_queue_write "observe" "$USER_EVENT"; then
-    record_ingest_metric "true"
-else
-    record_ingest_metric "false"
-fi
+# Raw turn ingest removed: verbatim turn_user episodes flooded semantic recall
+# with conversation fragments, preventing structured fact retrieval.
+# Lossless storage (store_turn above) preserves the full transcript.
+record_ingest_metric "true"
 
 # Use clean query for all recall and pattern detection (strip markup from QUERY)
 QUERY="$CLEAN_QUERY"
