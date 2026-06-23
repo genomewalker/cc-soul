@@ -2260,6 +2260,11 @@ async def call_tool(name: str, arguments: dict):
         if internal:
             arguments["realm"] = internal
 
+    # Genome 'process' memories are internal cognitive-config state: default
+    # them to realm-private visibility (0) unless the caller overrides.
+    if name == "remember" and arguments.get("type") == "process":
+        arguments.setdefault("visibility", 0)
+
     # P3: Idempotency guard for compliance hook memories within a 60s window.
     if name == "remember":
         source_tool = arguments.get("source_tool", "")
