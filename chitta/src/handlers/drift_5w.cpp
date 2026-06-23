@@ -93,9 +93,13 @@ ToolResult FieldRpcHandler::tool_recall_ucb1(const json& params) {
     size_t fetch_k = static_cast<size_t>(params.value("fetch_k", 40));
 
     auto embedding = embed_query(query);
-    if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
-    auto hits = field_store_->recall(embedding, fetch_k, realm);
+    std::vector<FieldRecallHit> hits;
+    if (!embedding.empty()) {
+        hits = field_store_->recall(embedding, fetch_k, realm);
+    } else {
+        hits = field_store_->recall_keyword(query, fetch_k);
+    }
     size_t total = field_store_->memory_count();
 
     // Compute UCB1 scores and sort

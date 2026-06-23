@@ -108,9 +108,13 @@ ToolResult FieldRpcHandler::tool_show_conflicts(const json& params) {
     std::string realm = params.value("realm", "");
 
     auto embedding = embed_query(query);
-    if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
-    auto hits = field_store_->recall(embedding, limit, realm);
+    std::vector<FieldRecallHit> hits;
+    if (!embedding.empty()) {
+        hits = field_store_->recall(embedding, limit, realm);
+    } else {
+        hits = field_store_->recall_keyword(query, limit);
+    }
 
     json groups = json::array();
     std::ostringstream ss;

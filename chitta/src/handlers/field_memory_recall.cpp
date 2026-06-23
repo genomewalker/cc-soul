@@ -531,13 +531,15 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     std::string realm = params.value("realm", "");
 
     auto embedding = embed_query(query);
-    if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
-    auto semantic_hits = field_store_->recall(embedding, limit, realm);
-    semantic_hits.erase(
-        std::remove_if(semantic_hits.begin(), semantic_hits.end(),
-            [](const FieldRecallHit& h) { return h.content.empty(); }),
-        semantic_hits.end());
+    std::vector<FieldRecallHit> semantic_hits;
+    if (!embedding.empty()) {
+        semantic_hits = field_store_->recall(embedding, limit, realm);
+        semantic_hits.erase(
+            std::remove_if(semantic_hits.begin(), semantic_hits.end(),
+                [](const FieldRecallHit& h) { return h.content.empty(); }),
+            semantic_hits.end());
+    }
     auto keyword_hits  = field_store_->recall_keyword(query, limit);
 
     // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
@@ -740,7 +742,18 @@ ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     std::string realm = params.value("realm", "");
 
     auto q0 = embed_query(query);
-    if (q0.empty()) return ToolResult::error("Failed to embed query");
+    if (q0.empty()) {
+        // Embed queue saturated or model unavailable — fall back to keyword-only.
+        auto kw_hits = field_store_->recall_keyword(query, k);
+        json kw_json = hits_to_results_json(kw_hits);
+        std::ostringstream ss;
+        ss << "Found " << kw_json.size() << " results (keyword fallback, embed unavailable):\n";
+        for (const auto& r : kw_json) {
+            int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
+            ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
+        }
+        return ToolResult::ok(ss.str(), {{"results", kw_json}, {"passes", 0}, {"fallback", "keyword"}});
+    }
 
     auto query_embedding = q0;  // mutable copy refined each pass
     float prev_entropy = -1.0f;

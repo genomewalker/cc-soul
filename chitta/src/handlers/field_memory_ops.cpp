@@ -466,9 +466,13 @@ ToolResult FieldRpcHandler::tool_explore_recall(const json& params) {
     size_t limit = static_cast<size_t>(params.value("limit", 10));
 
     auto embedding = embed_query(query);
-    if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
-    auto hits = field_store_->recall(embedding, limit);
+    std::vector<FieldRecallHit> hits;
+    if (!embedding.empty()) {
+        hits = field_store_->recall(embedding, limit);
+    } else {
+        hits = field_store_->recall_keyword(query, limit);
+    }
     json results = json::array();
     std::ostringstream ss;
     for (const auto& h : hits) {
