@@ -213,10 +213,23 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");
 
-    size_t limit      = static_cast<size_t>(params.value("limit", 10));
-    std::string realm = params.value("realm", "");
-    std::string tag   = params.value("tag", "");
-    bool expand       = params.value("expand", true);
+    size_t limit         = static_cast<size_t>(params.value("limit", 10));
+    std::string realm    = params.value("realm", "");
+    std::string tag      = params.value("tag", "");
+    std::string strategy = params.value("strategy", "");
+    bool expand          = params.value("expand", true);
+
+    // Field-RAG / Modern Hopfield mode: bypass RRF, run DAM relaxation.
+    if (strategy == "field" && params.contains("_preembedding")) {
+        auto emb  = params["_preembedding"].get<std::vector<float>>();
+        auto hits = field_store_->recall_field(emb, query, limit, realm);
+        hits.erase(
+            std::remove_if(hits.begin(), hits.end(),
+                [](const FieldRecallHit& h) { return h.content.empty(); }),
+            hits.end());
+        json results = hits_to_results_json(hits, false);
+        return ToolResult::ok(std::to_string(hits.size()) + " field memories", {{"results", results}});
+    }
 
     // Fetch more than needed so tag filtering has candidates to work with
     size_t fetch_limit = tag.empty() ? limit : limit * 8;
