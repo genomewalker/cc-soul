@@ -348,16 +348,23 @@ case "$MATCHER" in
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] Indexed file. Prefer mcp__chitta-bridge__read_symbol/smart_context over full Read for large files."}}\n'
         fi
 
-        # ─── Read dedup: deny large re-reads of unchanged files ───────────────────
-        # Forces sqz_read_file which returns a 13-token §ref§ for cached content.
-        if [[ "$line_count" -gt 200 && -n "$_session_id" && "$_allow_read" != "1" ]]; then
+        # ─── Read dedup: route re-reads of unchanged files to sqz ────────────────
+        if [[ "$line_count" -gt 200 && -n "$_session_id" && "$_allow_read" != "1" && "$_is_system_path" == "0" ]]; then
             _file_mtime=$(stat -c %Y "$file_path" 2>/dev/null || echo 0)
             _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
             _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
             if grep -qF "$_file_hash" "$_read_cache" 2>/dev/null; then
-                _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
-                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (mtime unchanged, %d lines). sqz_read_file returns a 13-token §ref§ for cached content."}}\n' \
-                    "$(basename "$file_path")" "$line_count"
+                if _should_enforce; then
+                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "read-dedup" 1
+                    _deny_msg=$(printf '[read-dedup] %s already read this session (mtime unchanged, %d lines). Use sqz_read_file tool — returns a 13-token §ref§ for cached content. Set CC_SOUL_ALLOW_READ=1 to bypass.' \
+                        "$(basename "$file_path")" "$line_count")
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$_deny_msg"
+                    exit 0
+                else
+                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines). sqz_read_file returns a 13-token §ref§ for cached content."}}\n' \
+                        "$(basename "$file_path")" "$line_count"
+                fi
             fi
             printf '%s\n' "$_file_hash" >> "$_read_cache" 2>/dev/null || true
         fi

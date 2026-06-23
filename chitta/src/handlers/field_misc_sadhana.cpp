@@ -338,11 +338,22 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
 
     std::string topic;
 
-    // Priority 1: open questions / gaps
+    // Priority 1: open questions / gaps (by kind)
     auto gaps = field_store_->recall_by_kind("question", 5);
     if (!gaps.empty()) {
         topic = gaps[0].content;
         if (topic.size() > 100) topic = topic.substr(0, 100);
+    }
+
+    // Priority 1b: [gap]-tagged memories written by dream agent via `chitta remember`
+    if (topic.empty()) {
+        auto gap_hits = field_store_->recall_keyword("[gap]", 5);
+        if (!gap_hits.empty()) {
+            topic = gap_hits[0].content;
+            if (topic.size() > 6 && topic.substr(0, 6) == "[gap] ")
+                topic = topic.substr(6);
+            if (topic.size() > 100) topic = topic.substr(0, 100);
+        }
     }
 
     // Priority 2: low-confidence memories
