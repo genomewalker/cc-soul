@@ -278,6 +278,16 @@ fi
 # Gate: skip LLM call if fallback already produced results
 if [[ "${SKIP_LLM:-false}" != "true" ]]; then
 
+    # Persona injection: select a reasoning persona based on session goal/realm
+    SCRIPT_DIR_PRE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SESSION_GOAL="${SESSION_ID:-distillation}"
+    PERSONA_INJECT=$(bash "${SCRIPT_DIR_PRE}/inject-persona.sh" "$SESSION_GOAL $REALM" 2>/dev/null || echo "")
+    DISTILL_SYSTEM_PROMPT="You are a knowledge distiller. Extract learnings in SSL v0.4 format. Output ONLY SSL-formatted learnings with G:N granularity and A:v,a affect annotations. G:1+ memories require <=@provenance."
+    if [[ -n "$PERSONA_INJECT" ]]; then
+        DISTILL_SYSTEM_PROMPT="${PERSONA_INJECT} ${DISTILL_SYSTEM_PROMPT}"
+        echo "[distill] Persona injected: ${PERSONA_INJECT:0:60}..." >&2
+    fi
+
     echo "[distill] Session $SESSION_ID: Calling $MODEL via $ENDPOINT..."
 
     # Build JSON request
@@ -286,11 +296,11 @@ if [[ "${SKIP_LLM:-false}" != "true" ]]; then
 import json, sys
 prompt = sys.stdin.read()
 req = {'model': '$MODEL', 'messages': [
-    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.4 format. Output ONLY SSL-formatted learnings with G:N granularity and A:v,a affect annotations. G:1+ memories require <=@provenance.'},
+    {'role': 'system', 'content': sys.argv[1]},
     {'role': 'user', 'content': prompt}
 ], 'temperature': 0.3, 'max_tokens': 4096}
 json.dump(req, open('$TMPJSON', 'w'), ensure_ascii=True)
-" <<< "$PROMPT"
+" "$DISTILL_SYSTEM_PROMPT" <<< "$PROMPT"
 
     RESPONSE=$(curl -sL --max-time 180 \
         -H "Content-Type: application/json" \
