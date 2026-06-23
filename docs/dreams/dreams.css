@@ -218,6 +218,40 @@
   color: var(--sandal-300);
 }
 
+/* ── Prev/next dream navigation ──────────── */
+.dream-prevnext {
+  max-width: 700px;
+  margin: 4rem auto 0;
+  padding: 0 1.5rem;
+}
+
+.dream-prevnext-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.5rem 0;
+  border-top: 1px solid rgba(157, 178, 217, 0.1);
+}
+
+.dream-prevnext a {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: rgba(203, 175, 134, 0.6);
+  max-width: 45%;
+  line-height: 1.5;
+  transition: color 0.2s ease;
+}
+
+.dream-prevnext a:hover {
+  color: var(--sandal-300);
+}
+
+.prevnext-next {
+  text-align: right;
+  margin-left: auto;
+}
+
 /* ── Responsive ───────────────────────────── */
 @media (max-width: 640px) {
   .dreams-grid {
