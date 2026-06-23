@@ -73,6 +73,12 @@ int cf_recall_semantic_ctx(struct CfHandle* h,
     float query_valence, float query_arousal,
     CfRecallHit* buf, size_t buf_cap, size_t* written);
 
+// Field-RAG / Modern Hopfield recall FFI
+int cf_recall_field(struct CfHandle* h,
+    const float* query_embedding, size_t embedding_len,
+    const char* query_text, const char* realm, size_t k,
+    CfRecallHit* buf, size_t buf_cap, size_t* written);
+
 // FEP attractor network FFI
 float cf_reconstruction_error(const struct CfHandle* h, uint64_t memory_id);
 float cf_memory_surprise(const struct CfHandle* h, uint64_t memory_id);
@@ -619,6 +625,28 @@ public:
             query_embedding.data(), query_embedding.size(),
             realm_ptr, k,
             query_valence, query_arousal,
+            buf, MAX_HITS, &written
+        );
+        cf_checked(r, __func__);
+        return hits_to_results(buf, written);
+    }
+
+    /// Field-RAG recall — Modern Hopfield / DAM relaxation over HNSW candidates.
+    std::vector<FieldRecallHit> recall_field(
+        const std::vector<float>& query_embedding,
+        const std::string&        query_text,
+        size_t                    k,
+        const std::string&        realm = ""
+    ) {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+        const char* realm_ptr  = realm.empty()      ? nullptr : realm.c_str();
+        const char* qtext_ptr  = query_text.empty() ? nullptr : query_text.c_str();
+        int r = cf_recall_field(
+            handle_,
+            query_embedding.data(), query_embedding.size(),
+            qtext_ptr, realm_ptr, k,
             buf, MAX_HITS, &written
         );
         cf_checked(r, __func__);
