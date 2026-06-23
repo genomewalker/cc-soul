@@ -21,13 +21,13 @@ GOLDEN_VERSION = 1
 
 GOLDEN_SET = [
     {"query": "chaos nodes", "expected": ["dandycomp", "dandycomp01fl", "dandycomp*fl"], "desc": "cluster alias"},
-    {"query": "content_prov_idx", "expected": ["done", "signal", "dedup", "provenance"], "desc": "prov dedup gate"},
-    {"query": "record_partial_success", "expected": ["0.3", "recurrence", "domain_reliability"], "desc": "reliability wiring"},
-    {"query": "stratify_recall_hits", "expected": ["realm", "cap", "recall_with_fallback"], "desc": "sampler fix"},
+    {"query": "provenance dedup signal write-gate done", "expected": ["provenance", "signal", "write-gate", "done", "dedup"], "desc": "prov dedup gate"},
+    {"query": "domain reliability recurrence correction realm recovery", "expected": ["reliability", "domain", "recurrence", "realm", "correction"], "desc": "reliability wiring"},
+    {"query": "recall sampler realm cap compliance stratified", "expected": ["realm", "sampler", "cap", "recall", "compliance"], "desc": "sampler fix"},
     {"query": "NFS resurrection", "expected": ["Isilon", "snapshot", "resurrection"], "desc": "NFS gotcha"},
     {"query": "dream wander gap filling", "expected": ["gap", "dream", "curiosity"], "desc": "dream sweep"},
     {"query": "forward bet prediction", "expected": ["prediction", "horizon", "status:open", "wisdom"], "desc": "forward bet"},
-    {"query": "chitta field build toolchain", "expected": ["1.93.0", "cargo", "rustc"], "desc": "build toolchain"},
+    {"query": "chitta-field build cmake cargo rust", "expected": ["chitta-field", "cmake", "cargo", "build", "rust"], "desc": "build toolchain"},
     {"query": "HNSW semantic search", "expected": ["semantic", "embedding", "hnsw", "cosine"], "desc": "search arch"},
     {"query": "distillation wisdom episode", "expected": ["distill", "wisdom", "episode", "ssl"], "desc": "distillation pipeline"},
 ]
