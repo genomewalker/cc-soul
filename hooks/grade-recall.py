@@ -97,12 +97,12 @@ GREEN = "\033[32m"; RED = "\033[31m"; YELLOW = "\033[33m"
 BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
 
 
-def recall(query: str, limit: int) -> list[dict]:
+def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
     env = dict(os.environ, SQZ_NO_DEDUP="1")
-    out = subprocess.run(
-        ["chitta", "recall", "--query", query, "--limit", str(limit), "--json"],
-        capture_output=True, text=True, timeout=30, env=env,
-    )
+    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit), "--json"]
+    if strategy:
+        cmd += ["--strategy", strategy]
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env,)
     try:
         return json.loads(out.stdout).get("results", [])
     except Exception:
@@ -115,16 +115,16 @@ def ndcg(positions: list[int], n_gold: int, k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def bootstrap(limit: int) -> dict[str, list[str]]:
+def bootstrap(limit: int, strategy: str = "") -> dict[str, list[str]]:
     """Discover gold memory IDs for each golden query. Returns {desc: [id, ...]}."""
     gold_ids: dict[str, list[str]] = {}
     for item in GOLDEN_SET:
         sig = item["gold_signature"].lower()
-        results = recall(item["bootstrap_query"], limit)
+        results = recall(item["bootstrap_query"], limit, strategy)
         hits = [r for r in results if sig in r.get("text", "").lower()]
         if not hits:
             # fallback: try the natural query
-            results2 = recall(item["query"], limit)
+            results2 = recall(item["query"], limit, strategy)
             hits = [r for r in results2 if sig in r.get("text", "").lower()]
         ids = [h["id"] for h in hits]
         gold_ids[item["desc"]] = ids
@@ -136,13 +136,26 @@ def bootstrap(limit: int) -> dict[str, list[str]]:
     return gold_ids
 
 
-def grade_one(item: dict, gold_ids: dict, limit: int) -> dict:
+def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dict:
     ids = gold_ids.get(item["desc"], [])
-    results = recall(item["query"], limit)
+    sig = item["gold_signature"].lower()
+    results = recall(item["query"], limit, strategy)
     result_ids = [r["id"] for r in results]
+    result_texts = [r.get("text", "").lower() for r in results]
 
+    # Primary: ID-based positions (exact gold match)
     positions = [result_ids.index(gid) for gid in ids if gid in result_ids]
-    score = ndcg(positions, max(len(ids), 1), limit)
+
+    # Fallback: signature-based positions when no ID match (strategy surfaces different
+    # memory IDs carrying the same content, e.g. SSL wisdoms vs NL memories)
+    if not positions:
+        positions = [i for i, t in enumerate(result_texts) if sig in t]
+        sig_fallback = bool(positions)
+    else:
+        sig_fallback = False
+
+    n_gold = max(len(ids), 1) if ids else max(len(positions), 1)
+    score = ndcg(positions, n_gold, limit)
 
     return {
         "query": item["query"],
@@ -151,6 +164,7 @@ def grade_one(item: dict, gold_ids: dict, limit: int) -> dict:
         "n_gold": len(ids),
         "n_results": len(results),
         "gold_positions": positions,
+        "sig_fallback": sig_fallback,
         "ndcg": score,
         "pass": score >= 0.5,
     }
@@ -162,11 +176,12 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--strategy", default="", help="recall strategy (e.g. 'field')")
     a = ap.parse_args()
 
     if a.bootstrap:
-        print(f"{BOLD}Bootstrapping gold memory IDs (limit={a.limit})...{RESET}")
-        gold_ids = bootstrap(a.limit)
+        print(f"{BOLD}Bootstrapping gold memory IDs (limit={a.limit}, strategy={a.strategy or 'default'})...{RESET}")
+        gold_ids = bootstrap(a.limit, a.strategy)
         GOLD_IDS_PATH.write_text(json.dumps({"version": GOLDEN_VERSION, "ids": gold_ids}, indent=2) + "\n")
         print(f"\n{GREEN}Saved: {GOLD_IDS_PATH}{RESET}")
         found = sum(1 for v in gold_ids.values() if v)
@@ -181,7 +196,7 @@ def main():
     stored = json.loads(GOLD_IDS_PATH.read_text())
     gold_ids = stored.get("ids", {})
 
-    records = [grade_one(it, gold_ids, a.limit) for it in GOLDEN_SET]
+    records = [grade_one(it, gold_ids, a.limit, a.strategy) for it in GOLDEN_SET]
     mean_ndcg = sum(r["ndcg"] for r in records) / len(records) if records else 0.0
     ts = datetime.now(timezone.utc).isoformat()
 
@@ -202,7 +217,8 @@ def main():
             mark = "PASS" if r["pass"] else "FAIL"
             pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
             no_gold = f"{YELLOW}(no gold IDs){RESET}" if not r["n_gold"] else ""
-            print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str} {no_gold}")
+            sig_tag = f"{DIM}[sig]{RESET}" if r.get("sig_fallback") else ""
+            print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str} {no_gold}{sig_tag}")
         verdict = GREEN if mean_ndcg >= a.min else RED
         print(f"\n{BOLD}{verdict}mean nDCG@{a.limit} = {mean_ndcg:.3f}{RESET}  (min={a.min})")
         print(f"report: {RESULTS_PATH}")
