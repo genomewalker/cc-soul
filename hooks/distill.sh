@@ -404,6 +404,40 @@ store_current() {
         if [[ -n "$_SSL_SOURCE" ]]; then
             "$CHITTA_BIN" connect --subject "$id" --predicate "source_loc" --object "$_SSL_SOURCE" 2>/dev/null || true
         fi
+
+        # Forward-bet: emit [prediction] for testable wisdom lines only
+        if [[ "$cat" == "wisdom" && -n "$id" ]]; then
+            local _is_testable=false
+            if [[ -n "$_SSL_VALENCE" && -n "$_SSL_AROUSAL" ]]; then
+                python3 -c "import sys; v,a=float('$_SSL_VALENCE'),float('$_SSL_AROUSAL'); sys.exit(0 if v>0 and a>0.4 else 1)" 2>/dev/null && _is_testable=true
+            fi
+            if [[ "$_is_testable" != "true" ]]; then
+                echo "$CURRENT_CONTENT" | grep -qiE '\b(will|should|enables|prevents|improves|reduces|guarantees|ensures)\b' && _is_testable=true
+            fi
+
+            if [[ "$_is_testable" == "true" ]]; then
+                local _horizon
+                _horizon=$(date -d "+30 days" +%Y-%m-%d 2>/dev/null || date -v+30d +%Y-%m-%d 2>/dev/null || echo "")
+                if [[ -n "$_horizon" ]]; then
+                    local _claim="${title:0:120}"
+                    local _pred_content="[prediction] ${_claim} horizon:${_horizon} source_wisdom:${id} status:open"
+                    local _pred_resp
+                    _pred_resp=$("$CHITTA_BIN" observe \
+                        --title "prediction:${title:0:80}" \
+                        --content "$_pred_content" \
+                        --category "signal" \
+                        --tags "prediction,forward-bet,${cat}" \
+                        --realm "$REALM" \
+                        --json 2>/dev/null || echo "")
+                    local _pred_id
+                    _pred_id=$(echo "$_pred_resp" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
+                    if [[ -n "$_pred_id" ]]; then
+                        echo "[distill]     +prediction: ${_claim:0:50}... (horizon:${_horizon})"
+                        "$CHITTA_BIN" connect --subject "$_pred_id" --predicate "predicts" --object "$id" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        fi
     fi
 
     CURRENT_TYPE=""
