@@ -984,32 +984,60 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
     // Assemble HTML from fixed template — model only provides text content
     std::ostringstream html_out;
     html_out << "<!DOCTYPE html>\n"
-             << "<html lang=\"en\"><head><meta charset=\"UTF-8\">\n"
-             << "<title>" << title << " - cc-soul dreams</title>\n"
+             << "<html lang=\"en\">\n<head>\n"
+             << "<meta charset=\"UTF-8\">\n"
+             << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+             << "<title>" << title << " \xe2\x80\x94 cc-soul dreams</title>\n"
              << "<meta name=\"description\" content=\"" << desc << "\">\n"
              << "<link rel=\"icon\" href=\"../favicon.svg\" type=\"image/svg+xml\">\n"
-             << "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400&display=swap\" rel=\"stylesheet\">\n"
+             << "<meta property=\"og:title\" content=\"" << title << " \xe2\x80\x94 cc-soul dreams\">\n"
+             << "<meta property=\"og:description\" content=\"" << desc << "\">\n"
+             << "<meta property=\"og:type\" content=\"article\">\n"
+             << "<meta property=\"og:image\" content=\"../favicon.svg\">\n"
+             << "<meta name=\"twitter:card\" content=\"summary\">\n"
+             << "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
+             << "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"
+             << "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap\" rel=\"stylesheet\">\n"
              << "<link rel=\"stylesheet\" href=\"../styles.css\">\n"
              << "<link rel=\"stylesheet\" href=\"dreams.css\">\n"
-             << "</head><body>\n"
-             << "<nav class=\"nav\"><div class=\"nav-inner\">"
-             << "<a href=\"../index.html\" class=\"nav-brand\">cc<span>-</span>soul</a>\n"
-             << "<ul class=\"nav-links\"><li><a href=\"../index.html\">Home</a></li>"
-             << "<li><a href=\"index.html\" class=\"active\">Dreams</a></li></ul>\n"
-             << "</div></nav>\n"
+             << "</head>\n<body>\n"
+             << "\n<!-- NAV -->\n"
+             << "<nav class=\"nav\">\n  <div class=\"nav-inner\">\n"
+             << "    <a href=\"../index.html\" class=\"nav-brand\">cc<span>-</span>soul</a>\n"
+             << "    <button class=\"nav-hamburger\" onclick=\"document.querySelector('.nav').classList.toggle('nav-open')\" aria-label=\"Menu\">\n"
+             << "      <span></span><span></span><span></span>\n    </button>\n"
+             << "    <ul class=\"nav-links\">\n"
+             << "      <li><a href=\"../index.html\">Home</a></li>\n"
+             << "      <li><a href=\"../getting-started.html\">Get Started</a></li>\n"
+             << "      <li><a href=\"../philosophy.html\">Philosophy</a></li>\n"
+             << "      <li><a href=\"../architecture.html\">Architecture</a></li>\n"
+             << "      <li><a href=\"../sadhana.html\">Sadhana</a></li>\n"
+             << "      <li><a href=\"index.html\" class=\"active\">Dreams</a></li>\n"
+             << "      <li><a href=\"../tools.html\">Tools</a></li>\n"
+             << "      <li><a href=\"https://github.com/genomewalker/cc-soul\" target=\"_blank\" rel=\"noopener\">GitHub</a></li>\n"
+             << "    </ul>\n  </div>\n</nav>\n"
+             << "\n<!-- PAGE HEADER -->\n"
              << "<header class=\"page-header\"><div class=\"container\">\n"
              << "<div class=\"page-header-badge reveal\">Dream &middot; " << today << "</div>\n"
              << "<h1 class=\"reveal reveal-delay-1\">" << title << "</h1>\n"
              << "<p class=\"page-header-sub reveal reveal-delay-2\">" << desc << "</p>\n"
              << "</div></header>\n"
-             << "<main class=\"dream-content\"><div class=\"dream-meta\">"
-             << "<a href=\"index.html\">&larr; All dreams</a></div>\n"
-             << "<article>\n";
-    if (!para1.empty())       html_out << "<p>" << para1 << "</p>\n";
-    if (!para2.empty())       html_out << "<p>" << para2 << "</p>\n";
-    if (!connections.empty()) html_out << "<h2>Connections</h2>\n<p>" << connections << "</p>\n";
-    if (!lingered.empty())    html_out << "<h2>What lingered</h2>\n<p>" << lingered << "</p>\n";
-    html_out << "</article></main></body></html>\n";
+             << "\n<!-- CONTENT -->\n"
+             << "<main class=\"dream-content\">\n"
+             << "  <div class=\"dream-meta\"><a href=\"index.html\">&larr; All dreams</a></div>\n"
+             << "  <article>\n";
+    if (!para1.empty())       html_out << "    <p>" << para1 << "</p>\n";
+    if (!para2.empty())       html_out << "    <p>" << para2 << "</p>\n";
+    if (!connections.empty()) html_out << "    <h2>Connections</h2>\n    <p>" << connections << "</p>\n";
+    if (!lingered.empty())    html_out << "    <h2>What lingered</h2>\n    <p>" << lingered << "</p>\n";
+    html_out << "  </article>\n</main>\n"
+             << "\n<!-- FOOTER -->\n"
+             << "<footer class=\"footer\">\n  <div class=\"container\">\n"
+             << "    <p>A dream by cc-soul &middot; " << today
+             << " &middot; <a href=\"index.html\">All dreams</a>"
+             << " &middot; <a href=\"https://github.com/genomewalker/cc-soul\" target=\"_blank\" rel=\"noopener\">GitHub</a></p>\n"
+             << "  </div>\n</footer>\n"
+             << "</body>\n</html>\n";
     std::string html = html_out.str();
 
     // Write the dream page
@@ -1045,10 +1073,11 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
     }
 
     std::ostringstream card;
-    card << "\n    <article class=\"dream-card\">"
-         << "<div class=\"dream-date\">" << today << "</div>"
-         << "<h3 class=\"dream-title\"><a href=\"" << filename << "\">" << title << "</a></h3>"
-         << "<p class=\"dream-summary\">" << desc << "</p>"
+    card << "\n    <article class=\"dream-card\">\n"
+         << "  <div class=\"dream-date\">" << today << "</div>\n"
+         << "  <h2 class=\"dream-title\"><a href=\"" << filename << "\">" << title << "</a></h2>\n"
+         << "  <p class=\"dream-summary\">" << desc << "</p>\n"
+         << "  <div class=\"dream-meta-row\"><span>dream</span></div>\n"
          << "</article>";
 
     index_html.insert(pos + marker.size(), card.str());
