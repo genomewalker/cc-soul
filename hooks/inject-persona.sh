@@ -88,20 +88,26 @@ if [[ -z "$persona_lines" ]]; then
 fi
 
 best_score=0
+best_ntrig=9999
 best_injection=""
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     triggers="${line#*triggers:}"; triggers="${triggers%% injection:*}"
     injection="${line#*injection:}"
     score=0
+    ntrig=0
     IFS=',' read -r -a pats <<< "$triggers"
     for p in "${pats[@]}"; do
         p="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]' | sed 's/^ *//;s/ *$//')"
         [[ -z "$p" ]] && continue
+        ntrig=$((ntrig + 1))
         [[ "$task_lc" == *"$p"* ]] && score=$((score + 1))
     done
-    if (( score > best_score )); then
+    # Primary: higher score. Tiebreak: higher density (score/ntrig) via cross-multiply.
+    if (( score > best_score )) || \
+       (( score == best_score && score > 0 && score * best_ntrig > best_score * ntrig )); then
         best_score=$score
+        best_ntrig=$ntrig
         best_injection="$injection"
     fi
 done <<< "$persona_lines"
