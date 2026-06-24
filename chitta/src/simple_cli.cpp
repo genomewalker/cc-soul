@@ -87,6 +87,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
                int http_port, const std::string& http_static_dir,
+               int rpc_port,
                DaemonLock& lock) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
@@ -151,6 +152,28 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
             [&viz_server](const std::vector<uint64_t>& ids, int passes) {
                 if (viz_server) viz_server->push_recall_event(ids, passes);
             });
+    }
+
+    // HTTP RPC server — stateless JSON-RPC over HTTP so clients survive daemon restarts
+    std::unique_ptr<httplib::Server> rpc_http_svr;
+    std::thread rpc_http_thread;
+    if (rpc_port > 0) {
+        rpc_http_svr = std::make_unique<httplib::Server>();
+        rpc_http_svr->Post("/", [&handler](const httplib::Request& req, httplib::Response& res) {
+            auto parsed = json::parse(req.body, nullptr, false);
+            if (parsed.is_discarded()) {
+                res.status = 400;
+                res.set_content(R"({"error":"invalid json"})", "application/json");
+                return;
+            }
+            res.set_content(
+                handler.handle(parsed).dump(-1, ' ', false, json::error_handler_t::replace),
+                "application/json");
+        });
+        rpc_http_thread = std::thread([&rpc_http_svr, rpc_port]() {
+            rpc_http_svr->listen("127.0.0.1", rpc_port);
+        });
+        std::cerr << "[rpc-http] listening on 127.0.0.1:" << rpc_port << "\n";
     }
 
     // Sadhana manager — deferred until FieldStore is ready
@@ -872,6 +895,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     // while threads finish their current work.
     server.stop();
     if (viz_server) viz_server->stop();
+    if (rpc_http_svr) { rpc_http_svr->stop(); if (rpc_http_thread.joinable()) rpc_http_thread.join(); }
 
     // Clean pid/lock BEFORE joining: distillation/enrichment may be in a long
     // LLM call (>15s) that cannot be interrupted; the alarm below will _Exit
@@ -1044,6 +1068,10 @@ int main(int argc, char* argv[]) {
     // HTTP viz server config
     int http_port = 0;
     std::string http_static_dir;
+    int rpc_port = []() -> int {
+        const char* e = std::getenv("CHITTA_RPC_PORT");
+        return e ? std::atoi(e) : 0;
+    }();
 
     // Manual distill command args
     std::string distill_transcript_path;
@@ -1117,6 +1145,8 @@ int main(int argc, char* argv[]) {
             no_autonomous = true;
         } else if (strcmp(argv[i], "--merge-policy") == 0 && i + 1 < argc) {
             setenv("CHITTA_MERGE_POLICY", argv[++i], 1);
+        } else if (strcmp(argv[i], "--rpc-port") == 0 && i + 1 < argc) {
+            rpc_port = safe_stoi(argv[++i], "--rpc-port");
         } else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) {
             http_port = safe_stoi(argv[++i], "--http-port");
         } else if (strcmp(argv[i], "--http-static-dir") == 0 && i + 1 < argc) {
@@ -1344,7 +1374,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, &embed_queue, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, daemon_lock);
+        result = cmd_daemon(field_store, yantra_raw, &embed_queue, interval, *early_server, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, rpc_port, daemon_lock);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {
