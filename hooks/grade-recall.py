@@ -21,7 +21,7 @@ import argparse, json, math, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-GOLDEN_VERSION = 2
+GOLDEN_VERSION = 3
 
 # Natural-language queries a user would actually type, paired with:
 #   bootstrap_query: a targeted query to find the gold memory during bootstrap
@@ -147,16 +147,15 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     result_ids = [r["id"] for r in results]
     result_texts = [r.get("text", "").lower() for r in results]
 
-    # Primary: ID-based positions (exact gold match)
-    positions = [result_ids.index(gid) for gid in ids if gid in result_ids]
+    # Sig-based positions: primary stable key (survives re-ingest/NFS resurrection)
+    sig_positions = [i for i, t in enumerate(result_texts) if sig in t]
 
-    # Fallback: signature-based positions when no ID match (strategy surfaces different
-    # memory IDs carrying the same content, e.g. SSL wisdoms vs NL memories)
-    if not positions:
-        positions = [i for i, t in enumerate(result_texts) if sig in t]
-        sig_fallback = bool(positions)
-    else:
-        sig_fallback = False
+    # ID-based positions: secondary (may be stale after re-ingest)
+    id_positions = [result_ids.index(gid) for gid in ids if gid in result_ids]
+
+    # Union: take best coverage; sig is durable, ID is exact
+    positions = sorted(set(sig_positions) | set(id_positions))
+    sig_fallback = bool(sig_positions) and not id_positions
 
     n_gold = max(len(ids), 1) if ids else max(len(positions), 1)
     score = ndcg(positions, n_gold, limit)
@@ -178,14 +177,16 @@ def main():
     ap = argparse.ArgumentParser(description="G0 recall grader (nDCG@10)")
     ap.add_argument("--bootstrap", action="store_true", help="discover gold IDs and save")
     ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--bootstrap-limit", type=int, default=640, help="depth for bootstrap (default 640)")
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--strategy", default="", help="recall strategy (e.g. 'field')")
     a = ap.parse_args()
 
     if a.bootstrap:
-        print(f"{BOLD}Bootstrapping gold memory IDs (limit={a.limit}, strategy={a.strategy or 'default'})...{RESET}")
-        gold_ids = bootstrap(a.limit, a.strategy)
+        blimit = a.bootstrap_limit
+        print(f"{BOLD}Bootstrapping gold memory IDs (limit={blimit}, strategy={a.strategy or 'default'})...{RESET}")
+        gold_ids = bootstrap(blimit, a.strategy)
         GOLD_IDS_PATH.write_text(json.dumps({"version": GOLDEN_VERSION, "ids": gold_ids}, indent=2) + "\n")
         print(f"\n{GREEN}Saved: {GOLD_IDS_PATH}{RESET}")
         found = sum(1 for v in gold_ids.values() if v)
