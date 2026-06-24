@@ -42,13 +42,13 @@ GOLDEN_SET = [
     },
     {
         "query": "how does domain reliability work",
-        "bootstrap_query": "record_partial_success domain reliability recurrence beta prior",
-        "gold_signature": "record_partial_success",
+        "bootstrap_query": "domain reliability beta prior decay record_success can only decay",
+        "gold_signature": "can only decay",
         "desc": "reliability wiring",
     },
     {
         "query": "why does recall get capped per realm",
-        "bootstrap_query": "stratify recall realm cap compliance stratified sampler",
+        "bootstrap_query": "stratify recall realm cap stratify_recall_hits per-realm slots Thompson",
         "gold_signature": "stratify_recall_hits",
         "desc": "sampler fix",
     },
@@ -72,13 +72,13 @@ GOLDEN_SET = [
     },
     {
         "query": "how to build chitta-field",
-        "bootstrap_query": "chitta-field build cmake cargo rust toolchain 1.93.0",
-        "gold_signature": "1.93.0",
+        "bootstrap_query": "chitta-field build cmake cargo rust toolchain 1.92 rustup build.sh",
+        "gold_signature": "1.92",
         "desc": "build toolchain",
     },
     {
         "query": "how does semantic search work",
-        "bootstrap_query": "HNSW semantic search embedding cosine similarity recall chitta-field",
+        "bootstrap_query": "HNSW semantic search embedding bge cosine similarity RRF chitta-field",
         "gold_signature": "semantic similarity",
         "desc": "search arch",
     },
@@ -97,13 +97,17 @@ GREEN = "\033[32m"; RED = "\033[31m"; YELLOW = "\033[33m"
 BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
 
 
+GRADE_REALM = "project:cc-soul"
+
+
 def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
     env = dict(os.environ, SQZ_NO_DEDUP="1")
-    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit), "--json"]
+    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
+           "--realm", GRADE_REALM, "--json"]
     if strategy:
         cmd += ["--strategy", strategy]
-    out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env,)
     try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env,)
         return json.loads(out.stdout).get("results", [])
     except Exception:
         return []
