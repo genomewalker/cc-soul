@@ -355,11 +355,10 @@ case "$MATCHER" in
             _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
             if grep -qF "$_file_hash" "$_read_cache" 2>/dev/null; then
                 if _should_enforce; then
-                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "deny" "read-dedup" 1
-                    _deny_msg=$(printf '[read-dedup] %s already read this session (mtime unchanged, %d lines). Use sqz_read_file tool — returns a 13-token §ref§ for cached content. Set CC_SOUL_ALLOW_READ=1 to bypass.' \
-                        "$(basename "$file_path")" "$line_count")
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$_deny_msg"
-                    exit 0
+                    # advisory-only in enforce mode too: Edit tool requires a prior Read; hard-deny breaks Edit for unchanged files
+                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines). Use sqz_read_file — returns a 13-token §ref§ for cached content."}}' \
+                        "$(basename "$file_path")" "$line_count"
                 else
                     _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
                     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines). sqz_read_file returns a 13-token §ref§ for cached content."}}\n' \
