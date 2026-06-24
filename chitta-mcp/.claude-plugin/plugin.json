@@ -8,8 +8,8 @@
   "keywords": ["memory", "soul", "chitta", "code-intelligence", "mcp"],
   "mcpServers": {
     "chitta": {
-      "command": "chitta-mcp",
-      "description": "Soul memory and code intelligence daemon"
+      "url": "http://localhost:9481/mcp",
+      "description": "Soul memory and code intelligence daemon. Start server: chitta-mcp --http"
     }
   }
 }

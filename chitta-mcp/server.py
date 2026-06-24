@@ -15,6 +15,7 @@ Includes composite tools for token-efficient code intelligence:
 import os
 import json
 import socket
+from pathlib import Path
 import asyncio
 import itertools
 import logging
@@ -478,6 +479,45 @@ class ChittaClient:
             self.sock = None
 
 
+class ChittaHttpClient:
+    """HTTP client for chittad — survives daemon restarts (no persistent connection)."""
+
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self._ids = itertools.count(1)
+        self.lock = threading.Lock()
+
+    def connect(self) -> bool:
+        import urllib.request
+        try:
+            urllib.request.urlopen(
+                urllib.request.Request(self.base_url + "/",
+                    data=b'{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"health_check","arguments":{}}}',
+                    headers={"Content-Type": "application/json"}),
+                timeout=5)
+            return True
+        except Exception:
+            return False
+
+    def call(self, req: dict) -> Optional[str]:
+        import urllib.request
+        with self.lock:
+            req_id = next(self._ids)
+            req["id"] = req_id
+            try:
+                r = urllib.request.urlopen(
+                    urllib.request.Request(self.base_url + "/",
+                        data=json.dumps(req).encode(),
+                        headers={"Content-Type": "application/json"}),
+                    timeout=60)
+                return r.read().decode()
+            except Exception:
+                return None
+
+    def close(self):
+        pass  # stateless — nothing to close
+
+
 # Global client and server
 client: Optional[ChittaClient] = None
 server = Server("chitta-mcp")
@@ -507,6 +547,7 @@ _HOOK_DEDUP_WINDOW_S = 60.0
 def ensure_daemon() -> bool:
     """Ensure daemon is running and connected.
 
+    Uses HTTP if CHITTA_RPC_PORT is set; falls back to Unix socket.
     Uses atomic lock file creation to prevent race conditions.
     Only ONE process should spawn the daemon - others wait.
     """
@@ -514,14 +555,24 @@ def ensure_daemon() -> bool:
     import time
     import fcntl
 
-    socket_path = get_socket_path()
-
-    if client and client.sock:
-        return True
-
-    client = ChittaClient(socket_path)
-    if client.connect():
-        return True
+    rpc_port = os.environ.get("CHITTA_RPC_PORT", "")
+    if rpc_port:
+        base_url = f"http://127.0.0.1:{rpc_port}"
+        if not isinstance(client, ChittaHttpClient) or getattr(client, "base_url", "") != base_url:
+            client = ChittaHttpClient(base_url)
+        if client.connect():
+            return True
+        # Daemon not up yet — fall through to spawn logic below
+        socket_path = get_socket_path()
+    else:
+        socket_path = get_socket_path()
+        if isinstance(client, ChittaHttpClient):
+            client = None
+        if client and client.sock:
+            return True
+        client = ChittaClient(socket_path)
+        if client.connect():
+            return True
 
     # Socket doesn't exist or can't connect - wait for daemon
     # First, just wait - subconscious.sh hook usually starts daemon
@@ -2339,10 +2390,12 @@ def main():
     http_mode = "--http" in sys.argv or os.environ.get("CHITTA_MCP_HTTP")
     port = int(os.environ.get("CHITTA_MCP_PORT", "9481"))
 
-    # Parse --port from argv
+    # Parse --port / --rpc-port from argv
     for i, arg in enumerate(sys.argv):
         if arg == "--port" and i + 1 < len(sys.argv):
             port = int(sys.argv[i + 1])
+        if arg == "--rpc-port" and i + 1 < len(sys.argv):
+            os.environ["CHITTA_RPC_PORT"] = sys.argv[i + 1]
 
     if http_mode:
         _run_http(port)
@@ -2363,12 +2416,22 @@ def _run_stdio():
     asyncio.run(run())
 
 
+def _mcp_token() -> str:
+    token_file = Path(os.environ.get("MIND", Path.home() / ".claude" / "mind")) / ".mcp_token"
+    try:
+        return token_file.read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
 def _run_http(port: int):
     """Run as streamable HTTP MCP server for Codex, Cursor, Copilot CLI etc."""
     from starlette.applications import Starlette
     from starlette.routing import Mount
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, PlainTextResponse
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    token = _mcp_token()
 
     session_manager = StreamableHTTPSessionManager(
         app=server,
@@ -2381,6 +2444,16 @@ def _run_http(port: int):
     async def health(request):
         return JSONResponse({"status": "ok", "server": "chitta-mcp", "transport": "http"})
 
+    async def auth_middleware(scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith("/mcp"):
+            if token:
+                auth = dict(scope.get("headers", [])).get(b"authorization", b"").decode()
+                if auth != f"Bearer {token}":
+                    response = PlainTextResponse("Unauthorized", status_code=401)
+                    await response(scope, receive, send)
+                    return
+        await app(scope, receive, send)
+
     app = Starlette(
         routes=[
             Route("/health", health),
@@ -2392,7 +2465,7 @@ def _run_http(port: int):
         import uvicorn
 
         config = uvicorn.Config(
-            app,
+            auth_middleware,
             host="127.0.0.1",
             port=port,
             log_level="warning",
