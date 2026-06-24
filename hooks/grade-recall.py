@@ -129,7 +129,7 @@ def bootstrap(limit: int, strategy: str = "") -> dict[str, list[str]]:
         if not hits:
             results2 = recall(item["query"], limit, strategy)
             hits = [r for r in results2 if sig in r.get("text", "").lower()]
-        ids = [h["id"] for h in hits]
+        ids = [h["id"] for h in hits[:3]]  # top-3 ranked; avoids IDCG inflation from broad signatures
         gold_ids[item["desc"]] = ids
         status = f"{GREEN}found {len(ids)} gold(s){RESET}" if ids else f"{RED}NOT FOUND{RESET}"
         print(f"  {item['desc']:35} {status}")
@@ -156,7 +156,7 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     positions = sorted(set(sig_positions) | set(id_positions))
     sig_fallback = bool(sig_positions) and not id_positions
 
-    n_gold = max(len(ids), 1) if ids else max(len(positions), 1)
+    n_gold = max(len(ids), len(positions), 1)
     score = ndcg(positions, n_gold, limit)
 
     return {
