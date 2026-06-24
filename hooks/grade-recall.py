@@ -127,7 +127,6 @@ def bootstrap(limit: int, strategy: str = "") -> dict[str, list[str]]:
         results = recall(item["bootstrap_query"], limit, strategy)
         hits = [r for r in results if sig in r.get("text", "").lower()]
         if not hits:
-            # fallback: try the natural query
             results2 = recall(item["query"], limit, strategy)
             hits = [r for r in results2 if sig in r.get("text", "").lower()]
         ids = [h["id"] for h in hits]
