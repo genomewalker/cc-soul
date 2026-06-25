@@ -210,8 +210,12 @@ def main():
     ap.add_argument("--bootstrap-limit", type=int, default=640, help="depth for bootstrap (default 640)")
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--no-reranker", action="store_true", help="skip cross-encoder re-ranking")
     ap.add_argument("--strategy", default="", help="recall strategy (e.g. 'field')")
     a = ap.parse_args()
+    if a.no_reranker:
+        global _reranker
+        _reranker = False
 
     if a.bootstrap:
         blimit = a.bootstrap_limit
