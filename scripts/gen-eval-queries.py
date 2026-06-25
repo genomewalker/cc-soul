@@ -13,42 +13,94 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_OUT = ROOT / "hooks" / "chitta-eval-goldids.json"
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("CHITTA_EVAL_MODEL", "gemma4:27b")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+OLLAMA_MODEL = os.environ.get("CHITTA_EVAL_MODEL", "gemma3:27b")
 RECALL_LIMIT = 20
 VERIFY_STRATEGY = "hybrid"
 
 
 def chitta(tool: str, **kwargs) -> dict:
-    cmd = ["chitta", tool, "--json"]
+    cmd = ["chitta", tool]
     for k, v in kwargs.items():
-        cmd += [f"--{k}", str(v)]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    return json.loads(r.stdout) if r.stdout.strip() else {}
+        if k == "json":
+            cmd.append("--json")
+        else:
+            cmd += [f"--{k}", str(v)]
+    cmd.append("--json")  # always request JSON output
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if not r.stdout.strip():
+        return {}
+    try:
+        result = json.loads(r.stdout)
+        return result if isinstance(result, dict) else {}
+    except json.JSONDecodeError:
+        rows = []
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    pass
+        return {"results": rows, "memories": rows} if rows else {}
 
 
 def ollama_generate(prompt: str) -> str:
     import urllib.request
-    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode()
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/generate", data=payload,
+    payload = json.dumps({
+        "model": OLLAMA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "options": {"num_predict": 60, "temperature": 0.3},
+    }).encode()
+    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
                                   headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())["response"].strip()
-    except Exception as e:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read())["message"]["content"].strip()
+    except Exception:
         return ""
 
 
+_SAMPLE_SEEDS = [
+    "architecture decision", "bug fix approach", "workflow pattern",
+    "data processing", "configuration", "performance optimization",
+    "error handling", "deployment", "testing strategy", "code structure",
+    "memory system", "recall quality", "distillation", "embedding model",
+    "file provenance", "job submission", "cluster compute", "database schema",
+    "protein structure", "sequence alignment", "taxonomic classification",
+    "phylogenetic analysis", "ancient DNA", "damage estimation",
+]
+
 def sample_memories(realm: str | None, n: int) -> list[dict]:
-    kwargs = {"limit": max(n * 3, 500)}
-    if realm:
-        kwargs["realm"] = realm
-    result = chitta("list_memories_brief", **kwargs)
-    memories = result.get("memories", [])
-    # Filter to wisdom/signal kinds only — episodes are noise
-    useful = [m for m in memories if m.get("kind") in ("wisdom", "signal", "correction", "preference")]
-    if not useful:
-        useful = memories
+    seen_ids: set[str] = set()
+    memories: list[dict] = []
+    seeds = _SAMPLE_SEEDS.copy()
+    random.shuffle(seeds)
+    per_seed = max(10, n // len(seeds) + 1)
+    for seed in seeds:
+        if len(memories) >= n * 2:
+            break
+        kwargs: dict = {"query": seed, "limit": per_seed, "strategy": "priority"}
+        if realm:
+            kwargs["realm"] = realm
+        result = chitta("recall", **kwargs)
+        for r in result.get("results", []):
+            mid = str(r.get("id", ""))
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                # Normalize field names
+                memories.append({
+                    "id": mid,
+                    "kind": r.get("kind"),
+                    "realm": r.get("realm", ""),
+                    "content": r.get("text", r.get("content", "")),
+                    "preview": r.get("text", "")[:100],
+                })
+    # Filter episodes (kind_episode=0.15 penalty memories are low-value as eval targets)
+    useful = [m for m in memories if m.get("kind") not in ("episode", None)]
+    if len(useful) < n // 2:
+        useful = memories  # fallback: take everything
     random.shuffle(useful)
     return useful[:n]
 
@@ -57,11 +109,11 @@ def make_query(memory: dict) -> str | None:
     content = memory.get("content", memory.get("preview", ""))
     if not content or len(content) < 20:
         return None
+    snippet = content[:300]
     prompt = (
-        f"Given this memory from a personal knowledge system:\n\n{content}\n\n"
-        "Write ONE short natural-language question (5-12 words) that a user would type "
-        "to retrieve this memory. The question must be answerable from this memory. "
-        "Return ONLY the question, no explanation, no quotes."
+        f"Memory: {snippet}\n\n"
+        "Write one short question (5-12 words) a user would ask to retrieve this. "
+        "Return ONLY the question."
     )
     q = ollama_generate(prompt)
     # Clean up
