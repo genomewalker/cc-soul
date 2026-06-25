@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""Fine-tune BGE-small embedding model on chitta memory pairs.
+"""Fine-tune Jina-v2-base embedding model on chitta SSL→NL memory pairs.
+
+Uses MultipleNegativesRankingLoss with in-batch negatives.  Training data
+uses Jina instruction prefixes (search_query: / search_document:) so the
+fine-tuned model preserves the E5/Jina retrieval convention.
+
+After training, convert to GGUF for chitta:
+  python llama.cpp/convert_hf_to_gguf.py <output-dir> \
+      --outtype q8_0 --outfile ~/.claude/bin/jina-v2-base-finetuned.gguf
+  # Then: edit chittad.service to point --embed-model at the new GGUF,
+  # restart daemon, and re-embed all memories with: chitta reindex --all
 
 Usage:
     python scripts/finetune_bge.py [--pairs PATH] [--output DIR] [--epochs N]
 
-Requires: pip install sentence-transformers datasets
+Requires: pip install sentence-transformers>=3.0 datasets
 """
 
 import argparse
@@ -15,7 +25,6 @@ from pathlib import Path
 
 
 def load_pairs(path: str) -> list[dict]:
-    """Load query-passage pairs from JSONL."""
     pairs = []
     with open(path) as f:
         for line in f:
@@ -30,113 +39,88 @@ def load_pairs(path: str) -> list[dict]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fine-tune BGE-small on chitta pairs")
-    parser.add_argument("--pairs", default=os.path.expanduser("~/.claude/training/pairs.jsonl"),
-                        help="Path to training pairs JSONL")
-    parser.add_argument("--output", default=os.path.expanduser("~/.claude/models/bge-finetuned"),
-                        help="Output directory for fine-tuned model")
-    parser.add_argument("--base-model", default="BAAI/bge-small-en-v1.5",
-                        help="Base model to fine-tune")
-    parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
-    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
-    parser.add_argument("--warmup-ratio", type=float, default=0.1, help="Warmup ratio")
-    parser.add_argument("--max-length", type=int, default=512, help="Max sequence length")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pairs",
+                        default=os.path.expanduser("~/.claude/training/ssl_nl_pairs.jsonl"))
+    parser.add_argument("--output",
+                        default=os.path.expanduser("~/.claude/models/jina-v2-base-finetuned"))
+    parser.add_argument("--base-model", default="jinaai/jina-embeddings-v2-base-en")
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--warmup-ratio", type=float, default=0.1)
+    parser.add_argument("--max-length", type=int, default=256)
     args = parser.parse_args()
 
     if not Path(args.pairs).exists():
-        print(f"Error: pairs file not found: {args.pairs}", file=sys.stderr)
-        print("Run 'chitta export_training_pairs' first to generate training data.", file=sys.stderr)
+        print(f"pairs not found: {args.pairs}", file=sys.stderr)
         sys.exit(1)
 
     pairs = load_pairs(args.pairs)
-    if len(pairs) < 10:
-        print(f"Error: only {len(pairs)} pairs found. Need at least 10 for training.", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Loaded {len(pairs)} training pairs from {args.pairs}")
+    print(f"Loaded {len(pairs)} pairs from {args.pairs}")
 
     try:
-        from sentence_transformers import SentenceTransformer, InputExample, losses
-        from sentence_transformers.evaluation import InformationRetrievalEvaluator
-        from torch.utils.data import DataLoader
-    except ImportError:
-        print("Error: sentence-transformers not installed.", file=sys.stderr)
-        print("Install with: pip install sentence-transformers", file=sys.stderr)
+        from sentence_transformers import SentenceTransformer
+        from sentence_transformers.losses import MultipleNegativesRankingLoss
+        from sentence_transformers.training_args import SentenceTransformerTrainingArguments
+        from sentence_transformers.trainer import SentenceTransformerTrainer
+        from datasets import Dataset
+    except ImportError as e:
+        print(f"Missing dependency: {e}", file=sys.stderr)
+        print("pip install 'sentence-transformers>=3.0' datasets", file=sys.stderr)
         sys.exit(1)
 
-    # Build training examples
-    train_examples = []
-    has_negatives = any("neg" in p for p in pairs)
+    # Build dataset — anchor=NL query, positive=SSL memory.
+    # Add Jina instruction prefixes so fine-tuned model preserves the retrieval convention.
+    anchors = ["search_query: " + p["query"] for p in pairs if p.get("query") and p.get("pos")]
+    positives = ["search_document: " + p["pos"] for p in pairs if p.get("query") and p.get("pos")]
+    print(f"Training examples: {len(anchors)}")
 
-    for pair in pairs:
-        query = pair.get("query", "")
-        pos = pair.get("pos", "")
-        neg = pair.get("neg", "")
+    n_eval = max(10, len(anchors) // 10)
+    train_ds = Dataset.from_dict({"anchor": anchors[n_eval:], "positive": positives[n_eval:]})
+    eval_ds  = Dataset.from_dict({"anchor": anchors[:n_eval], "positive": positives[:n_eval]})
 
-        if not query or not pos:
-            continue
-
-        if has_negatives and neg:
-            train_examples.append(InputExample(texts=[query, pos, neg]))
-        else:
-            train_examples.append(InputExample(texts=[query, pos]))
-
-    print(f"Built {len(train_examples)} training examples "
-          f"({'triplet' if has_negatives else 'pair'} mode)")
-
-    # Load model
-    print(f"Loading base model: {args.base_model}")
     model = SentenceTransformer(args.base_model)
     model.max_seq_length = args.max_length
 
-    # DataLoader
-    train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=args.batch_size)
+    loss = MultipleNegativesRankingLoss(model)
 
-    # Loss function
-    if has_negatives:
-        train_loss = losses.TripletLoss(model=model)
-    else:
-        train_loss = losses.MultipleNegativesRankingLoss(model=model)
-
-    # Build eval set (10% held out)
-    eval_size = max(1, len(pairs) // 10)
-    eval_pairs = pairs[:eval_size]
-
-    queries = {str(i): p["query"] for i, p in enumerate(eval_pairs) if p.get("query")}
-    corpus = {str(i): p["pos"] for i, p in enumerate(eval_pairs) if p.get("pos")}
-    relevant_docs = {str(i): {str(i)} for i in range(len(eval_pairs))
-                     if eval_pairs[i].get("query") and eval_pairs[i].get("pos")}
-
-    evaluator = None
-    if len(queries) >= 5:
-        evaluator = InformationRetrievalEvaluator(
-            queries=queries,
-            corpus=corpus,
-            relevant_docs=relevant_docs,
-            name="chitta-eval",
-        )
-
-    # Train
-    warmup_steps = int(len(train_dataloader) * args.epochs * args.warmup_ratio)
-    print(f"Training for {args.epochs} epochs, {warmup_steps} warmup steps")
-
-    os.makedirs(args.output, exist_ok=True)
-
-    model.fit(
-        train_objectives=[(train_dataloader, train_loss)],
-        epochs=args.epochs,
-        warmup_steps=warmup_steps,
-        evaluator=evaluator,
-        evaluation_steps=max(100, len(train_dataloader) // 2),
-        output_path=args.output,
-        optimizer_params={"lr": args.lr},
+    steps_per_epoch = len(train_ds) // args.batch_size
+    training_args = SentenceTransformerTrainingArguments(
+        output_dir=args.output,
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        learning_rate=args.lr,
+        warmup_ratio=args.warmup_ratio,
+        eval_strategy="steps",
+        eval_steps=max(50, steps_per_epoch // 2),
+        save_strategy="epoch",
+        load_best_model_at_end=False,
+        fp16=True,
+        logging_steps=20,
+        report_to="none",
     )
 
-    print(f"\nFine-tuned model saved to: {args.output}")
-    print(f"To use with chitta, convert to ONNX:")
-    print(f"  python -m optimum.exporters.onnx --model {args.output} {args.output}/onnx/")
-    print(f"Then point chitta's ONNX embedder to {args.output}/onnx/model.onnx")
+    trainer = SentenceTransformerTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
+        loss=loss,
+    )
+
+    trainer.train()
+    model.save_pretrained(args.output)
+    print(f"\nSaved: {args.output}")
+    print(f"\nConvert to GGUF for chitta:")
+    print(f"  python llama.cpp/convert_hf_to_gguf.py {args.output} \\")
+    print(f"      --outtype q8_0 --outfile /projects/caeg/scratch/kbd606/tmp/jina-v2-base-finetuned.gguf")
+    print(f"  # Deploy:")
+    print(f"  install -m 0755 /projects/caeg/scratch/kbd606/tmp/jina-v2-base-finetuned.gguf ~/.claude/bin/")
+    print(f"  systemctl --user edit --force chittad  # update --embed-model path")
+    print(f"  systemctl --user restart chittad")
+    print(f"  chitta reindex --all  # re-embed 140k memories with new model")
 
 
 if __name__ == "__main__":
