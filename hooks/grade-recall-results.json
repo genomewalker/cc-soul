@@ -1,9 +1,9 @@
 {
-  "ts": "2026-06-25T13:12:01.888406+00:00",
+  "ts": "2026-06-25T16:58:35.133712+00:00",
   "version": 3,
   "limit": 20,
   "metric": "mean_nDCG",
-  "score": 0.9088719007298465,
+  "score": 0.8792637096332602,
   "n": 10,
   "records": [
     {
@@ -136,12 +136,11 @@
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
-        0,
-        1
+        0
       ],
       "sig_fallback": true,
-      "ndcg": 0.7653606369886217,
-      "pass": true
+      "ndcg": 0.46927872602275644,
+      "pass": false
     },
     {
       "query": "how does semantic search work",
