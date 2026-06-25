@@ -24,6 +24,25 @@ import threading
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
+# Cross-encoder reranker — loaded once on first use
+_reranker = None
+_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_RERANK_FETCH_MUL = 4
+
+def _get_reranker():
+    global _reranker
+    if _reranker is not None:
+        return _reranker if _reranker is not False else None
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from sentence_transformers import CrossEncoder
+            _reranker = CrossEncoder(_RERANKER_MODEL)
+    except Exception:
+        _reranker = False
+    return _reranker if _reranker is not False else None
+
 _executor = ThreadPoolExecutor(max_workers=4)
 
 # Suppress MCP SDK validation warnings (Claude Code sends incomplete initialize requests)
@@ -1927,9 +1946,9 @@ def handle_recall_smart(arguments: dict) -> str:
 
 
 def handle_recall_gateway(arguments: dict) -> str:
-    """Unified recall with strategy routing.
+    """Unified recall with strategy routing and optional cross-encoder reranking.
 
-    Strategies: semantic (default), priority, temporal, hybrid, smart
+    Strategies: semantic (default), priority, temporal, hybrid, smart, field
     disable_hdc: if True, skip HDC lane in RRF (ablation/benchmarking)
     """
     strategy = arguments.pop("strategy", "semantic")
@@ -1941,7 +1960,28 @@ def handle_recall_gateway(arguments: dict) -> str:
         "smart": "smart_recall",
     }
     tool = tool_map.get(strategy, "recall")
-    return daemon_call(tool, arguments)
+
+    reranker = _get_reranker()
+    if not reranker:
+        return daemon_call(tool, arguments)
+
+    query = arguments.get("query", "")
+    limit = int(arguments.get("limit", 10))
+    fetch_args = dict(arguments, limit=limit * _RERANK_FETCH_MUL)
+    raw_str = daemon_call(tool, fetch_args)
+    try:
+        raw = json.loads(raw_str)
+        results = raw.get("results", [])
+    except Exception:
+        results = []
+    if not results or len(results) <= limit:
+        return daemon_call(tool, arguments)
+
+    pairs = [(query, h.get("text", "")) for h in results]
+    scores = reranker.predict(pairs)
+    ranked = sorted(zip(scores, results), key=lambda x: -float(x[0]))
+    reranked = [h for _, h in ranked[:limit]]
+    return json.dumps({"results": reranked})
 
 
 def handle_sadhana_gateway(arguments: dict) -> str:
