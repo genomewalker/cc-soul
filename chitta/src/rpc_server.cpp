@@ -173,6 +173,7 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"remember", "Store text in memory with optional tags",
      {{"content", "Text to remember", true, nullptr},
       {"type", "Node type: wisdom|belief|episode", false, "episode"},
+      {"kind", "Alias for --type", false, nullptr},
       {"tags", "Comma-separated tags", false, nullptr},
       {"realm", "Primary realm (default: brahman)", false, nullptr},
       {"visibility", "0=Private, 1=Shared, 2=Global", false, "0"},
@@ -1159,6 +1160,13 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         if (ppid > 1) {  // Sanity check: not init
             args["pid"] = static_cast<int64_t>(ppid);
         }
+    }
+
+    // Normalize --kind as alias for --type in remember/grow
+    if ((tool == "remember" || tool == "grow") &&
+        args.contains("kind") && !args.contains("type")) {
+        args["type"] = args["kind"];
+        args.erase("kind");
     }
 
     // Send tool call
