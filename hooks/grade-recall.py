@@ -21,6 +21,25 @@ import argparse, json, math, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Cross-encoder reranker — loaded once, used for all queries
+_reranker = None
+_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_RERANK_FETCH_MUL = 4  # fetch this many × limit, then rerank to top-limit
+
+def _load_reranker():
+    global _reranker
+    if _reranker is not None:
+        return _reranker
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from sentence_transformers import CrossEncoder
+            _reranker = CrossEncoder(_RERANKER_MODEL)
+    except Exception:
+        _reranker = False  # sentinel: tried and failed
+    return _reranker
+
 GOLDEN_VERSION = 3
 
 # Natural-language queries a user would actually type, paired with:
@@ -100,17 +119,29 @@ BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
 GRADE_REALM = "project:cc-soul"
 
 
-def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
+def _recall_raw(query: str, limit: int, strategy: str = "") -> list[dict]:
     env = dict(os.environ, SQZ_NO_DEDUP="1")
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
            "--realm", GRADE_REALM, "--json"]
     if strategy:
         cmd += ["--strategy", strategy]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env,)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
         return json.loads(out.stdout).get("results", [])
     except Exception:
         return []
+
+
+def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
+    reranker = _load_reranker()
+    fetch = limit * _RERANK_FETCH_MUL if reranker else limit
+    results = _recall_raw(query, fetch, strategy)
+    if not reranker or len(results) <= limit:
+        return results[:limit]
+    pairs = [(query, h.get("text", "")) for h in results]
+    scores = reranker.predict(pairs)
+    ranked = sorted(zip(scores, results), key=lambda x: -float(x[0]))
+    return [h for _, h in ranked[:limit]]
 
 
 def ndcg(positions: list[int], n_gold: int, k: int) -> float:

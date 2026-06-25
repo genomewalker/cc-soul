@@ -1,0 +1,199 @@
+{
+  "ts": "2026-06-25T05:45:51.551701+00:00",
+  "version": 3,
+  "limit": 20,
+  "metric": "mean_nDCG",
+  "score": 0.905263082983881,
+  "n": 10,
+  "records": [
+    {
+      "query": "chaos nodes",
+      "desc": "cluster alias",
+      "gold_ids": [
+        "17475104458537960091",
+        "3766964318940168335",
+        "1949287679136890931"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        1,
+        3,
+        10,
+        11
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.6288192703151899,
+      "pass": true
+    },
+    {
+      "query": "how does provenance deduplication work",
+      "desc": "prov dedup gate",
+      "gold_ids": [
+        "18446679945552855042",
+        "17475104458537960066"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true
+    },
+    {
+      "query": "how does domain reliability work",
+      "desc": "reliability wiring",
+      "gold_ids": [
+        "17475104458537959674"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        0
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true
+    },
+    {
+      "query": "why does recall get capped per realm",
+      "desc": "sampler fix",
+      "gold_ids": [
+        "17475104458537959675"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        0
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true
+    },
+    {
+      "query": "NFS resurrection problem",
+      "desc": "NFS gotcha",
+      "gold_ids": [
+        "18283549743256698883",
+        "18239848227681599504",
+        "18017687741466148925"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1,
+        4,
+        5
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.9267582364714125,
+      "pass": true
+    },
+    {
+      "query": "dream sweep gap filling",
+      "desc": "dream sweep",
+      "gold_ids": [
+        "17475104458537960092"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        0
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true
+    },
+    {
+      "query": "forward bet prediction horizon",
+      "desc": "forward bet",
+      "gold_ids": [
+        "17475104458537960067"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        0
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true
+    },
+    {
+      "query": "how to build chitta-field",
+      "desc": "build toolchain",
+      "gold_ids": [
+        "10364209500650471833",
+        "17475104458537960223",
+        "10390583829663318066"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1
+      ],
+      "sig_fallback": true,
+      "ndcg": 0.7653606369886217,
+      "pass": true
+    },
+    {
+      "query": "how does semantic search work",
+      "desc": "search arch",
+      "gold_ids": [
+        "422798148281303107",
+        "17475104458537960058",
+        "18446679945552855059"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        1,
+        2,
+        3
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.7328286204777911,
+      "pass": true
+    },
+    {
+      "query": "distillation pipeline wisdom episode",
+      "desc": "distillation pipeline",
+      "gold_ids": [
+        "18283549743256699033",
+        "18283549743256699036",
+        "18283549743256699037"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        18,
+        19
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.9988640655857943,
+      "pass": true
+    }
+  ]
+}
