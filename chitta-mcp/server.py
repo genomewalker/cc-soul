@@ -1958,6 +1958,7 @@ def handle_recall_gateway(arguments: dict) -> str:
         "temporal": "recall_temporal",
         "hybrid": "hybrid_recall",
         "smart": "smart_recall",
+        "field": "recall_field",
     }
     tool = tool_map.get(strategy, "recall")
 
@@ -2350,6 +2351,9 @@ async def call_tool(name: str, arguments: dict):
         internal = _classify_internal_realm(arguments.get("content", ""))
         if internal:
             arguments["realm"] = internal
+        # kind is a user-friendly alias for type (daemon field name is "type")
+        if "kind" in arguments and "type" not in arguments:
+            arguments["type"] = arguments.pop("kind")
 
     # Genome 'process' memories are internal cognitive-config state: default
     # them to realm-private visibility (0) unless the caller overrides.
