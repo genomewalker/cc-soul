@@ -1456,7 +1456,11 @@ int main(int argc, char* argv[]) {
                         // Do NOT prepend "search_document: " — transform_batch() defaults to
                         // EmbedMode::Document and adds that prefix itself. Prepending here
                         // double-prefixes and mismatches the single-prefixed query path.
-                        std::string body = c.size() > MAX_CONTENT_BYTES ? c.substr(0, MAX_CONTENT_BYTES) : c;
+                        size_t trunc = MAX_CONTENT_BYTES;
+                        if (c.size() > MAX_CONTENT_BYTES) {
+                            while (trunc > 0 && (static_cast<unsigned char>(c[trunc]) & 0xC0) == 0x80) --trunc;
+                        }
+                        std::string body = c.substr(0, trunc);
                         batch_texts.push_back(chitta::ssl::retrieval_text(body));
                     } else {
                         not_backfilled.push_back(pending[i]);
