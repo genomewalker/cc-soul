@@ -1,14 +1,14 @@
 {
   "hybrid": {
     "strategy": "hybrid",
-    "mean_ndcg": 0.842,
+    "mean_ndcg": 0.827,
     "ci_95": [
-      0.802,
-      0.879
+      0.783,
+      0.864
     ],
     "n_queries": 164,
     "by_type": {
-      "single_hop": 0.841,
+      "single_hop": 0.825,
       "multihop": 0.908,
       "abstention": 1.0
     },
@@ -125,9 +125,9 @@
         "query": "Where is the nomic-embed-text-v1.5 model file located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_model_file_located?",
-        "ndcg": 1.0,
+        "ndcg": 0.631,
         "gold_pos": [
-          0
+          1
         ],
         "n_gold": 1,
         "n_results": 20
@@ -334,9 +334,9 @@
         "query": "How does bam2mcaf handle alignment indices and memory usage?",
         "type": "single_hop",
         "label": "how_does_bam2mcaf_handle_alignment_indices_and_memory_usage?",
-        "ndcg": 0.5,
+        "ndcg": 0.631,
         "gold_pos": [
-          2
+          1
         ],
         "n_gold": 1,
         "n_results": 20
@@ -497,9 +497,9 @@
         "query": "What does the geodesic distributed-tmp-dir-fix change address?",
         "type": "single_hop",
         "label": "what_does_the_geodesic_distributed-tmp-dir-fix_change_addres",
-        "ndcg": 0.356,
+        "ndcg": 0.387,
         "gold_pos": [
-          5
+          4
         ],
         "n_gold": 1,
         "n_results": 20
@@ -882,9 +882,9 @@
         "query": "Where is the nomic-embed-text-v1.5 embedding model located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_embedding_model_located?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -1111,10 +1111,8 @@
         "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
         "type": "single_hop",
         "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-        "ndcg": 0.231,
-        "gold_pos": [
-          18
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -1199,9 +1197,9 @@
         "query": "What data is stored in memory slice-7 of [arch]?",
         "type": "single_hop",
         "label": "what_data_is_stored_in_memory_slice-7_of_[arch]?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -1496,9 +1494,9 @@
         "query": "What bash command followed `zcat` before it became `cd`?",
         "type": "single_hop",
         "label": "what_bash_command_followed_`zcat`_before_it_became_`cd`?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -1606,9 +1604,9 @@
         "query": "How does bam2mcaf handle alignment indices and memory usage?",
         "type": "single_hop",
         "label": "how_does_bam2mcaf_handle_alignment_indices_and_memory_usage?_102488",
-        "ndcg": 0.631,
+        "ndcg": 0.5,
         "gold_pos": [
-          1
+          2
         ],
         "n_gold": 1,
         "n_results": 20
@@ -1845,35 +1843,26 @@
         "query": "NFS resurrection problem",
         "type": "single_hop",
         "label": "NFS gotcha",
-        "ndcg": 0.89,
-        "gold_pos": [
-          0,
-          1,
-          6,
-          7
-        ],
-        "n_gold": 4,
-        "n_results": 20
+        "ndcg": 0.0,
+        "gold_pos": [],
+        "n_gold": 3,
+        "n_results": 6
       },
       {
         "query": "dream sweep gap filling",
         "type": "single_hop",
         "label": "dream sweep",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
-        "n_results": 20
+        "n_results": 3
       },
       {
         "query": "forward bet prediction horizon",
         "type": "single_hop",
         "label": "forward bet",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -1881,12 +1870,11 @@
         "query": "how to build chitta-field",
         "type": "single_hop",
         "label": "build toolchain",
-        "ndcg": 0.553,
+        "ndcg": 0.39,
         "gold_pos": [
-          0,
-          1
+          0
         ],
-        "n_gold": 5,
+        "n_gold": 4,
         "n_results": 20
       },
       {
@@ -1936,14 +1924,14 @@
   },
   "semantic": {
     "strategy": "semantic",
-    "mean_ndcg": 0.84,
+    "mean_ndcg": 0.844,
     "ci_95": [
-      0.804,
-      0.876
+      0.806,
+      0.883
     ],
     "n_queries": 164,
     "by_type": {
-      "single_hop": 0.838,
+      "single_hop": 0.843,
       "multihop": 0.908,
       "abstention": 1.0
     },
@@ -2060,9 +2048,9 @@
         "query": "Where is the nomic-embed-text-v1.5 model file located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_model_file_located?",
-        "ndcg": 1.0,
+        "ndcg": 0.631,
         "gold_pos": [
-          0
+          1
         ],
         "n_gold": 1,
         "n_results": 20
@@ -2432,9 +2420,9 @@
         "query": "What does the geodesic distributed-tmp-dir-fix change address?",
         "type": "single_hop",
         "label": "what_does_the_geodesic_distributed-tmp-dir-fix_change_addres",
-        "ndcg": 0.356,
+        "ndcg": 0.387,
         "gold_pos": [
-          5
+          4
         ],
         "n_gold": 1,
         "n_results": 20
@@ -2817,9 +2805,9 @@
         "query": "Where is the nomic-embed-text-v1.5 embedding model located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_embedding_model_located?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -3046,10 +3034,8 @@
         "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
         "type": "single_hop",
         "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-        "ndcg": 0.235,
-        "gold_pos": [
-          17
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -3134,9 +3120,9 @@
         "query": "What data is stored in memory slice-7 of [arch]?",
         "type": "single_hop",
         "label": "what_data_is_stored_in_memory_slice-7_of_[arch]?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -3156,9 +3142,9 @@
         "query": "Why does `MAP_PRIVATE` mmap increase RSS upon access?",
         "type": "single_hop",
         "label": "why_does_`map_private`_mmap_increase_rss_upon_access?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -3431,9 +3417,9 @@
         "query": "What bash command followed `zcat` before it became `cd`?",
         "type": "single_hop",
         "label": "what_bash_command_followed_`zcat`_before_it_became_`cd`?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -3816,12 +3802,11 @@
         "query": "how to build chitta-field",
         "type": "single_hop",
         "label": "build toolchain",
-        "ndcg": 0.553,
+        "ndcg": 0.39,
         "gold_pos": [
-          0,
-          1
+          0
         ],
-        "n_gold": 5,
+        "n_gold": 4,
         "n_results": 20
       },
       {
@@ -3862,24 +3847,23 @@
           15,
           16,
           17,
-          18,
-          19
+          18
         ],
-        "n_gold": 20,
+        "n_gold": 19,
         "n_results": 20
       }
     ]
   },
   "field": {
     "strategy": "field",
-    "mean_ndcg": 0.531,
+    "mean_ndcg": 0.422,
     "ci_95": [
-      0.46,
-      0.598
+      0.353,
+      0.495
     ],
     "n_queries": 164,
     "by_type": {
-      "single_hop": 0.522,
+      "single_hop": 0.409,
       "multihop": 0.908,
       "abstention": 1.0
     },
@@ -3888,8 +3872,10 @@
         "query": "What is the unified taxonomy architecture option from genopack?",
         "type": "single_hop",
         "label": "what_is_the_unified_taxonomy_architecture_option_from_genopa",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -3897,10 +3883,8 @@
         "query": "What bridge failures involve room-run-dispatch and routing errors?",
         "type": "single_hop",
         "label": "what_bridge_failures_involve_room-run-dispatch_and_routing_e",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4040,10 +4024,8 @@
         "query": "What scaling strategy maps diversity threshold to zero in geodesic kernels?",
         "type": "single_hop",
         "label": "what_scaling_strategy_maps_diversity_threshold_to_zero_in_ge",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4051,10 +4033,8 @@
         "query": "What pipeline stage estimates pre-alignment damage using libtaph?",
         "type": "single_hop",
         "label": "what_pipeline_stage_estimates_pre-alignment_damage_using_lib",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4115,10 +4095,8 @@
         "query": "How does evidence rollup compare to terminal assignment architectures?",
         "type": "single_hop",
         "label": "how_does_evidence_rollup_compare_to_terminal_assignment_arch",
-        "ndcg": 0.333,
-        "gold_pos": [
-          6
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4207,10 +4185,8 @@
         "query": "What is the strobemer technique for cross-mapping recovery in [arch]?",
         "type": "single_hop",
         "label": "what_is_the_strobemer_technique_for_cross-mapping_recovery_i",
-        "ndcg": 0.5,
-        "gold_pos": [
-          2
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4240,8 +4216,10 @@
         "query": "What's the relationship between geodesic outlier labeling and contamination labeling?",
         "type": "single_hop",
         "label": "what's_the_relationship_between_geodesic_outlier_labeling_an",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4249,8 +4227,10 @@
         "query": "What embedding model offers high dimensionality from content diversity?",
         "type": "single_hop",
         "label": "what_embedding_model_offers_high_dimensionality_from_content",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4269,9 +4249,9 @@
         "query": "What was the bug-fix strategy for geodesic?",
         "type": "single_hop",
         "label": "what_was_the_bug-fix_strategy_for_geodesic?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -4311,8 +4291,10 @@
         "query": "How does Geodesic handle thread counts with memory constraints?",
         "type": "single_hop",
         "label": "how_does_geodesic_handle_thread_counts_with_memory_constrain",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 0.631,
+        "gold_pos": [
+          1
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4360,10 +4342,8 @@
         "query": "How can I reduce memory usage during field extraction in pass2?",
         "type": "single_hop",
         "label": "how_can_i_reduce_memory_usage_during_field_extraction_in_pas",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4398,10 +4378,8 @@
         "query": "How do we discuss design decisions using Chitta & Codex?",
         "type": "single_hop",
         "label": "how_do_we_discuss_design_decisions_using_chitta_&_codex?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4462,9 +4440,9 @@
         "query": "What change prevents remote node failures with absolute paths?",
         "type": "single_hop",
         "label": "what_change_prevents_remote_node_failures_with_absolute_path",
-        "ndcg": 0.387,
+        "ndcg": 0.356,
         "gold_pos": [
-          4
+          5
         ],
         "n_gold": 1,
         "n_results": 20
@@ -4473,12 +4451,12 @@
         "query": "How do I extend the VizServer skeleton for a web dashboard?",
         "type": "single_hop",
         "label": "how_do_i_extend_the_vizserver_skeleton_for_a_web_dashboard?",
-        "ndcg": 0.279,
+        "ndcg": 0.289,
         "gold_pos": [
-          10
+          9
         ],
         "n_gold": 1,
-        "n_results": 18
+        "n_results": 17
       },
       {
         "query": "How can I route reads to separate channels by genome type?",
@@ -4595,10 +4573,8 @@
         "query": "Why is the gather search path different from worker output?",
         "type": "single_hop",
         "label": "why_is_the_gather_search_path_different_from_worker_output?",
-        "ndcg": 0.631,
-        "gold_pos": [
-          1
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4617,10 +4593,8 @@
         "query": "How do I add top neighbor taxids to detector features?",
         "type": "single_hop",
         "label": "how_do_i_add_top_neighbor_taxids_to_detector_features?",
-        "ndcg": 0.631,
-        "gold_pos": [
-          1
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4628,10 +4602,8 @@
         "query": "What causes the single-threaded scan in LCA pass 2?",
         "type": "single_hop",
         "label": "what_causes_the_single-threaded_scan_in_lca_pass_2?",
-        "ndcg": 0.631,
-        "gold_pos": [
-          1
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4648,10 +4620,8 @@
         "query": "What change was made to the geodesic containment threshold in bug-3-fix?",
         "type": "single_hop",
         "label": "what_change_was_made_to_the_geodesic_containment_threshold_i",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4730,10 +4700,8 @@
         "query": "What optimizations were tested involving LCA-pass2-speedup and selective decoding?",
         "type": "single_hop",
         "label": "what_optimizations_were_tested_involving_lca-pass2-speedup_a",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4741,10 +4709,8 @@
         "query": "What's the difference between zp_loss diagnostic and fixed thresholds?",
         "type": "single_hop",
         "label": "what's_the_difference_between_zp_loss_diagnostic_and_fixed_t",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4794,8 +4760,10 @@
         "query": "What optimizations prioritize reference-centric analytics and read access?",
         "type": "single_hop",
         "label": "what_optimizations_prioritize_reference-centric_analytics_an",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4814,8 +4782,10 @@
         "query": "What pipeline changes fixed the contaminated genome length bug?",
         "type": "single_hop",
         "label": "what_pipeline_changes_fixed_the_contaminated_genome_length_b",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4823,10 +4793,8 @@
         "query": "Should I use the Viking dataset for MCAF2 benchmarking?",
         "type": "single_hop",
         "label": "should_i_use_the_viking_dataset_for_mcaf2_benchmarking?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4843,10 +4811,8 @@
         "query": "What caused the geodesic pipeline integration to fail with incomplete execution?",
         "type": "single_hop",
         "label": "what_caused_the_geodesic_pipeline_integration_to_fail_with_i",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4916,21 +4882,19 @@
         "query": "What was the reason for excluding tools/binaries in gitignore?",
         "type": "single_hop",
         "label": "what_was_the_reason_for_excluding_tools/binaries_in_gitignor",
-        "ndcg": 0.315,
+        "ndcg": 0.279,
         "gold_pos": [
-          7
+          10
         ],
         "n_gold": 1,
-        "n_results": 18
+        "n_results": 19
       },
       {
         "query": "What does libtaph integration do regarding pre-alignment damage estimation?",
         "type": "single_hop",
         "label": "what_does_libtaph_integration_do_regarding_pre-alignment_dam",
-        "ndcg": 0.431,
-        "gold_pos": [
-          3
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -4978,10 +4942,8 @@
         "query": "What data is stored in memory slice-7 of [arch]?",
         "type": "single_hop",
         "label": "what_data_is_stored_in_memory_slice-7_of_[arch]?",
-        "ndcg": 0.431,
-        "gold_pos": [
-          3
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5000,8 +4962,10 @@
         "query": "Why does `MAP_PRIVATE` mmap increase RSS upon access?",
         "type": "single_hop",
         "label": "why_does_`map_private`_mmap_increase_rss_upon_access?",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5078,10 +5042,8 @@
         "query": "What are the memory tradeoffs for dense-vector accumulators versus unordered maps?",
         "type": "single_hop",
         "label": "what_are_the_memory_tradeoffs_for_dense-vector_accumulators_",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5089,10 +5051,8 @@
         "query": "How can I improve data parsing time in pass2?",
         "type": "single_hop",
         "label": "how_can_i_improve_data_parsing_time_in_pass2?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5133,10 +5093,8 @@
         "query": "What's the standard metadata for DFIT algorithm selection publications?",
         "type": "single_hop",
         "label": "what's_the_standard_metadata_for_dfit_algorithm_selection_pu",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5153,10 +5111,8 @@
         "query": "What optimization techniques involve columnar pruning and zone maps?",
         "type": "single_hop",
         "label": "what_optimization_techniques_involve_columnar_pruning_and_zo",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5164,10 +5120,8 @@
         "query": "How did the analysis scripts color phylogenetic tree support dots?",
         "type": "single_hop",
         "label": "how_did_the_analysis_scripts_color_phylogenetic_tree_support",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5184,10 +5138,8 @@
         "query": "How does Chitta handle terse negations in prompt hooks using regex?",
         "type": "single_hop",
         "label": "how_does_chitta_handle_terse_negations_in_prompt_hooks_using",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5226,10 +5178,8 @@
         "query": "What type of memory does Geodesic use for RSSFile?",
         "type": "single_hop",
         "label": "what_type_of_memory_does_geodesic_use_for_rssfile?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5237,10 +5187,8 @@
         "query": "What causes NFS write stalls and buffering latency?",
         "type": "single_hop",
         "label": "what_causes_nfs_write_stalls_and_buffering_latency?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5266,10 +5214,8 @@
         "query": "What methods enable accurate and fast damage estimation with Kaiku?",
         "type": "single_hop",
         "label": "what_methods_enable_accurate_and_fast_damage_estimation_with",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5299,10 +5245,8 @@
         "query": "Is single-threaded or multithreaded better for performance optimization?",
         "type": "single_hop",
         "label": "is_single-threaded_or_multithreaded_better_for_performance_o",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5348,10 +5292,8 @@
         "query": "How can I build profile G in-memory during the MCAF pass?",
         "type": "single_hop",
         "label": "how_can_i_build_profile_g_in-memory_during_the_mcaf_pass?",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5377,10 +5319,8 @@
         "query": "What is the branding concept behind \"[kaiku] etymology-as-echoes-of-ancient-dna\"?",
         "type": "single_hop",
         "label": "what_is_the_branding_concept_behind_\"[kaiku]_etymology-as-ec",
-        "ndcg": 1.0,
-        "gold_pos": [
-          0
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5544,11 +5484,10 @@
         "query": "chaos nodes",
         "type": "single_hop",
         "label": "cluster alias",
-        "ndcg": 1.0,
+        "ndcg": 0.897,
         "gold_pos": [
           0,
           1,
-          2,
           3,
           4,
           5,
@@ -5564,10 +5503,9 @@
           15,
           16,
           17,
-          18,
-          19
+          18
         ],
-        "n_gold": 22,
+        "n_gold": 20,
         "n_results": 20
       },
       {
@@ -5608,23 +5546,24 @@
         "query": "NFS resurrection problem",
         "type": "single_hop",
         "label": "NFS gotcha",
-        "ndcg": 0.883,
+        "ndcg": 0.89,
         "gold_pos": [
           0,
           1,
-          5,
-          7,
-          8
+          6,
+          7
         ],
-        "n_gold": 5,
+        "n_gold": 4,
         "n_results": 20
       },
       {
         "query": "dream sweep gap filling",
         "type": "single_hop",
         "label": "dream sweep",
-        "ndcg": 0.0,
-        "gold_pos": [],
+        "ndcg": 1.0,
+        "gold_pos": [
+          0
+        ],
         "n_gold": 1,
         "n_results": 20
       },
@@ -5643,13 +5582,12 @@
         "query": "how to build chitta-field",
         "type": "single_hop",
         "label": "build toolchain",
-        "ndcg": 0.784,
+        "ndcg": 0.668,
         "gold_pos": [
           0,
           1,
           2,
-          3,
-          9
+          8
         ],
         "n_gold": 7,
         "n_results": 20
@@ -5658,12 +5596,10 @@
         "query": "how does semantic search work",
         "type": "single_hop",
         "label": "search arch",
-        "ndcg": 0.761,
+        "ndcg": 0.637,
         "gold_pos": [
-          1,
-          2,
-          3,
-          4
+          0,
+          1
         ],
         "n_gold": 4,
         "n_results": 20
@@ -5672,7 +5608,7 @@
         "query": "distillation pipeline wisdom episode",
         "type": "single_hop",
         "label": "distillation pipeline",
-        "ndcg": 0.848,
+        "ndcg": 0.839,
         "gold_pos": [
           0,
           1,
@@ -5683,8 +5619,8 @@
           6,
           8,
           9,
-          10,
-          14
+          14,
+          18
         ],
         "n_gold": 14,
         "n_results": 20
@@ -5693,14 +5629,14 @@
   },
   "smart": {
     "strategy": "smart",
-    "mean_ndcg": 0.842,
+    "mean_ndcg": 0.844,
     "ci_95": [
       0.805,
-      0.878
+      0.882
     ],
     "n_queries": 164,
     "by_type": {
-      "single_hop": 0.841,
+      "single_hop": 0.843,
       "multihop": 0.908,
       "abstention": 1.0
     },
@@ -5817,9 +5753,9 @@
         "query": "Where is the nomic-embed-text-v1.5 model file located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_model_file_located?",
-        "ndcg": 1.0,
+        "ndcg": 0.631,
         "gold_pos": [
-          0
+          1
         ],
         "n_gold": 1,
         "n_results": 20
@@ -6189,9 +6125,9 @@
         "query": "What does the geodesic distributed-tmp-dir-fix change address?",
         "type": "single_hop",
         "label": "what_does_the_geodesic_distributed-tmp-dir-fix_change_addres",
-        "ndcg": 0.356,
+        "ndcg": 0.387,
         "gold_pos": [
-          5
+          4
         ],
         "n_gold": 1,
         "n_results": 20
@@ -6574,9 +6510,9 @@
         "query": "Where is the nomic-embed-text-v1.5 embedding model located?",
         "type": "single_hop",
         "label": "where_is_the_nomic-embed-text-v1.5_embedding_model_located?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -6803,10 +6739,8 @@
         "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
         "type": "single_hop",
         "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-        "ndcg": 0.231,
-        "gold_pos": [
-          18
-        ],
+        "ndcg": 0.0,
+        "gold_pos": [],
         "n_gold": 1,
         "n_results": 20
       },
@@ -6891,9 +6825,9 @@
         "query": "What data is stored in memory slice-7 of [arch]?",
         "type": "single_hop",
         "label": "what_data_is_stored_in_memory_slice-7_of_[arch]?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -7188,9 +7122,9 @@
         "query": "What bash command followed `zcat` before it became `cd`?",
         "type": "single_hop",
         "label": "what_bash_command_followed_`zcat`_before_it_became_`cd`?",
-        "ndcg": 0.631,
+        "ndcg": 1.0,
         "gold_pos": [
-          1
+          0
         ],
         "n_gold": 1,
         "n_results": 20
@@ -7573,12 +7507,11 @@
         "query": "how to build chitta-field",
         "type": "single_hop",
         "label": "build toolchain",
-        "ndcg": 0.553,
+        "ndcg": 0.39,
         "gold_pos": [
-          0,
-          1
+          0
         ],
-        "n_gold": 5,
+        "n_gold": 4,
         "n_results": 20
       },
       {
@@ -7619,10 +7552,9 @@
           15,
           16,
           17,
-          18,
-          19
+          18
         ],
-        "n_gold": 20,
+        "n_gold": 19,
         "n_results": 20
       }
     ]

@@ -553,7 +553,7 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
                 [](const FieldRecallHit& h) { return h.content.empty(); }),
             semantic_hits.end());
     }
-    auto keyword_hits  = field_store_->recall_keyword(query, limit);
+    auto keyword_hits  = field_store_->recall_keyword(query, limit, realm);
 
     // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
     {
