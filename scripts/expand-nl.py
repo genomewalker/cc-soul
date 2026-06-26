@@ -45,19 +45,20 @@ def already_expanded(tags: list) -> bool:
 
 def ollama_expand(ssl_label: str, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> str:
     body = json.dumps({
-        "model": OLLAMA_MODEL,
+        "model": ollama_model,
         "prompt": ssl_label[:500],
         "system": SYSTEM,
         "stream": False,
         "think": False,
+        "keep_alive": 300,
         "options": {"temperature": 0.1, "num_predict": 100},
     }).encode()
     req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate",
+        f"{ollama_url}/api/generate",
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=300) as r:
         resp = json.loads(r.read())
     text = resp.get("response", "").strip()
     for sep in (".", "\n"):
