@@ -1,14 +1,14 @@
 {
   "strategy": "hybrid",
-  "mean_ndcg": 0.862,
+  "mean_ndcg": 0.858,
   "ci_95": [
-    0.828,
-    0.897
+    0.82,
+    0.895
   ],
   "n_queries": 164,
   "by_type": {
-    "single_hop": 0.859,
-    "multihop": 1.0,
+    "single_hop": 0.856,
+    "multihop": 0.908,
     "abstention": 1.0
   },
   "per_query": [
@@ -49,9 +49,9 @@
       "query": "How do I limit the decode backlog size with threading?",
       "type": "single_hop",
       "label": "how_do_i_limit_the_decode_backlog_size_with_threading?",
-      "ndcg": 0.356,
+      "ndcg": 0.387,
       "gold_pos": [
-        5
+        4
       ],
       "n_gold": 1,
       "n_results": 20
@@ -82,9 +82,9 @@
       "query": "How does DAMAR-fringe-expansion handle fringe seeds and minimizers?",
       "type": "single_hop",
       "label": "how_does_damar-fringe-expansion_handle_fringe_seeds_and_mini",
-      "ndcg": 0.5,
+      "ndcg": 1.0,
       "gold_pos": [
-        2
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -236,9 +236,9 @@
       "query": "What releases involve ESS floor on log and adna presence?",
       "type": "single_hop",
       "label": "what_releases_involve_ess_floor_on_log_and_adna_presence?",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -269,9 +269,9 @@
       "query": "How does evidence rollup compare to terminal assignment architectures?",
       "type": "single_hop",
       "label": "how_does_evidence_rollup_compare_to_terminal_assignment_arch",
-      "ndcg": 0.356,
+      "ndcg": 0.333,
       "gold_pos": [
-        5
+        6
       ],
       "n_gold": 1,
       "n_results": 20
@@ -324,9 +324,9 @@
       "query": "What was noted about the yantra migration process?",
       "type": "single_hop",
       "label": "what_was_noted_about_the_yantra_migration_process?",
-      "ndcg": 0.356,
+      "ndcg": 0.289,
       "gold_pos": [
-        5
+        9
       ],
       "n_gold": 1,
       "n_results": 20
@@ -335,9 +335,9 @@
       "query": "How does bam2mcaf handle alignment indices and memory usage?",
       "type": "single_hop",
       "label": "how_does_bam2mcaf_handle_alignment_indices_and_memory_usage?",
-      "ndcg": 0.387,
+      "ndcg": 0.431,
       "gold_pos": [
-        4
+        3
       ],
       "n_gold": 1,
       "n_results": 20
@@ -346,9 +346,9 @@
       "query": "How does KtaxDb handle LCA path marking with hybrid lifting?",
       "type": "single_hop",
       "label": "how_does_ktaxdb_handle_lca_path_marking_with_hybrid_lifting?",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -379,9 +379,9 @@
       "query": "What is the strobemer technique for cross-mapping recovery in [arch]?",
       "type": "single_hop",
       "label": "what_is_the_strobemer_technique_for_cross-mapping_recovery_i",
-      "ndcg": 0.431,
+      "ndcg": 0.5,
       "gold_pos": [
-        3
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -412,9 +412,9 @@
       "query": "What's the relationship between geodesic outlier labeling and contamination labeling?",
       "type": "single_hop",
       "label": "what's_the_relationship_between_geodesic_outlier_labeling_an",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -434,9 +434,9 @@
       "query": "What is the current status of Stage-1 branch prediction dispatch?",
       "type": "single_hop",
       "label": "what_is_the_current_status_of_stage-1_branch_prediction_disp",
-      "ndcg": 1.0,
+      "ndcg": 0.5,
       "gold_pos": [
-        0
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -478,9 +478,9 @@
       "query": "What's the difference between read-based and assembly-based sedaDNA profiling?",
       "type": "single_hop",
       "label": "what's_the_difference_between_read-based_and_assembly-based_",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -489,10 +489,8 @@
       "query": "How does Geodesic handle thread counts with memory constraints?",
       "type": "single_hop",
       "label": "how_does_geodesic_handle_thread_counts_with_memory_constrain",
-      "ndcg": 1.0,
-      "gold_pos": [
-        0
-      ],
+      "ndcg": 0.0,
+      "gold_pos": [],
       "n_gold": 1,
       "n_results": 20
     },
@@ -500,9 +498,9 @@
       "query": "What does the geodesic distributed-tmp-dir-fix change address?",
       "type": "single_hop",
       "label": "what_does_the_geodesic_distributed-tmp-dir-fix_change_addres",
-      "ndcg": 0.333,
+      "ndcg": 0.356,
       "gold_pos": [
-        6
+        5
       ],
       "n_gold": 1,
       "n_results": 20
@@ -577,9 +575,9 @@
       "query": "What causes circular bias in 5' stratification with deam scores?",
       "type": "single_hop",
       "label": "what_causes_circular_bias_in_5'_stratification_with_deam_sco",
-      "ndcg": 1.0,
+      "ndcg": 0.5,
       "gold_pos": [
-        0
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -698,9 +696,9 @@
       "query": "How does window size affect memory usage and throughput?",
       "type": "single_hop",
       "label": "how_does_window_size_affect_memory_usage_and_throughput?",
-      "ndcg": 0.431,
+      "ndcg": 0.631,
       "gold_pos": [
-        3
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -830,9 +828,9 @@
       "query": "What causes the single-threaded scan in LCA pass 2?",
       "type": "single_hop",
       "label": "what_causes_the_single-threaded_scan_in_lca_pass_2?",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -874,9 +872,9 @@
       "query": "What optimizations benefit memory performance with read-heavy workloads?",
       "type": "single_hop",
       "label": "what_optimizations_benefit_memory_performance_with_read-heav",
-      "ndcg": 0.631,
+      "ndcg": 0.5,
       "gold_pos": [
-        1
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -971,9 +969,9 @@
       "query": "What is the thread-local accumulator with post-join merge approach?",
       "type": "single_hop",
       "label": "what_is_the_thread-local_accumulator_with_post-join_merge_ap",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1059,9 +1057,9 @@
       "query": "What caused the geodesic pipeline integration to fail with incomplete execution?",
       "type": "single_hop",
       "label": "what_caused_the_geodesic_pipeline_integration_to_fail_with_i",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1114,9 +1112,9 @@
       "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
       "type": "single_hop",
       "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-      "ndcg": 1.0,
+      "ndcg": 0.228,
       "gold_pos": [
-        0
+        19
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1125,9 +1123,9 @@
       "query": "How does genopack output support resumability and parallel reads?",
       "type": "single_hop",
       "label": "how_does_genopack_output_support_resumability_and_parallel_r",
-      "ndcg": 0.387,
+      "ndcg": 1.0,
       "gold_pos": [
-        4
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1147,9 +1145,9 @@
       "query": "What does libtaph integration do regarding pre-alignment damage estimation?",
       "type": "single_hop",
       "label": "what_does_libtaph_integration_do_regarding_pre-alignment_dam",
-      "ndcg": 0.315,
+      "ndcg": 0.431,
       "gold_pos": [
-        7
+        3
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1213,9 +1211,9 @@
       "query": "What optimizations benefit read-heavy workloads with MCAF performance?",
       "type": "single_hop",
       "label": "what_optimizations_benefit_read-heavy_workloads_with_mcaf_pe",
-      "ndcg": 0.5,
+      "ndcg": 0.631,
       "gold_pos": [
-        2
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1444,9 +1442,9 @@
       "query": "What does `use-refstats` do in ka_vint's memory?",
       "type": "single_hop",
       "label": "what_does_`use-refstats`_do_in_ka_vint's_memory?",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1587,9 +1585,9 @@
       "query": "How can I create disjoint splits for protein classifier training?",
       "type": "single_hop",
       "label": "how_can_i_create_disjoint_splits_for_protein_classifier_trai",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1609,9 +1607,9 @@
       "query": "How does bam2mcaf handle alignment indices and memory usage?",
       "type": "single_hop",
       "label": "how_does_bam2mcaf_handle_alignment_indices_and_memory_usage?_102488",
-      "ndcg": 0.431,
+      "ndcg": 0.5,
       "gold_pos": [
-        3
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1686,9 +1684,9 @@
       "query": "How do display choices in phylogenetic trees connect metadata lookup with study focus highlighting?",
       "type": "multihop",
       "label": "mh_how_do_display_choices_in_phylogenetic_t",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1798,16 +1796,17 @@
       "query": "chaos nodes",
       "type": "single_hop",
       "label": "cluster alias",
-      "ndcg": 0.767,
+      "ndcg": 0.658,
       "gold_pos": [
-        0,
         1,
-        2,
-        3,
         4,
-        7
+        5,
+        10,
+        13,
+        14,
+        17
       ],
-      "n_gold": 9,
+      "n_gold": 7,
       "n_results": 20
     },
     {
@@ -1848,69 +1847,63 @@
       "query": "NFS resurrection problem",
       "type": "single_hop",
       "label": "NFS gotcha",
-      "ndcg": 0.746,
+      "ndcg": 0.89,
       "gold_pos": [
         0,
         1,
-        9,
-        10
+        6,
+        7
       ],
-      "n_gold": 5,
+      "n_gold": 4,
       "n_results": 20
     },
     {
       "query": "dream sweep gap filling",
       "type": "single_hop",
       "label": "dream sweep",
-      "ndcg": 0.738,
+      "ndcg": 1.0,
       "gold_pos": [
-        0,
-        4,
-        9,
-        13,
-        15
+        0
       ],
-      "n_gold": 5,
+      "n_gold": 1,
       "n_results": 20
     },
     {
       "query": "forward bet prediction horizon",
       "type": "single_hop",
       "label": "forward bet",
-      "ndcg": 0.832,
+      "ndcg": 1.0,
       "gold_pos": [
-        0,
-        5
+        0
       ],
-      "n_gold": 2,
+      "n_gold": 1,
       "n_results": 20
     },
     {
       "query": "how to build chitta-field",
       "type": "single_hop",
       "label": "build toolchain",
-      "ndcg": 0.706,
+      "ndcg": 0.645,
       "gold_pos": [
         0,
         1,
-        2,
-        3,
-        19
+        2
       ],
-      "n_gold": 8,
+      "n_gold": 6,
       "n_results": 20
     },
     {
       "query": "how does semantic search work",
       "type": "single_hop",
       "label": "search arch",
-      "ndcg": 0.712,
+      "ndcg": 0.761,
       "gold_pos": [
         1,
         2,
+        3,
         4
       ],
-      "n_gold": 3,
+      "n_gold": 4,
       "n_results": 20
     },
     {

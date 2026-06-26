@@ -22,7 +22,7 @@ G0_GOLDIDS_PATH = ROOT / "hooks" / "grade-recall-goldids.json"
 RESULTS_PATH = ROOT / "hooks" / "chitta-eval-results.json"
 
 _reranker = None
-_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 _RERANK_FETCH_MUL = 4
 
 
@@ -157,6 +157,10 @@ def load_queries(path: Path) -> list[dict]:
         for m in meta:
             label = m.get("label", "")
             gold = ids.get(label, [])
+            # Always seed gold with the original memory_id from generation time
+            orig = m.get("memory_id")
+            if orig and str(orig) not in [str(g) for g in gold]:
+                gold = [str(orig)] + [str(g) for g in gold]
             queries.append({
                 "query": m["query"],
                 "label": label,
@@ -199,6 +203,7 @@ def load_g0_queries(path: Path) -> list[dict]:
                 "gold_ids": gold,
                 "gold_signature": g.get("gold_signature", ""),
                 "type": "single_hop",
+                "realm": "project:cc-soul",
             })
         return queries
     except Exception:
@@ -206,22 +211,26 @@ def load_g0_queries(path: Path) -> list[dict]:
 
 
 def bootstrap_goldids(queries: list[dict], limit: int, strategy: str) -> dict:
-    """Re-verify gold IDs by running recall and checking signature matches."""
+    """Re-verify gold IDs by running recall and checking signature/ID matches."""
     ids: dict = {}
     for q in queries:
         if q.get("type") == "abstention":
             ids[q["label"]] = []
             continue
-        results = chitta_recall(q["query"], limit * _RERANK_FETCH_MUL, strategy)
+        realm = q.get("realm")
+        results = chitta_recall(q["query"], limit * _RERANK_FETCH_MUL, strategy, realm)
+        retrieved = {str(r.get("id", "")) for r in results}
         sig = q.get("gold_signature", "")
         found = []
-        for r in results[:limit]:
-            if sig and sig in r.get("text", ""):
-                found.append(str(r.get("id", "")))
-        if not found and q.get("gold_ids"):
-            # Re-check existing IDs
-            retrieved = {str(r.get("id","")) for r in results}
-            found = [g for g in q["gold_ids"] if g in retrieved]
+        # Sig-matched hits (durable across re-ingests)
+        if sig:
+            for r in results:
+                if sig in r.get("text", ""):
+                    found.append(str(r.get("id", "")))
+        # Existing gold IDs that appear in results
+        for g in q.get("gold_ids", []):
+            if str(g) in retrieved and str(g) not in found:
+                found.append(str(g))
         ids[q["label"]] = found
         print(f"  {q['label']}: {len(found)} gold IDs")
     return ids

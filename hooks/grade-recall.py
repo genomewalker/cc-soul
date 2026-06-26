@@ -23,7 +23,7 @@ from pathlib import Path
 
 # Cross-encoder reranker — loaded once, used for all queries
 _reranker = None
-_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 _RERANK_FETCH_MUL = 4  # fetch this many × limit, then rerank to top-limit
 
 def _load_reranker():
