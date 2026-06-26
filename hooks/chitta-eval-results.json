@@ -1,13 +1,13 @@
 {
   "strategy": "hybrid",
-  "mean_ndcg": 0.848,
+  "mean_ndcg": 0.851,
   "ci_95": [
-    0.812,
-    0.882
+    0.811,
+    0.887
   ],
   "n_queries": 164,
   "by_type": {
-    "single_hop": 0.847,
+    "single_hop": 0.849,
     "multihop": 0.908,
     "abstention": 1.0
   },
@@ -335,9 +335,9 @@
       "query": "How does bam2mcaf handle alignment indices and memory usage?",
       "type": "single_hop",
       "label": "how_does_bam2mcaf_handle_alignment_indices_and_memory_usage?",
-      "ndcg": 0.431,
+      "ndcg": 0.631,
       "gold_pos": [
-        3
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -498,9 +498,9 @@
       "query": "What does the geodesic distributed-tmp-dir-fix change address?",
       "type": "single_hop",
       "label": "what_does_the_geodesic_distributed-tmp-dir-fix_change_addres",
-      "ndcg": 0.356,
+      "ndcg": 0.387,
       "gold_pos": [
-        5
+        4
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1112,8 +1112,10 @@
       "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
       "type": "single_hop",
       "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-      "ndcg": 0.0,
-      "gold_pos": [],
+      "ndcg": 0.24,
+      "gold_pos": [
+        16
+      ],
       "n_gold": 1,
       "n_results": 20
     },
@@ -1143,9 +1145,9 @@
       "query": "What does libtaph integration do regarding pre-alignment damage estimation?",
       "type": "single_hop",
       "label": "what_does_libtaph_integration_do_regarding_pre-alignment_dam",
-      "ndcg": 0.431,
+      "ndcg": 0.5,
       "gold_pos": [
-        3
+        2
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1198,9 +1200,9 @@
       "query": "What data is stored in memory slice-7 of [arch]?",
       "type": "single_hop",
       "label": "what_data_is_stored_in_memory_slice-7_of_[arch]?",
-      "ndcg": 0.631,
+      "ndcg": 1.0,
       "gold_pos": [
-        1
+        0
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1429,9 +1431,9 @@
       "query": "What is my preferred status regarding ststsu?",
       "type": "single_hop",
       "label": "what_is_my_preferred_status_regarding_ststsu?",
-      "ndcg": 0.387,
+      "ndcg": 0.356,
       "gold_pos": [
-        4
+        5
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1495,9 +1497,9 @@
       "query": "What bash command followed `zcat` before it became `cd`?",
       "type": "single_hop",
       "label": "what_bash_command_followed_`zcat`_before_it_became_`cd`?",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1880,13 +1882,12 @@
       "query": "how to build chitta-field",
       "type": "single_hop",
       "label": "build toolchain",
-      "ndcg": 0.645,
+      "ndcg": 0.553,
       "gold_pos": [
         0,
-        1,
-        2
+        1
       ],
-      "n_gold": 6,
+      "n_gold": 5,
       "n_results": 20
     },
     {
@@ -1927,10 +1928,9 @@
         15,
         16,
         17,
-        18,
-        19
+        18
       ],
-      "n_gold": 20,
+      "n_gold": 19,
       "n_results": 20
     }
   ]
