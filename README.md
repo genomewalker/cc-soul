@@ -190,11 +190,10 @@ CC-soul ships fine-tuned models for two jobs. All run in-process via llama.cpp �
 
 | Model | File | Size | Role |
 |-------|------|------|------|
-| **ssl_distiller_dpo** | `~/.claude/bin/ssl_distiller_dpo.gguf` | 941 MB | Embeddings — domain-fine-tuned, 1536-dim, DPO-aligned (active) |
-| ssl_distiller | `~/.claude/bin/ssl_distiller.gguf` | 941 MB | Embeddings — base fine-tune without DPO |
+| **jina-embeddings-v2-ft** | `~/.claude/models/jina-v2-ft.gguf` | — | Embeddings — domain fine-tuned Jina v2, 768-dim (active; nDCG@20=0.851) |
+| nomic-embed-text-v1.5 | `~/.claude/models/nomic-embed-text-v1.5.gguf` | 140 MB | Embeddings — fallback, 768-dim |
 | **chitta-hint-qwen v5-model-b** | `~/.claude/models/chitta-hint-qwen-q4_k_m.gguf` (symlink) | 851 MB | Hint extraction — active (88% overall, +20pp over prior) |
 | chitta-hint-qwen v4 q4_k_m | `~/.claude/models/chitta-hint-qwen-q4_k_m.gguf.old` | 379 MB | Hint extraction — prior generation (68% overall) |
-| nomic-embed-text-v1.5 | `~/.claude/models/nomic-embed-text-v1.5.gguf` | 140 MB | Embeddings — stock fallback (768-dim) |
 
 Override the embedding model: `--embed-model PATH` or `CHITTA_EMBED_MODEL=PATH`.
 Override the hint model: `CHITTA_HINT_MODEL=PATH`.
@@ -206,7 +205,7 @@ CC-soul's memory lives in [chitta-field](https://github.com/genomewalker/chitta-
 - **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions; recall driven by pattern overlap
 - **Self-orthogonalizing encoder** — FEP-derived learning rule; representations decorrelate naturally, resisting catastrophic forgetting
 - **Asymmetric Hopfield network** — directed couplings from co-retrieval order enable energy-based pattern completion
-- **HNSW semantic index** — activates above 2,000 memories; two-tier delta graph keeps insert cost at O(log N_delta) above 100K memories
+- **HNSW semantic index** — activates above 2,000 memories; two-tier delta graph keeps insert cost at O(log N_delta) above 5,000 memories
 - **Write-ahead log** — every operation durable before in-memory apply; full crash-recovery replay
 - **Multi-instance writes** — multiple Claude windows share the same field simultaneously; no locking
 - **Surprise-modulated decay** — unique memories resist forgetting; redundant ones fade naturally

@@ -144,7 +144,10 @@ chitta-field is a pure Rust static library — no external database engine, no N
 ~/.claude/mind/chitta-field/
 ├── {instance_id}_{first_seqno}.seg   # Op log segment (one per writer process)
 ├── chitta.snapshot                    # Full state snapshot (accelerates cold start)
-└── cortex.snapshot                    # Cortical index snapshot (optional)
+├── chitta.hnsw                        # Serialized HNSW main graph
+├── chitta.delta.hnsw                  # HNSW delta graph (active after 5 000 memories)
+├── chitta.emb                         # Embedding sidecar (8-byte magic CTEMB + count + {u64 id, f32×EMBED_DIM} records)
+└── chitta.bin                         # Binary/compressed sidecar
 ```
 
 ### Multi-writer model (Upanishads)
@@ -170,7 +173,7 @@ Op types include: `PutMemory`, `UpdateState`, `Forget`, `AddAssocEdge`, `AddTrip
 | `kind` | `String` | Semantic category (wisdom, episode, ssl, fact, ...) |
 | `realm` | `String` | Namespace / project scope |
 | `content` | `Vec<u8>` | Raw bytes (typically UTF-8 text) |
-| `embedding` | `Vec<f32>` | 768-dim BGE embedding |
+| `embedding` | `Vec<f32>` | 1024-dim BGE embedding (bge-large-en-v1.5 default; build-time configurable via `CHITTA_EMBED_DIM`) |
 | `confidence` | `f32` | 0.0-1.0 |
 | `decay_rate` | `f32` | Strength loss per time unit; 0.0 = pinned |
 | `strength` | `f32` | Current salience (decays over time) |
@@ -181,13 +184,13 @@ Op types include: `PutMemory`, `UpdateState`, `Forget`, `AddAssocEdge`, `AddTrip
 
 `cf_save_full_snapshot` serializes the entire in-RAM state (payloads, states, all indexes) to a single bincode file. On next open, the library reads the snapshot magic, finds the snapshot with the highest seqno using only 16 bytes per file (`peek_seqno`), loads that one, then replays only the op log entries that follow it.
 
-Snapshot format is versioned (magic `0xF011_5741_7E00_0004`). Old snapshots (magic `...0003`) are transparently migrated on load.
+Snapshot format is versioned (magic `0xF011_5741_7E00_0004`). Old snapshots (magic `...0003`) are transparently migrated on load. The current on-disk layout is also referred to as the "V23 sectioned format" — each major section (payloads, states, HNSW, cortex, keyword index, etc.) is written as a discrete tagged block, allowing partial reads and forward-compatible extension.
 
 ---
 
 ## Semantic Index (ANN)
 
-The `SemanticIndex` (in `hnsw.rs`) replaces brute-force cosine search with a two-tier approximate nearest-neighbour strategy.
+The `SemanticIndex` (in `hnsw.rs`) provides approximate nearest-neighbour search via a two-tier HNSW graph, with IVF + LSH as a coarse candidate filter.
 
 ### Architecture
 
@@ -196,36 +199,59 @@ Query embedding
       │
       ▼
 ┌─────────────────────────────────┐
-│  LSH probing (primary path)     │  4 tables, 12 bits each
-│  • Hash query → bucket          │  + 1-bit-flip Hamming neighbours
-│  • Collect candidates           │
+│  HNSW graph (main)              │  Single graph up to 2 000 memories
+│  • Navigate greedy from entry   │  M=16, EF_SEARCH=64
+│  • Collect ef candidates        │
 └──────────────┬──────────────────┘
-               │ (if empty)
+               │ (>= 5 000 memories: delta graph also queried)
                ▼
 ┌─────────────────────────────────┐
-│  IVF coarse quantizer (fallback)│  256 random-projection centroids
-│  • Score query vs centroids     │  Top 6-24 probes
-│  • Collect members from buckets │
+│  HNSW delta graph               │  Merges into main at DELTA_MERGE_RATIO=0.10
 └──────────────┬──────────────────┘
                │
                ▼
 ┌─────────────────────────────────┐
-│  Exact cosine reranking         │  1024-16384 candidates → top-k
+│  IVF + LSH (candidate filter)   │  256 centroids, 4 tables × 12 bits
+│  MIN_PROBES=6 … MAX_PROBES=24   │  1 024-16 384 candidates
+└──────────────┬──────────────────┘
+               │
+               ▼
+┌─────────────────────────────────┐
+│  Exact cosine reranking         │  MIN_CANDIDATES=1 024 → top-k
 └─────────────────────────────────┘
 ```
 
+Flat scan is permanently disabled (`FLAT_SCAN_MAX=0`) as of 2026-06-11; ANN was validated at 154K memories before removal.
+
+Per-realm HNSW graphs activate at `PER_REALM_HNSW_THRESHOLD=500` memories per realm.
+
+Embedding mmap (`memmap2`) activates at `EMB_MMAP_MIN=500_000` memories; below that, embeddings are heap-allocated.
+
 ### Parameters
 
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `COARSE_CENTROIDS` | 256 | Number of random-projection partitions |
-| `COARSE_ASSIGNMENTS` | 2 | Centroids each memory is assigned to |
-| `LSH_TABLES` | 4 | Number of LSH hash tables |
-| `LSH_BITS` | 12 | Bits per hash signature (4096 buckets/table) |
-| `MIN_PROBES` | 6 | Min centroid probes per query |
-| `MAX_CANDIDATES` | 16384 | Candidate cap before exact reranking |
+| Constant | Value | Source | Meaning |
+|----------|-------|--------|---------|
+| `HNSW_M` | 16 | `hnsw.rs:31` | Neighbours per node (inner layers) |
+| `HNSW_M0` | 32 | `hnsw.rs:32` | Neighbours per node (layer 0) |
+| `HNSW_EF_CONSTRUCTION` | 200 | `hnsw.rs:33` | Build-time candidate list size |
+| `HNSW_EF_SEARCH` | 64 | `hnsw.rs:34` | Query-time candidate list size |
+| `HNSW_ML` | 0.36067 | `hnsw.rs:36` | Level multiplier (1/ln(16)) |
+| `HNSW_THRESHOLD` | 2 000 | `hnsw.rs:21` | Single-graph cutover |
+| `HNSW_TIER2_THRESHOLD` | 5 000 | `hnsw.rs:27` | Delta-graph activation |
+| `HNSW_DELTA_MERGE_RATIO` | 0.10 | `hnsw.rs:29` | Delta/main size ratio triggers merge |
+| `PER_REALM_HNSW_THRESHOLD` | 500 | `hnsw.rs:39` | Per-realm graph activation |
+| `FLAT_SCAN_MAX` | 0 | `hnsw.rs:49` | Flat scan disabled |
+| `EMB_MMAP_MIN` | 500 000 | `hnsw.rs:56` | mmap activation threshold |
+| `COARSE_CENTROIDS` | 256 | `hnsw.rs:11` | IVF random-projection partitions |
+| `COARSE_ASSIGNMENTS` | 2 | `hnsw.rs:12` | Centroids per memory |
+| `LSH_TABLES` | 4 | `hnsw.rs:15` | LSH hash tables |
+| `LSH_BITS` | 12 | `hnsw.rs:16` | Bits per signature (4 096 buckets/table) |
+| `MIN_PROBES` | 6 | `hnsw.rs:13` | Min centroid probes per query |
+| `MAX_PROBES` | 24 | `hnsw.rs:14` | Max centroid probes per query |
+| `MIN_CANDIDATES` | 1 024 | `hnsw.rs:17` | Floor on reranking pool |
+| `MAX_CANDIDATES` | 16 384 | `hnsw.rs:18` | Cap before exact reranking |
 
-The centroids and LSH planes are fixed random unit vectors (seeded deterministically). The coarse index is persisted in snapshots; LSH structures are rebuilt from the stored embeddings on load (since planes are deterministic).
+The centroids and LSH planes are fixed random unit vectors seeded deterministically. The coarse index is persisted in snapshots; LSH structures are rebuilt from stored embeddings on load.
 
 ---
 
@@ -233,11 +259,15 @@ The centroids and LSH planes are fixed random unit vectors (seeded deterministic
 
 The `CorticalIndex` (in `organ/cortex.rs`) provides sub-millisecond associative recall without a learned ANN structure.
 
-Each memory's 768-dim embedding is encoded into a **Sparse Distributed Representation**: exactly K=64 active features out of N=16,384. Encoding uses a product-key decomposition: the embedding is split into two 384-dim halves, each scored against 128-centroid sub-dictionaries, and the top-K atoms are selected from the 256-candidate shortlist — O(√N · d) instead of O(N · d).
+Each memory's embedding is encoded into a **Sparse Distributed Representation**: exactly K=64 active features out of N=16,384. Encoding uses a product-key decomposition: when `EMBED_DIM=768`, the embedding is split into two 384-dim halves, each scored against 128-centroid sub-dictionaries, and the top-K atoms are selected from the 256-candidate shortlist — O(√N · d) instead of O(N · d). The split dimensions scale with `EMBED_DIM`.
 
 Recall is a bitset intersection: query SDR vs memory SDR, count shared active bits. This is O(K) per candidate and runs in sub-millisecond at tens of thousands of memories.
 
 A `ProductQuantizer` compresses residual embeddings (32 subvectors, 256 centroids each) to 32 bytes for scale.
+
+### HDC Module (hdc.rs)
+
+A standalone hyperdimensional computing module runs in parallel with the SDR cortical index. It uses 8192-bit binary vectors (128 `u64` words) and bag-of-words bundling: term vectors are XOR-combined via majority voting to produce document hypervectors. Recall is by Hamming distance. The HDC path is lighter-weight than the SDR path and can serve as a fast pre-filter or standalone recall mode.
 
 ### FEP Attractor Network (v5.3)
 
@@ -312,15 +342,15 @@ Text → VakPatha (tokenizer) → Shabda (token sequence) → AntahkaranaYantra 
 |-------|------------------|------|
 | `VakPatha` | Path of speech | WordPiece tokenizer (vocab.txt) |
 | `Shabda` | Sound-form | Tokenized input (input_ids + attention_mask) |
-| `Artha` | Meaning | 768-dim embedding vector + certainty |
+| `Artha` | Meaning | 1024-dim embedding vector + certainty (default; matches `EMBED_DIM`) |
 | `AntahkaranaYantra` | Inner instrument | ONNX Runtime inference engine |
 | `SmritiYantra` | Memory machine | Caching wrapper (LRU, 10000 entries) |
 | `ShantaYantra` | Silent machine | Zero-vector fallback |
 
 ### Model
 
-- **Model**: bge-base-en-v1.5 (110M parameters)
-- **Dimensions**: 768
+- **Model**: bge-large-en-v1.5 (default, `EMBED_DIM=1024`); build-time configurable via `CHITTA_EMBED_DIM` (must be a multiple of 64)
+- **Dimensions**: 1024 (default)
 - **Max sequence length**: 128 tokens
 - **Pooling**: Mean pooling with L2 normalization
 - **Runtime**: ONNX Runtime with sequential execution mode
@@ -749,9 +779,9 @@ struct Confidence {
 
 ```cpp
 struct QuantizedVector {
-    int8_t data[768];   // 768 bytes (vs 3072 bytes for float32)
-    float scale, offset; // Reconstruction: float = data[i] * scale + offset
-    // 74% storage savings
+    int8_t data[EMBED_DIM];   // EMBED_DIM bytes (vs 4×EMBED_DIM bytes for float32)
+    float scale, offset;       // Reconstruction: float = data[i] * scale + offset
+    // 75% storage savings at default EMBED_DIM=1024
 };
 ```
 
@@ -759,7 +789,7 @@ struct QuantizedVector {
 
 ```cpp
 struct BinaryVector {
-    uint64_t bits[12];  // 96 bytes (768 bits, one per dimension)
+    uint64_t bits[EMBED_DIM/64];  // EMBED_DIM bits, one per dimension
     // Sign of each float → 1 bit
     // Hamming distance via popcount
     // 32x compression, fast approximate similarity
@@ -900,6 +930,8 @@ cd chitta && cmake --build build --parallel
 | tree-sitter | Code parsing (+ 9 language grammars) |
 | nlohmann_json | JSON handling |
 | CRoaring | Bitmap operations |
+
+**chitta-field Rust deps (key)**: `serde`/`serde_json`/`rmp-serde` (op serialization), `bincode` (snapshots), `memmap2` (embedding mmap), `parking_lot` (locks), `crc32fast`, `sha2`, `rayon`, `roaring`, `smallvec`, `pyo3` (Python FFI bindings).
 
 ### Outputs
 
@@ -1046,6 +1078,12 @@ Recall source arbitration with learned weights. Tracks which recall sources (sem
 ### Autonomous Learning (Moves 1-6)
 
 Closes feedback loops from prediction errors to memory adaptation.
+
+**WAL op codes (bytes 44-48)**:
+- `OP_SURPRISE_CREDIT = 44` — SurpriseLearning hysteresis gate (`|credit|>=0.75 AND same_dir_streak>=2`); strength delta = `±min(0.08, 0.02+0.06×excess)`
+- `OP_UPSERT_WISDOM_CANDIDATE = 45` / `OP_UPDATE_WISDOM_LIFECYCLE = 46` — WisdomPromotion (thresholds: `support_count>=4`, `cross_session_count>=2`, `promotion_score>=0.72`, `contradiction_count==0`)
+- `OP_UPDATE_SCORER = 47` — LearnedScoringModel weight delta
+- `OP_ATTACH_DEBT_EVIDENCE = 48` — AttachDebtEvidence link
 
 | Tool | Description |
 |------|-------------|
