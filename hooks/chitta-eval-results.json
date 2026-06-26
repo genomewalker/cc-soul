@@ -1,13 +1,13 @@
 {
   "strategy": "hybrid",
-  "mean_ndcg": 0.858,
+  "mean_ndcg": 0.848,
   "ci_95": [
-    0.82,
-    0.895
+    0.812,
+    0.882
   ],
   "n_queries": 164,
   "by_type": {
-    "single_hop": 0.856,
+    "single_hop": 0.847,
     "multihop": 0.908,
     "abstention": 1.0
   },
@@ -148,9 +148,9 @@
       "query": "What golden test strategies avoid key order lock-in issues?",
       "type": "single_hop",
       "label": "what_golden_test_strategies_avoid_key_order_lock-in_issues?",
-      "ndcg": 1.0,
+      "ndcg": 0.356,
       "gold_pos": [
-        0
+        5
       ],
       "n_gold": 1,
       "n_results": 20
@@ -575,9 +575,9 @@
       "query": "What causes circular bias in 5' stratification with deam scores?",
       "type": "single_hop",
       "label": "what_causes_circular_bias_in_5'_stratification_with_deam_sco",
-      "ndcg": 0.5,
+      "ndcg": 0.27,
       "gold_pos": [
-        2
+        11
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1112,10 +1112,8 @@
       "query": "What does \u201cexecution-agnable\u201d mean in geodesic distributed execution?",
       "type": "single_hop",
       "label": "what_does_\u201cexecution-agnable\u201d_mean_in_geodesic_distributed_e",
-      "ndcg": 0.228,
-      "gold_pos": [
-        19
-      ],
+      "ndcg": 0.0,
+      "gold_pos": [],
       "n_gold": 1,
       "n_results": 20
     },
@@ -1343,9 +1341,9 @@
       "query": "What was the fix for the overlay path bug?",
       "type": "single_hop",
       "label": "what_was_the_fix_for_the_overlay_path_bug?",
-      "ndcg": 1.0,
+      "ndcg": 0.631,
       "gold_pos": [
-        0
+        1
       ],
       "n_gold": 1,
       "n_results": 20
@@ -1796,15 +1794,14 @@
       "query": "chaos nodes",
       "type": "single_hop",
       "label": "cluster alias",
-      "ndcg": 0.658,
+      "ndcg": 0.593,
       "gold_pos": [
         1,
         4,
         5,
         10,
         13,
-        14,
-        17
+        14
       ],
       "n_gold": 7,
       "n_results": 20
