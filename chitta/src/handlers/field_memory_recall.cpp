@@ -220,15 +220,19 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     bool expand          = params.value("expand", true);
 
     // Field-RAG / Modern Hopfield mode: bypass RRF, run DAM relaxation.
-    if (strategy == "field" && params.contains("_preembedding")) {
-        auto emb  = params["_preembedding"].get<std::vector<float>>();
-        auto hits = field_store_->recall_field(emb, query, limit, realm);
-        hits.erase(
-            std::remove_if(hits.begin(), hits.end(),
-                [](const FieldRecallHit& h) { return h.content.empty(); }),
-            hits.end());
-        json results = hits_to_results_json(hits, false);
-        return ToolResult::ok(std::to_string(hits.size()) + " field memories", {{"results", results}});
+    if (strategy == "field") {
+        auto emb = params.contains("_preembedding")
+            ? params["_preembedding"].get<std::vector<float>>()
+            : embed_query(query);
+        if (!emb.empty()) {
+            auto hits = field_store_->recall_field(emb, query, limit, realm);
+            hits.erase(
+                std::remove_if(hits.begin(), hits.end(),
+                    [](const FieldRecallHit& h) { return h.content.empty(); }),
+                hits.end());
+            json results = hits_to_results_json(hits, false);
+            return ToolResult::ok(std::to_string(hits.size()) + " field memories", {{"results", results}});
+        }
     }
 
     // Fetch more than needed so tag filtering has candidates to work with
