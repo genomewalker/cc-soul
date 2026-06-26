@@ -1,69 +1,40 @@
 # CC-Soul CLI Reference
 
-CC-Soul provides two command-line binaries: `chittad` (daemon/server) and `chitta` (client/tool invoker).
+`chittad` is the daemon binary (memory server, background processing, Unix socket listener).
+The `chitta` client binary is a separate tool not covered by `simple_cli.cpp`; this document covers `chittad` commands only.
 
 ---
 
 ## Table of Contents
 
-- [Binaries](#binaries)
-- [Installation](#installation)
-- [chittad — Daemon](#chittad--daemon)
-- [chitta — Client](#chitta--client)
-- [CLI Tool Invocation](#cli-tool-invocation)
-- [Thin Client Mode](#thin-client-mode)
-- [TOON Output Format](#toon-output-format)
+- [chittad — Commands](#chittad--commands)
+  - [daemon](#daemon)
+  - [shutdown](#shutdown)
+  - [status](#status)
+  - [stats](#stats)
+  - [metrics](#metrics)
+  - [distill](#distill)
+  - [re_embed](#re_embed)
+  - [export_content](#export_content)
+  - [import_embeddings](#import_embeddings)
+  - [reindex](#reindex)
+  - [migrate-store-format](#migrate-store-format)
+  - [prune-memories](#prune-memories)
+  - [health](#health)
+  - [format-id](#format-id)
+  - [hint_extract](#hint_extract)
 - [Environment Variables](#environment-variables)
-- [Examples](#examples)
+- [Embed Model Resolution](#embed-model-resolution)
+- [Daemon Internals](#daemon-internals)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Binaries
+## chittad — Commands
 
-| Binary | Purpose | Location |
-|--------|---------|----------|
-| `chittad` | Daemon server (background processing, socket listener, RPC) | `~/.claude/bin/chittad` |
-| `chitta` | CLI client (direct tool invocation or JSON-RPC forwarding) | `~/.claude/bin/chitta` |
+### daemon
 
-Both are compiled from the same C++ codebase (`chitta/src/`).
-
----
-
-## Installation
-
-The CLI is built automatically during installation:
-
-```bash
-cd cc-soul
-./scripts/smart-install.sh
-
-# Binaries are now at:
-~/.claude/bin/chitta
-~/.claude/bin/chittad
-```
-
-Or build manually:
-
-```bash
-cd chitta
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-```
-
-Binaries are output to `cc-soul/bin/` by CMakeLists.txt, then copied to `~/.claude/bin/` by the install script.
-
----
-
-## chittad — Daemon
-
-The daemon runs as a background process, providing the soul's memory services over a Unix domain socket.
-
-### Commands
-
-#### daemon
-
-Run the background daemon. Self-daemonizes by default (double-fork).
+Run the background daemon. Self-daemonizes by default (double-fork). Use `-f` to stay in foreground.
 
 ```bash
 chittad daemon [options]
@@ -75,41 +46,60 @@ chittad daemon [options]
 |--------|-------------|---------|
 | `--path PATH` | Mind storage directory | `~/.claude/mind` |
 | `--interval SECS` | Maintenance cycle interval | `60` |
-| `--foreground` | Run in foreground (don't daemonize) | Off |
-
-**Example:**
-```bash
-# Standard daemon (daemonizes, creates socket)
-chittad daemon
-
-# Run in foreground for debugging
-chittad daemon --foreground
-
-# Custom path and interval
-chittad daemon --path /custom/mind --interval 30
-```
+| `-f, --foreground` | Run in foreground (no daemonize) | Off |
+| `--verbose` | Verbose logging | Off |
+| `--distill-interval SECS` | Distillation check interval (seconds) | `900` (15 min) |
+| `--distill-min-turns N` | Minimum turns before distillation fires | — |
+| `--distill-script PATH` | Custom distillation script | — |
+| `--distill-model MODEL` | Model for distillation | `gemma4:26b` |
+| `--distill-token-trigger N` | Char count to trigger distillation (0=off) | `0` |
+| `--distill-cooldown SECS` | Minimum seconds between distillations | `180` |
+| `--distill-max-tokens N` | Max tokens for distillation context | `8192` |
+| `--distill-context-chars N` | Max chars of context fed to distiller (0=unlimited) | `0` |
+| `--no-distill` | Disable automatic distillation | Off |
+| `--embed-model MODEL` | GGUF embed model name | Auto (see below) |
+| `--no-enrich` | Disable enrichment | Off |
+| `--no-hygiene` | Disable hygiene and sleep consolidation | Off |
+| `--no-autonomous` | Disable dream/think/belief-maintenance callbacks | Off |
+| `--merge-policy POLICY` | Memory merge policy (`off` or `merge_aware`) | — |
+| `--embed-interval SECS` | Enable background embedding with this interval | Off |
+| `--rpc-port PORT` | HTTP JSON-RPC server port (also `CHITTA_RPC_PORT` env) | `0` (disabled) |
+| `--http-port PORT` | HTTP visualization server port | `0` (disabled) |
+| `--http-static-dir DIR` | Static files directory for HTTP viz server | — |
 
 **What the daemon does:**
-- Opens DuckDB database at `{path}/chitta.duckdb`
-- Loads ONNX embedding model (bge-base-en-v1.5, 768 dimensions)
-- Creates Unix domain socket at `/tmp/chitta-{hash}.sock`
-- Writes PID to `/tmp/chitta-{hash}.pid`
-- Starts thread pool (auto-scaling 2-16 workers)
-- Runs subconscious background processing:
-  - Every 1s: Check for work
-  - Every 30s: Process embedding queue (batch of 20)
-  - Every 30min: Hygiene cycle (decay, prune, consolidate)
-  - Every 60min: Theme maintenance
-- Runs transcript distillation (configurable interval)
-- Runs code enrichment (symbol descriptions)
 
-**Output:**
-```
-[socket_server] Listening on /tmp/chitta-1234567890.sock
-[daemon] Started (socket=/tmp/chitta-1234567890.sock, interval=60s, pid=12345)
+- Opens chitta-field store (Rust FFI) at the mind path
+- Loads GGUF embedding model via LlamaYantra (see [Embed Model Resolution](#embed-model-resolution)); falls back to OllamaYantra HTTP
+- Creates Unix domain socket via `socket_path_for_mind(mind_path)`
+- Writes PID via `pid_path_for_mind(mind_path)`
+- Starts thread pool (hard-coded 8 min / 16 max workers); queue depth cap via `CHITTA_MAX_QUEUE_DEPTH` (default 256)
+- Sets `OMP_NUM_THREADS`, `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `ORT_NUM_THREADS` to 4
+- Runs queue processor: reads `/tmp/chitta-queue.jsonl`; failed ops written to `{mind}/.failed_queue.jsonl`
+- Runs hint enrichment thread (trigger: 3 new memories; cooldown: 600s; batch: 50); binary via `CHITTA_HINT_ENRICHER` env or smart-install default
+- Runs inotify watcher on `segments/` for same-host peer writes (Linux only); 5s fallback for foreign sync
+- Detects binary self-updates every 60s via `/proc/self/exe` mtime; checks vector-space id compatibility before restart (Linux only)
+- Autonomous callbacks (unless `--no-autonomous`): `dream_wander` (idle 10+ min), `think_wander` (idle 5+ min, hourly), belief maintenance
+
+**Example:**
+
+```bash
+# Standard daemon (daemonizes)
+chittad daemon
+
+# Foreground with verbose, distillation enabled
+chittad daemon --foreground --verbose --distill-interval 900 --distill-model gemma4:26b
+
+# With HTTP JSON-RPC server
+chittad daemon --rpc-port 9482
+
+# Disable autonomous background work
+chittad daemon --no-autonomous --no-hygiene
 ```
 
-#### shutdown
+---
+
+### shutdown
 
 Gracefully stop the running daemon.
 
@@ -117,273 +107,192 @@ Gracefully stop the running daemon.
 chittad shutdown
 ```
 
-Sends a shutdown command via the Unix socket. The daemon saves state and exits cleanly.
+Sends a shutdown command via the Unix socket. The daemon saves state and exits. The command waits up to 30s for the socket to disappear. A SIGALRM watchdog force-exits after 15s if threads do not finish.
 
-#### status
+---
 
-Check if daemon is running and responsive.
+### status
+
+Check if the daemon is running and responsive.
 
 ```bash
 chittad status
 ```
 
-#### stats
+---
 
-Show soul statistics.
+### stats
+
+Show memory and symbol counts.
 
 ```bash
-chittad stats [--json] [--fast]
+chittad stats
+```
+
+**Output:**
+```
+memory_count: 1963
+symbol_count: 340
+yantra: ready
+```
+
+Note: no `--json` or `--fast` flags; no SUS metric output (Samarasya/Ojas scores are not produced by this command).
+
+---
+
+### metrics
+
+Show memory and symbol counts (same as `stats`; future work noted in source).
+
+```bash
+chittad metrics [days]
+```
+
+`days` is an optional positional argument (default 7) but is not currently used in output.
+
+---
+
+### distill
+
+Manually distill a transcript into memories.
+
+```bash
+chittad distill --transcript-path PATH [--session-id ID] [--realm REALM]
 ```
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--json` | Output as JSON |
-| `--fast` | Skip BM25 loading (faster startup) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--transcript-path PATH` | Path to transcript file (required) | — |
+| `--session-id ID` | Session identifier (auto-derived from filename if omitted) | Auto |
+| `--realm REALM` | Target realm | `brahman` |
 
-**Output:**
+Verbose output is always enabled for manual distillation.
+
+---
+
+### re_embed
+
+Re-embed all memories using the current GGUF model. Requires an embed model. Calls `requeue_all_embeddings`, `force_reindex`, and `save_full_snapshot`.
+
+```bash
+chittad re_embed --embed-model MODEL
 ```
-Soul Statistics
-═══════════════════════════════
-Nodes:
-  Total:  1963
 
-Sāmarasya (Coherence):
-  Global:     1.0
-  Local:      1.0
-  Structural: 1.0
-  Temporal:   0.5
-  τ (tau):    0.84
+Use this after switching embed models to regenerate all vectors.
 
-Ojas (Vitality):
-  Structural: 1.0
-  Semantic:   0.84
-  Temporal:   0.65
-  Capacity:   0.99
-  ψ (psi):    0.87 [healthy]
+---
 
-Yantra: ready
+### export_content
+
+GPU re-embed migration — phase 1. Dumps id + text as JSONL for external embedding.
+
+```bash
+chittad export_content --out FILE.jsonl
 ```
 
 ---
 
-## chitta — Client
+### import_embeddings
 
-The `chitta` binary operates in two modes:
+GPU re-embed migration — phase 3. Reads binary records (u64 id + f32[EMBED_DIM] vector) and writes them back into the store.
 
-1. **CLI mode**: Direct tool invocation with named arguments
-2. **Thin client mode**: Forward raw JSON-RPC to daemon via socket
+```bash
+chittad import_embeddings --in FILE.bin
+```
 
-### Global Options
+---
+
+### reindex
+
+Rebuild ANN indices (binary codes, coarse quantizer, LSH, HNSW) from current in-store embeddings. No embed model required.
+
+```bash
+chittad reindex
+```
+
+Use this to rebuild indices after `import_embeddings` or if indices become corrupted.
+
+---
+
+### migrate-store-format
+
+PR5 migration: stamps the `.shdr` identity sidecar on an existing store without re-embedding.
+
+```bash
+chittad migrate-store-format
+```
+
+---
+
+### prune-memories
+
+Remove or down-weight memories matching text substrings.
+
+```bash
+chittad prune-memories --match PATTERNS [--apply] [--delete | --background]
+```
+
+**Options:**
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--socket-path PATH` | Daemon socket path | Auto-detected |
-| `--json` | Output raw JSON | Text output |
-| `--toon` | Output TOON format (compact, LLM-friendly) | Text output |
-| `-v, --version` | Show version | - |
-| `-h, --help` | Show help | - |
+| `--match PATTERNS` | Comma-separated substrings (case-insensitive) to match against memory text | — |
+| `--apply` | Execute the action (dry-run if omitted) | Dry-run |
+| `--delete` | Delete matched memories (default action when `--apply` set) | Default |
+| `--background` | Down-weight matched memories instead of deleting | Off |
 
----
-
-## CLI Tool Invocation
-
-The `chitta` binary can invoke any registered RPC tool directly from the command line:
+**Example:**
 
 ```bash
-chitta <tool-name> [--param value ...]
-```
+# Dry-run: show what would be deleted
+chittad prune-memories --match "obsolete,stale"
 
-### Core Memory Tools
+# Delete matching memories
+chittad prune-memories --match "obsolete,stale" --apply --delete
 
-```bash
-# Store a memory
-chitta remember --content "[domain] pattern→insight" --tags "important" --type wisdom
-
-# Semantic search
-chitta recall --query "error handling patterns" --limit 10
-
-# Add wisdom/belief/failure
-chitta grow --type wisdom --title "Caching Strategy" --content "LRU with TTL for APIs"
-
-# Get node by ID
-chitta get --id "a1b2c3d4-..."
-
-# Update content
-chitta update --id "a1b2c3d4-..." --content "Updated text"
-
-# Remove a memory
-chitta forget --id "a1b2c3d4-..."
-
-# Adjust confidence
-chitta strengthen --id "a1b2c3d4-..." --amount 0.1
-chitta weaken --id "a1b2c3d4-..." --amount 0.1
-
-# Manage tags
-chitta tag --id "a1b2c3d4-..." --add "important"
-chitta tag --id "a1b2c3d4-..." --remove "old-tag"
-```
-
-### Search and Resonance
-
-```bash
-# Full resonance (8-phase retrieval)
-chitta full_resonate --query "caching strategies" --k 5
-
-# Full resonance with realm filter
-chitta full_resonate --query "auth patterns" --realm "project:web-app" --k 3
-
-# Partnership-only resonance (exclude code intel)
-chitta full_resonate --query "user preferences" --partnership-only true
-```
-
-### Graph/Triplets
-
-```bash
-# Create relationship
-chitta connect --subject "Mind" --predicate "contains" --object "remember()"
-
-# Query triplets
-chitta query --subject "Mind"
-chitta query --predicate "calls"
-chitta query_graph --object "DuckDBStore"
-```
-
-### Code Intelligence
-
-```bash
-# Index a codebase
-chitta learn_codebase --path /path/to/project --project "my-app"
-
-# Find symbols by name
-chitta find_symbol --name "Mind" --kind class
-
-# Read symbol source code
-chitta read_symbol --name "DuckDBStore"
-chitta read_function --name "full_resonate"
-
-# Find callers/callees
-chitta symbol_callers --name "remember"
-chitta symbol_callees --name "full_resonate"
-
-# Semantic code search
-chitta search_symbols --query "memory storage class" --limit 5
-
-# Codebase overview
-chitta codebase_overview --format tree
-```
-
-### Realm Management
-
-```bash
-# Auto-detect current realm
-chitta realm_detect
-
-# List all realms
-chitta realm_list
-
-# Set realm for a memory
-chitta realm_set --id "..." --realm "project:my-app"
-```
-
-### Session/Ledger
-
-```bash
-# Save checkpoint
-chitta ledger_save --session_id "work-session-1" --project "project:cc-soul" \
-  --mood "confident" --snapshot "Completed API documentation rewrite"
-
-# Load latest checkpoint
-chitta ledger_load --project "project:cc-soul"
-
-# List checkpoints
-chitta ledger_list --project "project:cc-soul" --limit 5
-```
-
-### State and Health
-
-```bash
-# Soul context
-chitta soul_context
-
-# Health check
-chitta health_check
-
-# Version
-chitta version_check
-
-# Memory hygiene stats
-chitta hygiene_stats
-
-# Run hygiene
-chitta hygiene_run
-```
-
-### Observation (Hook Integration)
-
-```bash
-# Store observation (used by hooks)
-chitta observe --title "Edit: main.cpp" --content "[signal] Edit: main.cpp" \
-  --category signal --tags "auto:edit"
-```
-
-### Import/Export
-
-```bash
-# Import .soul file
-chitta import_soul --file /path/to/data.soul
-
-# Export memories
-chitta export_soul --file /path/to/backup.soul --limit 100
+# Down-weight instead of delete
+chittad prune-memories --match "low-confidence" --apply --background
 ```
 
 ---
 
-## Thin Client Mode
+### health
 
-When stdin is not a terminal, `chitta` acts as a **thin client** — forwarding raw JSON-RPC to the daemon:
-
-```bash
-# Forward JSON-RPC to daemon
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{"query":"test","limit":3}}}' \
-  | chitta
-
-# With explicit socket path
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stats"}}' \
-  | chitta --socket-path /tmp/chitta-12345.sock
-```
-
-This is how the hook scripts communicate with the daemon — they pipe JSON-RPC requests through `chitta` as a fallback when direct socket access via `nc` fails.
-
----
-
-## TOON Output Format
-
-The `--toon` flag outputs in TOON (Token-Oriented Object Notation) format — ~40% fewer tokens than JSON, optimized for LLM consumption:
+Lightweight daemon ping over the Unix socket. Never loads the FieldStore.
 
 ```bash
-chitta soul_context --toon
+chittad health
 ```
 
 **Output:**
 ```
-total_nodes: 1963
-triplet_count: 340
-avg_confidence: 0.84
-status: healthy
-coherence:
- global: 1.0
- local: 1.0
- structural: 1.0
- temporal: 0.5
- tau_k: 0.84
+pid: 12345
+uptime_ms: 3600000
 ```
 
-Compare with JSON (same data, more tokens):
-```json
-{"total_nodes":1963,"triplet_count":340,"avg_confidence":0.84,"status":"healthy","coherence":{"global":1.0,"local":1.0,"structural":1.0,"temporal":0.5,"tau_k":0.84}}
+---
+
+### format-id
+
+Print the compiled vector-space id (`cf_compiled_vector_space_id()`). Used by the self-update gate to check compatibility. Never loads FieldStore.
+
+```bash
+chittad format-id
 ```
+
+---
+
+### hint_extract
+
+Extract hints from a file or stdin. Only available when built with `CHITTA_WITH_LLAMA_CPP=ON`.
+
+```bash
+chittad hint_extract [FILE]
+```
+
+If `FILE` is omitted, reads from stdin line by line.
 
 ---
 
@@ -391,94 +300,51 @@ Compare with JSON (same data, more tokens):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CHITTA_DB_PATH` | Mind storage directory | `~/.claude/mind` |
-| `CLAUDE_PLUGIN_ROOT` | Plugin root for model paths | None |
-| `SUBCONSCIOUS_INTERVAL` | Daemon cycle interval (seconds) | `60` |
-| `CHITTAD_BIN` | Path to chittad binary | `~/.claude/bin/chittad` |
-| `CHITTA_BIN` | Path to chitta binary | `~/.claude/bin/chitta` |
+| `CHITTA_EMBED_MODEL` | Embed model name (overridden by `--embed-model`) | Build default |
+| `CHITTA_MAX_QUEUE_DEPTH` | Max queue depth for thread pool job queue | `256` |
+| `CHITTA_RPC_PORT` | HTTP JSON-RPC server port (overridden by `--rpc-port`) | `0` (disabled) |
+| `CHITTA_MERGE_POLICY` | Memory merge policy (`off` or `merge_aware`); set by `--merge-policy` | — |
+| `CHITTA_HINT_ENRICHER` | Path to hint enricher binary | Smart-install default |
+| `OMP_NUM_THREADS` | OpenMP threads (set to 4 at startup) | `4` |
+| `MKL_NUM_THREADS` | MKL threads (set to 4 at startup) | `4` |
+| `OPENBLAS_NUM_THREADS` | OpenBLAS threads (set to 4 at startup) | `4` |
+| `ORT_NUM_THREADS` | ONNX Runtime threads (set to 4 at startup) | `4` |
 
-### Model Path Resolution
-
-If `--model` and `--vocab` are not specified, the binaries look for them in order:
-
-1. `$CLAUDE_PLUGIN_ROOT/chitta/models/` (when running as plugin)
-2. `~/.claude/models/model.onnx` and `~/.claude/models/vocab.txt` (smart-install location)
-3. `~/.claude/mind/model.onnx` and `~/.claude/mind/vocab.txt` (legacy)
+Variables `CHITTA_DB_PATH` and `SUBCONSCIOUS_INTERVAL` are not used by `chittad`.
 
 ---
 
-## Examples
+## Embed Model Resolution
 
-### Basic Usage
+The daemon prefers in-process GGUF embedding via LlamaYantra. Model filename is determined by `cf_embed_model_id()` (build-time constant). Resolution order:
 
-```bash
-# Check soul health
-chitta soul_context
+1. `~/.claude/models/{cf_embed_model_id()}.gguf`
+2. `~/.claude/bin/{model}.gguf`
+3. OllamaYantra HTTP (fallback if no GGUF found)
 
-# Quick search
-chitta recall --query "authentication" --limit 3
-
-# Deep resonance search
-chitta full_resonate --query "microservices patterns" --k 5
-
-# Run maintenance
-chitta cycle
-```
-
-### Daemon Management
-
-```bash
-# Start daemon (self-daemonizes)
-chittad daemon
-
-# Check status
-chittad status
-
-# View logs
-tail -f ~/.claude/mind/.subconscious.log
-
-# Stop daemon
-chittad shutdown
-```
-
-### JSON Integration
-
-```bash
-# Get stats as JSON for scripts
-chitta soul_context --json | jq '.total_nodes'
-
-# Search and extract text
-chitta full_resonate --query "error handling" --json --k 5 | \
-  jq -r '.results[].text'
-```
-
-### Code Intelligence Workflow
-
-```bash
-# Index project
-chitta learn_codebase --path . --project "my-project"
-
-# Find a class
-chitta find_symbol --name "UserService" --kind class
-
-# Read its code
-chitta read_symbol --name "UserService"
-
-# Find what calls it
-chitta symbol_callers --name "UserService"
-
-# Semantic search
-chitta search_symbols --query "database connection pooling"
-```
+There is no `--model` / `--vocab` flag and no ONNX model. The embed model is not fixed at `bge-base-en-v1.5` / 768 dimensions; the actual model and dimension are determined at build time via `cf_embed_model_id()`.
 
 ---
 
-## Exit Codes
+## Daemon Internals
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Error (see stderr for details) |
+**Thread pool:** Hard-coded 8 min / 16 max workers. Queue depth capped by `CHITTA_MAX_QUEUE_DEPTH` (default 256).
+
+**Store backend:** chitta-field (Rust FFI via `FieldStore`). Not DuckDB.
+
+**Socket and PID paths:** Determined by `socket_path_for_mind(mind_path)` and `pid_path_for_mind(mind_path)`. Not necessarily under `/tmp/`.
+
+**Embedding queue:** Flushed approximately every 5s; backfill batch size is 100.
+
+**Shutdown:** Daemon waits up to 30s for socket to disappear. SIGALRM fires after 15s if worker threads do not finish.
+
+**Background threads:**
+- Maintenance thread
+- Backfill thread (embedding backfill, batch 100)
+- Distillation thread
+- Hint enrichment thread (trigger: 3 new memories, cooldown: 600s, batch: 50)
+- Queue processor thread (reads `/tmp/chitta-queue.jsonl`)
+- ThreadPool (8-16 workers)
 
 ---
 
@@ -486,46 +352,39 @@ chitta search_symbols --query "database connection pooling"
 
 ### "Yantra not attached"
 
-The embedding model couldn't be loaded.
+The embed model could not be loaded.
 
 ```bash
-# Check if model files exist
-ls -la ~/.claude/models/model.onnx
-ls -la ~/.claude/models/vocab.txt
+# Check GGUF model files
+ls -la ~/.claude/models/
+ls -la ~/.claude/bin/*.gguf
 
-# Or at legacy location
-ls -la ~/.claude/mind/model.onnx
+# Check what model name the build expects
+chittad format-id
 ```
 
-### "Failed to open mind"
-
-Database path issue.
+### Socket connection failed
 
 ```bash
-# Check path exists
-ls -la ~/.claude/mind/
-
-# Create if needed
-mkdir -p ~/.claude/mind
-
-# Check for DuckDB files
-ls -la ~/.claude/mind/chitta.duckdb
-```
-
-### Socket Connection Failed
-
-```bash
-# Check socket exists
-ls /tmp/chitta-*.sock
-
 # Check daemon is running
+chittad health
+
+# Check PID
 pgrep -f "chittad daemon"
 
-# Clean up and restart
-rm -f /tmp/chitta-*.sock /tmp/chitta-*.pid /tmp/chitta-*.lock
+# Restart
+chittad shutdown
 chittad daemon
 ```
 
----
+### Daemon not responding after binary update
 
-*The command line is another window into the soul.*
+The daemon self-detects binary changes every 60s and restarts automatically if the vector-space id is compatible. If the id changed (incompatible embed model), the daemon will not auto-restart — run `re_embed` after manual restart.
+
+### Store indices corrupted
+
+```bash
+chittad reindex
+```
+
+This rebuilds binary codes, coarse quantizer, LSH, and HNSW from existing embeddings without re-embedding.

@@ -7,9 +7,12 @@ CC-Soul integrates with Claude Code through the hooks system, enabling automatic
 ## Table of Contents
 
 - [Overview](#overview)
+- [Hook Files](#hook-files)
 - [Hook Events](#hook-events)
+- [PreToolUse — pre-tool-hook.sh](#pretooluse--pre-tool-hooksh)
+- [Code-Intel Shadow Logging and Enforcement](#code-intel-shadow-logging-and-enforcement)
+- [Environment Variables](#environment-variables)
 - [Configuration](#configuration)
-- [Scripts](#scripts)
 - [Transparent Memory](#transparent-memory)
 - [Proactive Learning](#proactive-learning)
 - [Subconscious Daemon](#subconscious-daemon)
@@ -26,67 +29,48 @@ Hooks are shell commands that execute in response to Claude Code events. CC-Soul
 2. **Transparent memory** — Memories surface without explicit MCP calls
 3. **Proactive learning** — Corrections, preferences, and milestones detected automatically
 4. **Session continuity** — State saved and restored across sessions via ledger
-5. **Anticipation** — Context→action patterns learned and predicted
+5. **Tool safety** — Destructive commands blocked, expensive reads truncated
 6. **Background processing** — Subconscious daemon management
 
 ### Two Hook Systems
 
 CC-Soul provides hooks in two forms:
 
-| System | Files | Used When |
-|--------|-------|-----------|
-| **Plugin hooks** | `hooks/hooks.json` + `hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh` | Installed as Claude Code plugin |
-| **Settings hooks** | `hooks/*.sh` + `~/.claude/settings.json` | Standalone installation |
+| System           | Files                                                                               | Used When                        |
+|------------------|-------------------------------------------------------------------------------------|----------------------------------|
+| **Plugin hooks** | `hooks/hooks.json` + `hooks/*.sh`                                                   | Installed as Claude Code plugin  |
+| **Settings hooks** | `hooks/*.sh` + `~/.claude/settings.json`                                          | Standalone installation          |
 
 The `smart-install.sh` script configures the appropriate system automatically.
 
-### How It Works
+### Hook Output Format
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│                      CLAUDE CODE                               │
-│                                                                │
-│  Event: UserPromptSubmit                                      │
-│         │                                                      │
-│         ▼                                                      │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │                     HOOKS SYSTEM                         │  │
-│  │                                                          │  │
-│  │  1. Read hooks config (plugin or settings.json)          │  │
-│  │  2. Match event to handlers                              │  │
-│  │  3. Execute scripts                                      │  │
-│  │  4. Inject stdout into context                           │  │
-│  └─────────────────────────────────────────────────────────┘  │
-│         │                                                      │
-│         ▼                                                      │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │               PROMPT-HOOK.SH                              │  │
-│  │                                                          │  │
-│  │  1. Extract user message from stdin JSON                 │  │
-│  │  2. Detect learning opportunities (corrections, prefs)   │  │
-│  │  3. Run full_resonate(message) via daemon socket         │  │
-│  │  4. Search code symbols if query is code-related         │  │
-│  │  5. Run anticipation_predict for proactive suggestions   │  │
-│  │  6. Output combined context (max ~500 chars)             │  │
-│  └─────────────────────────────────────────────────────────┘  │
-│         │                                                      │
-│         ▼                                                      │
-│  Output injected as <system-reminder>                         │
-│                                                                │
-└───────────────────────────────────────────────────────────────┘
-```
+All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is not the old "SSL format" (`[conf%:type]`) from earlier versions — that format is obsolete.
+
+---
+
+## Hook Files
+
+| Script                  | Event            | Purpose                                                                              |
+|-------------------------|------------------|--------------------------------------------------------------------------------------|
+| `session-start-hook.sh` | SessionStart     | Realm detection, code re-indexing, soul context injection, ledger restore, git diff  |
+| `prompt-hook.sh`        | UserPromptSubmit | full_resonate search, code symbol injection, anticipation prediction, learning hints |
+| `stop-hook.sh`          | Stop             | Extract `[SOLUTION]`, `[GOTCHA]`, `[PREFERENCE]`, `[DECISION]`, `[FAILURE]`, `[PATTERN]`, `[LEARN]` blocks; anticipation recording; ledger save |
+| `pre-compact-hook.sh`   | PreCompact       | Save ledger checkpoint before context compaction                                     |
+| `pre-tool-hook.sh`      | PreToolUse       | Safety checks, file dedup, large-file truncation, Write guards, Agent routing, ScheduleWakeup budgeting |
+| `post-bash-hook.sh`     | PostToolUse      | Record significant file changes as signals for background learning                   |
+| `log-bash-history.sh`   | PostToolUse (async) | Append every Bash command to history for pattern learning                         |
+| `memory-intercept.sh`   | PostToolUse:Write (async) | Capture Write operations to learn what you build                           |
+| `distill.sh`            | Background       | Transcript distillation into compressed wisdom nodes                                 |
+| `subconscious.sh`       | SessionStart     | Start/stop/restart/status for the chittad daemon                                     |
+
+**Communication:** All scripts use a Unix domain socket to talk to the daemon (fast path). Falls back to the `chitta` thin client if the socket is unavailable. Socket path is derived from the mind path using a djb2 hash: `/tmp/chitta-{hash}.sock`.
 
 ---
 
 ## Hook Events
 
-CC-Soul responds to these Claude Code events:
-
 ### SessionStart
-
-**When:** Claude Code starts or resumes a session
-
-**Triggers:** `startup`, `resume`, `clear`, `compact`
 
 **What CC-Soul Does:**
 1. Auto-install binaries if needed (`smart-install.sh`)
@@ -101,41 +85,24 @@ CC-Soul responds to these Claude Code events:
 10. Load ledger checkpoint (pending tasks, next steps, mood)
 11. Detect git changes since last session
 
-### SessionEnd / Stop
+### Stop
 
-**When:** Claude Code session ends or Claude produces a response
-
-**What CC-Soul Does (Stop hook — stop-hook.sh):**
+**What CC-Soul Does:**
 1. Read Claude's response from stdin
-2. Auto-detect missed learning opportunities:
-   - Corrections the user made → auto-store via `remember`
-   - Preferences expressed → auto-store via `remember`
-   - Milestones detected → auto-store via `remember`
-3. Record anticipation patterns (context→action)
-4. Verify predictions from earlier anticipation
-5. Auto-checkpoint every 5 turns or on meaningful work
-6. Extract files, decisions, next steps, blockers from response
+2. Extract tagged blocks: `[SOLUTION]`, `[GOTCHA]`, `[PREFERENCE]`, `[DECISION]`, `[FAILURE]`, `[PATTERN]`, `[LEARN]`
+3. Auto-detect missed learning opportunities (corrections, preferences not explicitly tagged)
+4. Record anticipation patterns (context to action)
+5. Verify predictions from earlier anticipation
+6. Auto-checkpoint every 5 turns or on meaningful work
 7. Save ledger with session state
 
-**What CC-Soul Does (End hook — stop-hook.sh):**
-1. Calculate session duration and node delta
-2. Save session ledger (Ātman snapshot)
-3. Record session observation (for sessions >1 minute)
-4. Run maintenance cycle
-
 ### UserPromptSubmit
-
-**When:** User sends a message
 
 **What CC-Soul Does:**
 1. Extract user message from stdin JSON
 2. Context recovery: if user says "continue"/"resume", re-inject full soul context
-3. Detect learning opportunities:
-   - Correction patterns ("no", "actually", "that's wrong")
-   - Preference patterns ("I prefer", "always", "never")
-   - Frustration patterns ("stuck", "confused", "frustrated")
-   - Milestone patterns ("it works", "shipped", "deployed")
-4. Determine proactive surfacing tags (corrections, failures, decisions)
+3. Detect learning opportunities (corrections, preferences, frustration, milestones)
+4. Determine proactive surfacing tags
 5. Run `full_resonate(query)` via daemon socket
 6. Filter results: only ≥25% relevance, strip type prefixes, max 500 chars
 7. Surface code symbols if query is code-related
@@ -144,25 +111,15 @@ CC-Soul responds to these Claude Code events:
 
 ### PostToolUse
 
-**When:** After Bash, Write, or Edit tools execute
-
 **What CC-Soul Does:**
-- **capture-hook.sh**: Currently disabled (exits immediately). Previously captured significant commands and file operations.
-- **post-bash-hook.sh**: Records significant Edit/Write operations as signals for background learning.
+- **post-bash-hook.sh**: Records significant Edit/Write operations as signals for background learning
+- Note: `capture-hook.sh` is currently disabled (exits immediately). Write safety checks are handled by `pre-tool-hook.sh`, not the post-bash hook.
 
 ### PreToolUse
 
-**When:** Before Read, Edit, Write, or Bash tools execute
-
-**What CC-Soul Does (pre-tool-hook.sh):**
-- **Safety intercepts**: Blocks destructive commands (`rm -rf /`, `chmod -R 777 /`, `dd` to raw disks) — exits 2 with an explanation before they run.
-- **Large file rewriting**: `cat` on files >500 lines is intercepted, a compact alternative (`head -200 + wc -l`) is run instead, and the output is returned directly. The original command is blocked (exit 2). Real token savings.
-- **Command rewrites**: Unbounded `find` on `/` or `~` gets `-maxdepth 5`; unbounded recursive `grep` gets `| head -200`; large directory listings are capped.
-- **Bash pattern recall**: Detects R, Python, conda, git, cmake, and daemon patterns; injects relevant corrections and gotchas from memory before you run.
+Handled by `pre-tool-hook.sh`. See the [full section below](#pretooluse--pre-tool-hooksh).
 
 ### PreCompact
-
-**When:** Before conversation context is compacted
 
 **What CC-Soul Does:**
 1. Save current state to ledger checkpoint
@@ -171,11 +128,153 @@ CC-Soul responds to these Claude Code events:
 
 ---
 
+## PreToolUse — pre-tool-hook.sh
+
+`pre-tool-hook.sh` is the main safety and intelligence orchestrator. It handles these tool matchers:
+
+```
+Read | Edit | Write | Bash | Agent | ScheduleWakeup
+```
+
+### Bash Matcher
+
+**Stage 1 — Safety blocks (exit 2, command is cancelled):**
+
+| Pattern                      | Block reason                    |
+|------------------------------|---------------------------------|
+| `rm -rf /` or `rm -rf ~`    | Destroys root or home           |
+| `chmod -R 777 /`            | Exposes entire filesystem       |
+| `dd` to a raw disk device   | Overwrites disk directly        |
+
+**Stage 2 — Find/grep/ls fallback strategy:**
+
+- Unbounded `find` on `/` or `~` gets scoped: `chitta recall` is called first to get a memory hint; `find` is limited to a specific directory with `-maxdepth 3`. Set `CC_SOUL_DEEP_SEARCH=1` to allow root-wide search.
+- Grep content mode is capped at 50 matches via `head_limit` injection (not 200 — the 200 figure in older docs was wrong).
+- Glob results are capped at 100 entries via `head_limit` injection.
+
+**Stage 3 — Bash pattern recall (2s timeout, realm-scoped):**
+
+Detects command patterns and injects relevant corrections and gotchas from memory:
+
+| Pattern detected | Memory tags queried |
+|-----------------|---------------------|
+| R / Rscript     | r-lang, bioconductor |
+| Python / conda  | python, conda, environment |
+| git             | git, version-control |
+| cmake / make    | cmake, build        |
+| daemon / systemctl | daemon, service  |
+
+**Task ledger pre-stage:**
+
+Detects trackable commands (`sbatch`, `srun`, `nohup`, python scripts, bash scripts) and snapshots the current file state for provenance tracking before the command runs.
+
+### Read Matcher
+
+1. **Per-turn dedup**: A sentinel file `$MIND/.soul_injected_<session>_<turn>` ensures soul recall is injected only once per turn, not on every Read call.
+2. **Realm detection**: Calls `chitta realm_detect` before injecting any recall. If realm detection fails, injection is skipped entirely to prevent cross-project memory bleed.
+3. **Code-intel advisory**: If the file is indexed in chitta, suggests using `read_symbol` or `smart_context` instead of reading the whole file. Advisory only appears if chitta has indexed the file.
+4. **Large-file truncation**: Reads of files >200 lines are truncated to the first 150 lines. (Older docs said ">500 lines → head -200"; the actual thresholds are 200 and 150.)
+5. **Read dedup cache**: Tracks file reads by mtime hash at `$MIND/.read_cache_<session>`. Repeat reads of unchanged files return a 13-token `§ref:HASH§` reference via sqz instead of full content.
+6. **Strict-mode enforcement for indexed files**: When enforcement is active, reading a fully-indexed file is blocked with a suggestion to use symbol-level tools instead. Bypass for the session with `CC_SOUL_ALLOW_READ=1` or by creating the flag file `$MIND/.allow_read_<session_id>`.
+7. **System-path exception**: Enforcement is skipped for paths under `/site-packages`, `/usr/lib`, `/opt/*/lib`, and similar system locations — those files are never indexed.
+
+### Write Matcher
+
+1. **Blocks temp patch scripts**: Rejects Write calls to paths matching `/tmp`, `*/scratch`, `*patch*`, `*fix_*`, `*edit_*` and tells Claude to use the `Edit` tool directly instead.
+2. **Delegates to file_patch for large files**: If the target file exists and is ≥50 lines, routes through the `file_patch` MCP tool rather than a full rewrite.
+
+### Agent Matcher
+
+1. **Haiku routing**: Agents whose prompt matches search/research patterns are rerouted to `claude-haiku-4-5` with a ≤200 word limit injected. Bypass with `CC_SOUL_AGENT_NO_FORCE=1`.
+2. **Subagent count tracking**: Increments a per-session counter.
+   - Warns at `CC_SOUL_AGENT_WARN` (default: 20).
+   - Hard advisory at `CC_SOUL_AGENT_LIMIT` (default: 50).
+
+### ScheduleWakeup Matcher
+
+Guards autonomous loops (agents that reschedule themselves):
+
+- Warns at `CC_SOUL_LOOP_WARN` iterations (default: 10).
+- Blocks at `CC_SOUL_LOOP_LIMIT` iterations (default: 20).
+
+This is separate from the Agent subagent count above.
+
+---
+
+## Code-Intel Shadow Logging and Enforcement
+
+`pre-tool-hook.sh` logs every Read/Edit decision to `$MIND/.hook_shadow.jsonl`.
+
+### Log Fields
+
+| Field      | Description                                      |
+|------------|--------------------------------------------------|
+| `ts`       | Unix timestamp                                   |
+| `tool`     | Tool name (`Read`, `Edit`, etc.)                 |
+| `file`     | Absolute path to the file                        |
+| `lines`    | Line count of the file                           |
+| `indexed`  | Whether chitta has indexed this file (`true`/`false`) |
+| `decision` | `allow` or `deny`                                |
+| `reason`   | Short string explaining the decision             |
+| `enforced` | Whether the hook was in enforce mode             |
+
+### Auto-Activation of Enforcement
+
+Enforcement auto-activates when **both** conditions are met:
+
+1. Shadow log has **≥100 entries**
+2. Shadow log is **≥3 days old**
+
+No manual environment flip is needed. The log accumulates in shadow mode (decisions logged but not enforced), then silently switches to enforce mode once the threshold is met.
+
+### Enforcement Controls
+
+| Variable                 | Effect                                                            |
+|--------------------------|-------------------------------------------------------------------|
+| `CC_SOUL_HOOK_ENFORCE=1` | Force enforce mode on immediately (skip the 3-day wait)          |
+| `CC_SOUL_HOOK_ENFORCE=0` | Force shadow-only mode (disable enforcement even after threshold) |
+| `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session                                 |
+
+The flag file `$MIND/.allow_read_<session_id>` is an equivalent per-session bypass for `CC_SOUL_ALLOW_READ=1`.
+
+### Log Rotation
+
+The shadow log auto-rotates when it reaches **10 MB**. The current log is renamed to `.hook_shadow.jsonl.1` and a fresh log starts.
+
+### Review Data
+
+```bash
+./scripts/hook-stats.sh   # decisions, reasons, tool split, enforce status
+```
+
+---
+
+## Environment Variables
+
+| Variable                      | Default      | Description                                                              |
+|-------------------------------|--------------|--------------------------------------------------------------------------|
+| `CC_SOUL_HOOK_ENFORCE`        | (auto)       | `1` = force enforce; `0` = force shadow only                             |
+| `CC_SOUL_ALLOW_READ`          | `0`          | `1` = bypass Read deny and indexed-large deny for this session           |
+| `CC_SOUL_DEEP_SEARCH`         | `0`          | `1` = allow root-wide `find` (removes `-maxdepth 3` scoping)             |
+| `CC_SOUL_STRICT_MODE`         | `0`          | `1` = enforce symbol-level flow for indexed files                        |
+| `CC_SOUL_AGENT_NO_FORCE`      | `0`          | `1` = disable haiku routing for search/research agents                   |
+| `CC_SOUL_AGENT_WARN`          | `20`         | Subagent count at which a warning is issued                              |
+| `CC_SOUL_AGENT_LIMIT`         | `50`         | Subagent count at which a hard advisory fires                            |
+| `CC_SOUL_LOOP_WARN`           | `10`         | ScheduleWakeup iterations before warning                                 |
+| `CC_SOUL_LOOP_LIMIT`          | `20`         | ScheduleWakeup iterations before block                                   |
+| `CC_SOUL_SUBAGENT_BASH_RECALL`| `0`          | `1` = run Bash recall for subagent calls (adds ~2s per call, default off)|
+| `CC_SOUL_MAX_WAIT`            | `5`          | Max seconds to wait for daemon responses                                 |
+| `CC_SOUL_LEAN`                | `false`      | Ultra-lean context mode (stats only)                                     |
+| `DEBUG_SOUL`                  | `0`          | `1` = enable debug output to stderr                                      |
+| `SUBCONSCIOUS_INTERVAL`       | `60`         | Daemon cycle interval in seconds                                         |
+
+**Testing manually:** `CC_SOUL_HOOK_ENFORCE=1 bash hook.sh Read` will NOT work because the prefix assignment is not exported to nested bash. Use `export CC_SOUL_HOOK_ENFORCE=1` first.
+
+---
+
 ## Configuration
 
 ### Plugin Mode (hooks.json)
-
-When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
 
 ```json
 {
@@ -233,9 +332,9 @@ When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
 }
 ```
 
-### Settings Mode (~/.claude/settings.json)
+The PreToolUse section handles matchers `Read`, `Edit`, `Write`, `Bash`, `Agent`, and `ScheduleWakeup` — not only Bash.
 
-When installed standalone, `smart-install.sh` configures hooks in settings.json:
+### Settings Mode (~/.claude/settings.json)
 
 ```json
 {
@@ -266,7 +365,7 @@ When installed standalone, `smart-install.sh` configures hooks in settings.json:
       ]
     }],
     "PreToolUse": [{
-      "matcher": "Read|Edit|Write",
+      "matcher": "Read|Edit|Write|Bash|Agent|ScheduleWakeup",
       "hooks": [
         {"type": "command", "command": "~/.claude/hooks/pre-tool-hook.sh", "timeout": 10}
       ]
@@ -275,111 +374,14 @@ When installed standalone, `smart-install.sh` configures hooks in settings.json:
 }
 ```
 
-### Configuration Options
+### Hook Configuration Fields
 
-| Field | Description |
-|-------|-------------|
-| `matcher` | Regex pattern to filter events (empty or `*` = match all) |
-| `type` | Hook type: `command` |
-| `command` | Shell command to execute |
-| `timeout` | Timeout in seconds (optional) |
-
-### Variables
-
-| Variable | Value |
-|----------|-------|
-| `${CLAUDE_PLUGIN_ROOT}` | Plugin installation directory |
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CC_SOUL_LEAN` | `false` | Ultra-lean context mode (stats only) |
-| `CC_SOUL_MAX_WAIT` | `5` | Max seconds to wait for daemon responses |
-| `DEBUG_SOUL` | `0` | Enable debug output to stderr |
-| `CHITTA_DB_PATH` | `~/.claude/mind` | Mind storage path |
-| `SUBCONSCIOUS_INTERVAL` | `60` | Daemon cycle interval in seconds |
-
----
-
-## Scripts
-
-### Individual Hook Scripts
-
-Each lifecycle event is handled by a dedicated script in the `hooks/` directory. All scripts use socket-first communication with the daemon.
-
-| Script | Event | Purpose |
-|--------|-------|---------|
-| `session-start-hook.sh` | SessionStart | Realm detection, code re-indexing, soul context injection, ledger restore, git diff awareness |
-| `prompt-hook.sh` | UserPromptSubmit | full_resonate search, code symbol injection, anticipation prediction, learning detection |
-| `stop-hook.sh` | Stop | Auto-learning extraction, anticipation recording, ledger save, auto-checkpoint |
-| `pre-compact-hook.sh` | PreCompact | Save ledger checkpoint before context compaction |
-| `pre-tool-hook.sh` | PreToolUse | Safety intercepts (destructive commands), large-file rewriting (exit 2 block), pattern-based memory recall |
-| `post-bash-hook.sh` | PostToolUse | Record significant file changes as signals |
-| `log-bash-history.sh` | PostToolUse (async) | Append every Bash command to history for pattern learning |
-| `memory-intercept.sh` | PostToolUse:Write (async) | Capture Write operations to learn what you build |
-| `distill.sh` | Background | Transcript distillation into compressed wisdom nodes |
-
-**Communication:** All scripts use Unix domain socket to talk to daemon directly (fast path). Falls back to `chitta` thin client if socket unavailable. Socket path is derived from mind path using djb2 hash: `/tmp/chitta-{hash}.sock`.
-
-**Key features:**
-- Realm-aware (auto-detects project realm)
-- Context recovery on "continue"/"resume" patterns
-- Proactive learning hint injection
-- Anticipation prediction and verification
-- Code symbol injection for code-related queries
-- Auto-checkpoint on meaningful work or every 5 turns
-
-### subconscious.sh
-
-Daemon management script with health checking.
-
-**Usage:**
-```bash
-subconscious.sh <command>
-
-Commands:
-  start         Start daemon if not running (with responsiveness check)
-  stop          Stop running daemon (graceful → force kill)
-  restart       Stop then start
-  status        Check daemon status (PID, socket, managed/MCP-spawned)
-  health        Health check with auto-recovery
-```
-
-**Start sequence:**
-1. Kill all existing daemon processes (prevents accumulation)
-2. Check if any are responsive via socket ping
-3. Acquire atomic start lock (`mkdir` for POSIX atomicity)
-4. Launch `chittad daemon --path $MIND_PATH --interval $INTERVAL`
-5. Wait for socket AND verify daemon responds with stats
-6. Release lock
-
-**Socket path:** `/tmp/chitta-{djb2_hash(MIND_PATH)}.sock`
-**PID file:** `/tmp/chitta-{djb2_hash(MIND_PATH)}.pid`
-
-### smart-install.sh
-
-Auto-installation script that runs on SessionStart.
-
-**What it does:**
-1. Check if already installed (version marker)
-2. Stop existing daemon (version mismatch safety)
-3. Download ONNX model and vocabulary from HuggingFace
-4. Try pre-built binaries (platform-specific tar.gz from GitHub releases)
-5. Fall back to building from source (cmake + make)
-6. Copy binaries to `~/.claude/bin/`
-7. Install hook scripts to `~/.claude/hooks/`
-8. Configure bash permissions in settings.json
-9. Configure hooks in settings.json (if not plugin-managed)
-10. Validate binaries and mark as installed
-
-**Supported platforms:**
-- `linux-x64`, `linux-arm64`
-- `macos-x64`, `macos-arm64`
-
-### capture-hook.sh
-
-Currently **disabled** (exits immediately at line 16). Previously captured Bash commands, file writes, and edits as observations. Disabled because automatic capture creates noise — the soul now learns from Claude's typed markers (`[LEARN]`, `[SOLUTION]`, etc.) extracted by the stop hook, and from MCP tool calls.
+| Field     | Description                                              |
+|-----------|----------------------------------------------------------|
+| `matcher` | Regex pattern to filter events (`*` = match all)         |
+| `type`    | Hook type: `command`                                     |
+| `command` | Shell command to execute                                 |
+| `timeout` | Timeout in seconds (optional)                            |
 
 ---
 
@@ -393,9 +395,7 @@ The key innovation is **transparent memory** — memories that surface automatic
 
 2. **Hook receives JSON on stdin**:
    ```json
-   {
-     "message": "How should I handle rate limiting?"
-   }
+   {"message": "How should I handle rate limiting?"}
    ```
 
 3. **Hook runs resonance via daemon socket**:
@@ -414,27 +414,10 @@ The key innovation is **transparent memory** — memories that surface automatic
 
 ### Filtering and Formatting
 
-The hook applies several filters to keep context clean:
-
 - **Relevance threshold**: Only ≥25% relevance results pass
 - **Type stripping**: `[72%] [wisdom]` prefix removed — just content
 - **Truncation**: Max 500 chars total injection
 - **Tag exclusion**: Auto-captured signals (`auto:cmd`, `auto:file`, `auto:edit`) are excluded
-
-### Controlling Transparency
-
-Edit hook configuration to modify behavior:
-
-```bash
-# Disable resonance (stats only)
-prompt-hook.sh --lean
-
-# Enable resonance (default)
-prompt-hook.sh --lean --resonate
-
-# Full context (verbose)
-prompt-hook.sh
-```
 
 ---
 
@@ -444,30 +427,27 @@ The hooks detect learning opportunities in user messages and inject hints for Cl
 
 ### Detection Patterns
 
-| Pattern | Detection | Action |
-|---------|-----------|--------|
-| **Correction** | "no", "actually", "that's wrong", "not quite" | Hint: use `learn_correction` |
-| **Preference** | "I prefer", "always", "never", "more concise" | Hint: use `learn_preference` |
-| **Frustration** | "stuck", "confused", "frustrated", "tedious" | Hint: use `learn_approach` |
-| **Milestone** | "it works", "shipped", "released", "deployed" | Hint: use `learn_milestone` |
+| Pattern        | Detection                                          | Action                     |
+|----------------|----------------------------------------------------|----------------------------|
+| **Correction** | "no", "actually", "that's wrong", "not quite"      | Hint: use `learn_correction` |
+| **Preference** | "I prefer", "always", "never", "more concise"      | Hint: use `learn_preference` |
+| **Frustration**| "stuck", "confused", "frustrated", "tedious"       | Hint: use `learn_approach`   |
+| **Milestone**  | "it works", "shipped", "released", "deployed"      | Hint: use `learn_milestone`  |
 
 ### Auto-Learning (Stop Hook)
 
-The stop hook goes further — if Claude didn't use a learning tool but the user clearly corrected or expressed a preference, it **auto-stores** the learning:
+If Claude didn't use a learning tool but the user clearly corrected or expressed a preference, the stop hook auto-stores the learning:
 
 ```bash
-# If correction detected but Claude didn't call learn_correction:
 chitta remember --content "[correction] WRONG: ... CORRECT: ..." \
   --tags "correction,auto-learned" --type wisdom --visibility 2
 ```
 
 ### Anticipation
 
-The hook system learns context→action patterns:
-
-1. **UserPromptSubmit**: Calls `anticipation_predict` to suggest likely next action
+1. **UserPromptSubmit**: Calls `anticipation_predict` to suggest the likely next action
 2. **Stop**: Records what Claude actually did via `anticipation_observe`
-3. **Verification**: If prediction matched, calls `anticipation_success` to strengthen pattern
+3. **Verification**: If prediction matched, calls `anticipation_success` to strengthen the pattern
 
 ---
 
@@ -491,47 +471,30 @@ subconscious.sh start
 
 (Daemon runs independently)
      │
-     ├─▶ Every 1 second:  Check for work
+     ├─▶ Every 1 second:   Check for work
      ├─▶ Every 30 seconds: Process embedding queue (batch of 20)
      ├─▶ Every 30 minutes: Hygiene cycle (decay, prune, consolidate)
      ├─▶ Every 60 minutes: Theme maintenance (split, merge, reassign)
      └─▶ Pattern detection: Corrections, preferences, frustration, milestones
 ```
 
-### Why Not Stop on SessionEnd?
-
-The daemon keeps running even after Claude Code exits because:
-
-1. **Brain-like behavior** — Your brain doesn't stop processing when you're not actively thinking
-2. **Cross-session synthesis** — Wisdom can emerge between sessions
-3. **Multi-instance support** — Daemon serves all Claude instances
-4. **Resource efficiency** — Starting/stopping is more expensive than continuous running
-5. **Background distillation** — Transcript processing continues asynchronously
-
 ### Managing the Daemon
 
 ```bash
-# Check status
-./hooks/subconscious.sh status
+./hooks/subconscious.sh status    # Check status (PID, socket, managed/MCP-spawned)
+./hooks/subconscious.sh health    # Health check with auto-recovery
+./hooks/subconscious.sh stop      # Graceful stop then force kill
+./hooks/subconscious.sh restart   # Stop then start
 
-# Health check with auto-recovery
-./hooks/subconscious.sh health
-
-# Stop manually
-./hooks/subconscious.sh stop
-
-# Restart
-./hooks/subconscious.sh restart
-
-# View logs
-tail -f ~/.claude/mind/.subconscious.log
+tail -f ~/.claude/mind/.subconscious.log   # View logs
 ```
+
+**Socket path:** `/tmp/chitta-{djb2_hash(MIND_PATH)}.sock`
+**PID file:** `/tmp/chitta-{djb2_hash(MIND_PATH)}.pid`
 
 ---
 
 ## Custom Hooks
-
-You can add your own hooks to extend CC-Soul.
 
 ### Adding a Custom Hook
 
@@ -539,24 +502,13 @@ You can add your own hooks to extend CC-Soul.
 
 ```bash
 #!/bin/bash
-# scripts/my-custom-hook.sh
-
-# Read stdin if needed (JSON format varies by event)
 input=$(cat)
-
-# Do something
-echo "[my-hook] Processing..."
-
 # Output appears in Claude's context as <system-reminder>
 ```
 
-2. Make it executable:
+2. Make it executable: `chmod +x scripts/my-custom-hook.sh`
 
-```bash
-chmod +x scripts/my-custom-hook.sh
-```
-
-3. Add to hooks configuration (plugin mode — `hooks/hooks.json`):
+3. Add to `hooks/hooks.json` (plugin mode):
 
 ```json
 {
@@ -578,15 +530,11 @@ chmod +x scripts/my-custom-hook.sh
 
 ### Hook Input
 
-Hooks receive JSON on stdin. Format varies by event:
-
 **UserPromptSubmit:**
 ```json
 {
   "message": "User's message text",
-  "context_window": {
-    "remaining_percent": 85
-  }
+  "context_window": {"remaining_percent": 85}
 }
 ```
 
@@ -603,20 +551,16 @@ Hooks receive JSON on stdin. Format varies by event:
 
 **SessionStart:**
 ```json
-{
-  "transcript_path": "/path/to/transcript.jsonl"
-}
+{"transcript_path": "/path/to/transcript.jsonl"}
 ```
 
 ### Hook Output
 
-- **stdout** — Injected as `<system-reminder>` in Claude's context
+- **stdout** — Injected as `<system-reminder>` in Claude's context (JSON `hookSpecificOutput` schema)
 - **stderr** — Logged but not shown to Claude
-- **Exit code** — Non-zero indicates error (logged)
+- **Exit code 2** — Blocks the tool call and shows the hook's stdout as an error explanation
 
-### RPC from Scripts
-
-To communicate with the daemon from custom hooks:
+### RPC from Custom Scripts
 
 ```bash
 # Via Unix socket (fast path)
@@ -634,114 +578,72 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","a
 
 ### Hooks Not Running
 
-1. Check if using plugin mode or settings mode:
-   ```bash
-   # Plugin mode: check hooks.json
-   jq . hooks/hooks.json
+```bash
+# Plugin mode: check hooks.json
+jq . hooks/hooks.json
 
-   # Settings mode: check settings.json
-   jq '.hooks' ~/.claude/settings.json
-   ```
+# Settings mode: check settings.json
+jq '.hooks' ~/.claude/settings.json
 
-2. Verify scripts are executable:
-   ```bash
-   ls -la scripts/*.sh
-   chmod +x scripts/*.sh
-   ```
+# Verify scripts are executable
+ls -la hooks/*.sh
 
-3. Ensure daemon is running:
-   ```bash
-   ./hooks/subconscious.sh status
-   ```
+# Ensure daemon is running
+./hooks/subconscious.sh status
+```
 
 ### Slow Hook Execution
-
-Hooks have timeouts. If they're slow:
 
 1. Increase timeout in configuration
 2. Check daemon responsiveness: `./hooks/subconscious.sh health`
 3. Set `CC_SOUL_MAX_WAIT=10` for longer daemon response timeout
-4. Reduce resonance results: default is 3, can lower to 2
 
 ### Resonance Not Working
 
-1. Check daemon socket exists:
-   ```bash
-   ls /tmp/chitta-*.sock
-   ```
+```bash
+# Check daemon socket exists
+ls /tmp/chitta-*.sock
 
-2. Test daemon responds:
-   ```bash
-   echo "stats" | nc -U /tmp/chitta-*.sock
-   ```
+# Test daemon responds
+echo "stats" | nc -U /tmp/chitta-*.sock
 
-3. Test resonance directly:
-   ```bash
-   echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"full_resonate","arguments":{"query":"test","k":3}}}' \
-     | nc -U /tmp/chitta-*.sock
-   ```
+# Test resonance directly
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"full_resonate","arguments":{"query":"test","k":3}}}' \
+  | nc -U /tmp/chitta-*.sock
+```
 
 ### Daemon Not Starting
 
-1. Check for stale processes:
-   ```bash
-   pgrep -f "chittad daemon"
-   ```
-
-2. Clean up stale files:
-   ```bash
-   rm -f /tmp/chitta-*.sock /tmp/chitta-*.pid /tmp/chitta-*.lock
-   ```
-
-3. Check if binary exists:
-   ```bash
-   ls -la ~/.claude/bin/chittad
-   ```
-
-4. View daemon logs:
-   ```bash
-   cat ~/.claude/mind/.subconscious.log
-   ```
-
-5. Try starting manually:
-   ```bash
-   ~/.claude/bin/chittad daemon --path ~/.claude/mind --foreground
-   ```
-
-### Context Not Appearing
-
-1. Verify hook output manually:
-   ```bash
-   echo '{"message":"test query"}' | ./hooks/prompt-hook.sh prompt
-   ```
-
-2. Check daemon socket communication:
-   ```bash
-   echo '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"version_check"}}' \
-     | nc -U /tmp/chitta-*.sock
-   ```
+```bash
+pgrep -f "chittad daemon"                            # stale processes?
+rm -f /tmp/chitta-*.sock /tmp/chitta-*.pid /tmp/chitta-*.lock   # clean up
+ls -la ~/.claude/bin/chittad                          # binary exists?
+cat ~/.claude/mind/.subconscious.log                  # daemon logs
+~/.claude/bin/chittad daemon --path ~/.claude/mind --foreground  # manual start
+```
 
 ### Debug Mode
 
-Enable debug mode to see exactly what the hooks are doing:
-
 ```bash
-# Set environment variable before running Claude Code
 export DEBUG_SOUL=1
 claude
-```
-
-Debug output (to stderr) shows:
-- **Memory search**: Query, realm, boost k, extra tags
-- **Raw results**: Full response from `full_resonate` with relevance scores
-- **Code search**: Symbol search results when triggered
-- **Final output**: What actually gets injected into context
-
-To test manually:
-```bash
+# or test a hook directly:
 DEBUG_SOUL=1 ./hooks/prompt-hook.sh prompt "your test query"
 ```
 
----
+Debug output (stderr) shows: query, realm, boost k, extra tags, raw full_resonate results with relevance scores, symbol search results, and the final injected context.
 
-*Hooks are the nervous system connecting soul to body.*
+### Checking Shadow Log Enforcement Status
+
+```bash
+# Review decisions and enforce status
+./scripts/hook-stats.sh
+
+# Count entries in shadow log
+wc -l ~/.claude/mind/.hook_shadow.jsonl
+
+# Check log age
+stat ~/.claude/mind/.hook_shadow.jsonl
+```
+
+Enforcement auto-activates when the shadow log reaches ≥100 entries AND is ≥3 days old. Use `CC_SOUL_HOOK_ENFORCE=1` to force it on early, or `CC_SOUL_HOOK_ENFORCE=0` to keep it in shadow mode.
