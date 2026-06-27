@@ -1,9 +1,9 @@
 {
-  "ts": "2026-06-26T12:20:06.710796+00:00",
+  "ts": "2026-06-27T09:30:35.342201+00:00",
   "version": 3,
-  "limit": 20,
+  "limit": 10,
   "metric": "mean_nDCG",
-  "score": 0.9303885426530053,
+  "score": 0.9243964327843972,
   "n": 10,
   "records": [
     {
@@ -15,17 +15,14 @@
         "3766964318940168335"
       ],
       "n_gold": 3,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         1,
         4,
-        5,
-        10,
-        13,
-        14
+        5
       ],
       "sig_fallback": false,
-      "ndcg": 0.6532855418604522,
+      "ndcg": 0.6447841584694202,
       "pass": true
     },
     {
@@ -36,7 +33,7 @@
         "17475104458537960066"
       ],
       "n_gold": 2,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0,
         1
@@ -52,7 +49,7 @@
         "17475104458537959674"
       ],
       "n_gold": 1,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0
       ],
@@ -67,7 +64,7 @@
         "17475104458537959675"
       ],
       "n_gold": 1,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0
       ],
@@ -84,15 +81,16 @@
         "18017687741466148926"
       ],
       "n_gold": 3,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0,
         1,
-        6,
-        7
+        5,
+        7,
+        8
       ],
       "sig_fallback": false,
-      "ndcg": 0.8899603164338973,
+      "ndcg": 0.8830483001978133,
       "pass": true
     },
     {
@@ -102,7 +100,7 @@
         "17475104458537960092"
       ],
       "n_gold": 1,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0
       ],
@@ -117,7 +115,7 @@
         "17475104458537960067"
       ],
       "n_gold": 1,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0
       ],
@@ -134,14 +132,17 @@
         "10390583829663318175"
       ],
       "n_gold": 3,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0,
         1,
-        2
+        2,
+        3,
+        4,
+        8
       ],
-      "sig_fallback": true,
-      "ndcg": 1.0,
+      "sig_fallback": false,
+      "ndcg": 0.9833032486989473,
       "pass": true
     },
     {
@@ -153,15 +154,14 @@
         "17475104458537959678"
       ],
       "n_gold": 3,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         1,
         2,
-        3,
-        4
+        3
       ],
       "sig_fallback": false,
-      "ndcg": 0.7606395682357036,
+      "ndcg": 0.7328286204777911,
       "pass": true
     },
     {
@@ -173,7 +173,7 @@
         "18283549743256699037"
       ],
       "n_gold": 3,
-      "n_results": 20,
+      "n_results": 10,
       "gold_positions": [
         0,
         1,
@@ -184,17 +184,7 @@
         6,
         7,
         8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19
+        9
       ],
       "sig_fallback": false,
       "ndcg": 1.0,
