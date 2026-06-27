@@ -756,7 +756,12 @@ fi
 # Token diet: accumulate into FINAL_OUTPUT, enforce hard cap.
 # Priority order (highest first): learning hints > cross-session msgs >
 # memories > narrative > goals > curiosity > habits > anticipations
-MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-500}"
+# Cache-expired sessions: cache is already busted, expand the memory budget.
+if [[ -n "$CACHE_WARN" ]]; then
+    MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-2000}"
+else
+    MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-500}"
+fi
 FINAL_OUTPUT=""
 
 _append() {
@@ -866,6 +871,17 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         if [[ -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
             _corr_sys=$(printf '%s' "$_corr_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
             [[ -n "$_corr_sys" && ${#_corr_sys} -lt 400 ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
+        fi
+        # Cache-expired: prefix cache is already busted, so escalating memories to systemMessage
+        # costs nothing extra. Without this the model has no learned behaviour to check additionalContext
+        # and defaults to "I don't know" for project-specific terms.
+        if [[ -n "$CACHE_WARN" && ${COUNT:-0} -gt 0 && -n "${OUTPUT:-}" ]]; then
+            _top_facts=$(printf '%s' "$OUTPUT" | grep -v '^\[thought\]' | head -4 | \
+                sed 's/^\[hyb\]//;s/^\[corr\]//' | cut -c1-600 || true)
+            [[ -n "$_top_facts" ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG
+}[soul-context]
+${_top_facts}
+[/soul-context]"
         fi
 
         JSON_OUT=$(jq -n \
