@@ -1414,7 +1414,7 @@ int main(int argc, char* argv[]) {
         bool success = run_distillation(field_store, yantra_raw, state, distill_config, nullptr, false);
         result = success ? 0 : 1;
     } else if (command == "re_embed") {
-        // Re-embed all memories using the configured LlamaYantra model (ssl_distiller_dpo 1536-d).
+        // Re-embed all memories using the configured LlamaYantra model (nomic-embed-text-v1.5 768-d).
         // Marks every non-deleted memory embed_pending, then drains synchronously.
         if (!yantra_raw || !yantra_raw->ready()) {
             std::cerr << "[re_embed] ERROR: embed model not ready — set CHITTA_EMBED_MODEL or pass --embed-model\n";
