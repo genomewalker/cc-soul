@@ -250,6 +250,17 @@ if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
     memories=""
 fi
 
+# Cross-realm fallback: if scoped recall found nothing, retry without realm.
+# Lets project:geodesic/environment memories surface in foreign-realm sessions.
+# Cost: one extra hybrid call (~0.3s). Only fires when scoped recall was empty.
+if [[ -z "$memories" ]] && [[ "$REALM" != "brahman" ]]; then
+    _fallback=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid \
+                --limit 5 2>/dev/null || true)
+    if [[ -n "$_fallback" && "$_fallback" != *"No memories"* ]]; then
+        memories=$(printf '%s\n' "$_fallback" | grep -v '\[thought\]')
+    fi
+fi
+
 # Filter and format results
 OUTPUT=""
 COUNT=0
