@@ -92,6 +92,7 @@ print(text.strip())
 
 # Save cleaned message for Stop hook compliance detection (no system markup pollution)
 mkdir -p "$MIND_PATH"
+_prev_turn=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null || true)
 echo "$CLEAN_QUERY" > "$MIND_PATH/.last_user_message"
 
 # Get turn index (locked read+increment via lib.sh)
@@ -110,12 +111,11 @@ QUERY="$CLEAN_QUERY"
 
 # Context enrichment: short/anaphoric queries ("add that", "do it", "fix this") have
 # no referent — prepend the previous turn so recall has an anchor.
-_prev_msg=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null || true)
 _word_count=$(echo "$QUERY" | wc -w)
 _has_anaphor=$(echo "$QUERY" | grep -qiE '\b(that|this|it|those|them|they|he|she|the above|do it|fix it|add it)\b' && echo 1 || echo 0)
-if [[ -n "$_prev_msg" && "$_prev_msg" != "$QUERY" ]] && \
+if [[ -n "$_prev_turn" && "$_prev_turn" != "$QUERY" ]] && \
    [[ "$_word_count" -lt 15 || "$_has_anaphor" == "1" ]]; then
-    QUERY="${_prev_msg} ${QUERY}"
+    QUERY="${_prev_turn} ${QUERY}"
 fi
 
 # ===========================================
