@@ -1250,10 +1250,21 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Embeddings: prefer in-process GGUF (LlamaYantra), fall back to Ollama HTTP.
+    // Embeddings: GPU-first — try Ollama HTTP (GPU node) before falling back to
+    // in-process GGUF (CPU). OllamaYantra::discover_gpu_endpoint() checks /tmp/ollama-server-*.url
+    // and SLURM squeue; if an Ollama running the embed model is reachable, we use it and skip
+    // the GGUF load entirely (~100-1000× faster for re_embed of large corpora).
+    // CHITTA_EMBED_GPU_ONLY=1 makes the GPU path mandatory (no CPU fallback).
     std::shared_ptr<VakYantra> inner_yantra;
-#ifdef CHITTA_WITH_LLAMA_CPP
     {
+        auto ollama = std::make_shared<chitta::OllamaYantra>();
+        if (ollama->ready()) {
+            inner_yantra = ollama;
+            std::cerr << "[embed] GPU path active via Ollama\n";
+        }
+    }
+#ifdef CHITTA_WITH_LLAMA_CPP
+    if (!inner_yantra) {
         namespace fs = std::filesystem;
         std::string gguf;
         const char* env_model = std::getenv("CHITTA_EMBED_MODEL");
