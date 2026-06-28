@@ -108,6 +108,16 @@ record_ingest_metric "true"
 # Use clean query for all recall and pattern detection (strip markup from QUERY)
 QUERY="$CLEAN_QUERY"
 
+# Context enrichment: short/anaphoric queries ("add that", "do it", "fix this") have
+# no referent — prepend the previous turn so recall has an anchor.
+_prev_msg=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null || true)
+_word_count=$(echo "$QUERY" | wc -w)
+_has_anaphor=$(echo "$QUERY" | grep -qiE '\b(that|this|it|those|them|they|he|she|the above|do it|fix it|add it)\b' && echo 1 || echo 0)
+if [[ -n "$_prev_msg" && "$_prev_msg" != "$QUERY" ]] && \
+   [[ "$_word_count" -lt 15 || "$_has_anaphor" == "1" ]]; then
+    QUERY="${_prev_msg} ${QUERY}"
+fi
+
 # ===========================================
 # CACHE EXPIRY WARNING: Warn when >5 min idle
 # ===========================================
@@ -221,14 +231,14 @@ else
     # captures the output inside the subshell and loses it — wait collects exit
     # status, not variables — so lanes must hand results back through the filesystem.
     _ld=$(mktemp -d "${TMPDIR:-/tmp}/ccsoul-lanes.XXXXXX")
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" --include-global true >"$_ld/sem" 2>/dev/null || true ) &
+    ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" >"$_ld/sem" 2>/dev/null || true ) &
     _sem_pid=$!
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" --include-global true >"$_ld/hyb" 2>/dev/null || true ) &
+    ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
     _hyb_pid=$!
     # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
     # regardless of semantic similarity. Use --toon for consistent parseable output.
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
-              --limit 3 --toon --realm "$REALM" --include-global true >"$_ld/kw" 2>/dev/null || true ) &
+              --limit 3 --toon --realm "$REALM" >"$_ld/kw" 2>/dev/null || true ) &
     _kw_pid=$!
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true >"$_ld/corr" 2>/dev/null || true ) &
     _corr_pid=$!
