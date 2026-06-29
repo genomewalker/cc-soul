@@ -54,7 +54,7 @@ GOLDEN_SET = [
     {
         "query": "chaos nodes",
         "bootstrap_query": "dandycomp ssh direct no slurm chaos nodes",
-        "gold_signature": "dandycomp*fl",
+        "gold_signature": "dandycomp*",  # matches dandycomp*fl and dandycomp*-fl variants
         "desc": "cluster alias",
     },
     {
@@ -102,7 +102,7 @@ GOLDEN_SET = [
     {
         "query": "how does semantic search work",
         "bootstrap_query": "HNSW semantic search embedding bge cosine similarity RRF chitta-field",
-        "gold_signature": "semantic similarity",
+        "gold_signature": "hnsw",  # matches both SSL memories and NL-expansion variants
         "desc": "search arch",
     },
     {
