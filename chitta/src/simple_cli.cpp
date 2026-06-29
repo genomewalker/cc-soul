@@ -1319,17 +1319,30 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Embeddings: GPU-first — try Ollama HTTP (GPU node) before falling back to
-    // in-process GGUF (CPU). OllamaYantra::discover_gpu_endpoint() checks /tmp/ollama-server-*.url
-    // and SLURM squeue; if an Ollama running the embed model is reachable, we use it and skip
-    // the GGUF load entirely (~100-1000× faster for re_embed of large corpora).
-    // CHITTA_EMBED_GPU_ONLY=1 makes the GPU path mandatory (no CPU fallback).
+    // Embeddings priority:
+    //   1. CHITTA_EMBED_URL=http://node:port  — dedicated embed GPU (two-job setup)
+    //   2. CHITTA_EMBED_GPU_ONLY=1            — auto-discover GPU, skip GGUF
+    //   3. Local GGUF (default)               — in-process llama.cpp, no HTTP
+    //   4. OllamaYantra auto-discover         — last resort when no GGUF
+    // Rationale: when LLM occupies the GPU (gemma4:26b ~21GB), ollama's embed
+    // falls back to CPU and is slower than the in-process GGUF. A dedicated embed
+    // GPU job (CHITTA_EMBED_URL) is the correct two-job architecture.
+    const char* embed_url_env = std::getenv("CHITTA_EMBED_URL");
+    const bool  prefer_gpu    = std::getenv("CHITTA_EMBED_GPU_ONLY") &&
+                                std::string(std::getenv("CHITTA_EMBED_GPU_ONLY")) == "1";
     std::shared_ptr<VakYantra> inner_yantra;
-    {
+    if (embed_url_env && *embed_url_env) {
+        auto ollama = std::make_shared<chitta::OllamaYantra>("nomic-embed-text:v1.5",
+                                                              std::string(embed_url_env));
+        if (ollama->ready()) {
+            inner_yantra = ollama;
+            std::cerr << "[embed] Dedicated GPU embed at " << embed_url_env << "\n";
+        }
+    } else if (prefer_gpu) {
         auto ollama = std::make_shared<chitta::OllamaYantra>();
         if (ollama->ready()) {
             inner_yantra = ollama;
-            std::cerr << "[embed] GPU path active via Ollama\n";
+            std::cerr << "[embed] GPU path active via Ollama (forced)\n";
         }
     }
 #ifdef CHITTA_WITH_LLAMA_CPP
@@ -1366,8 +1379,16 @@ int main(int argc, char* argv[]) {
         }
     }
 #endif
+    if (!inner_yantra) {
+        // No GGUF found and GPU not forced — try OllamaYantra as last resort.
+        auto ollama = std::make_shared<chitta::OllamaYantra>();
+        if (ollama->ready()) {
+            inner_yantra = ollama;
+            std::cerr << "[embed] Ollama path active (no local GGUF found)\n";
+        }
+    }
     if (!inner_yantra)
-        inner_yantra = std::make_shared<chitta::OllamaYantra>();
+        inner_yantra = std::make_shared<chitta::OllamaYantra>(); // always-ready stub
     // EmbedQueue owns all serialization: single worker thread, LRU cache, two-lane queue.
     // TimeoutYantra is no longer needed — concurrent embed calls are never made directly.
     std::shared_ptr<VakYantra> yantra = inner_yantra;
