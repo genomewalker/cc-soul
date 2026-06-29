@@ -344,10 +344,16 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
         return s.size() >= 16 && s.substr(0, 16) == "[compliance:auto";
     };
 
+    // realm_ok: accept if caller is unfiltered (brahman/empty) or hit is in exact realm.
+    // Memories with no realm are only accepted when no realm filter is active.
+    auto realm_ok = [&](const std::string& hit_realm) {
+        return realm == "brahman" || realm.empty() || hit_realm == realm;
+    };
+
     // Priority 1: open questions / gaps (by kind)
-    auto gaps = field_store_->recall_by_kind("question", 5);
+    auto gaps = field_store_->recall_by_kind("question", 20);
     for (const auto& g : gaps) {
-        if (is_compliance(g.content)) continue;
+        if (!realm_ok(g.realm) || is_compliance(g.content)) continue;
         topic = g.content;
         if (topic.size() > 100) topic = topic.substr(0, 100);
         break;
@@ -355,9 +361,9 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
 
     // Priority 1b: [gap]-tagged memories written by dream agent via `chitta remember`
     if (topic.empty()) {
-        auto gap_hits = field_store_->recall_keyword("[gap]", 5);
+        auto gap_hits = field_store_->recall_keyword("[gap]", 20);
         for (const auto& h : gap_hits) {
-            if (is_compliance(h.content)) continue;
+            if (!realm_ok(h.realm) || is_compliance(h.content)) continue;
             topic = h.content;
             if (topic.size() > 6 && topic.substr(0, 6) == "[gap] ")
                 topic = topic.substr(6);
@@ -368,8 +374,9 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
 
     // Priority 2: low-confidence memories
     if (topic.empty()) {
-        auto low_conf = field_store_->recall_by_kind("episode", 20);
+        auto low_conf = field_store_->recall_by_kind("episode", 50);
         for (const auto& h : low_conf) {
+            if (!realm_ok(h.realm)) continue;
             if (h.confidence > 0.0f && h.confidence < 0.5f && !is_compliance(h.content)) {
                 topic = h.content;
                 if (topic.size() > 100) topic = topic.substr(0, 100);
