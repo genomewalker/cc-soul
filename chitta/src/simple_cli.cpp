@@ -1096,7 +1096,8 @@ void print_usage(const char* prog) {
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
               << "  --no-autonomous          Disable autonomous agents (dream, think)\n"
               << "  --merge-policy POLICY    LLM write dedup: off (default) | merge_aware\n"
-              << "  --embed-interval SECS    Enable background embedding of wisdom memories (default: off)\n"
+              << "  --embed-interval SECS    Background embedding interval in seconds (default: 30)\n"
+              << "  --no-embed-interval      Disable background embedding\n"
               << "\nHTTP Visualization Server:\n"
               << "  --http-port PORT         Enable HTTP viz server on PORT (0=disabled, default)\n"
               << "  --http-static-dir PATH   Static file directory (default: auto-detect docs/mind-viz/)\n"
@@ -1207,6 +1208,8 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--embed-interval") == 0 && i + 1 < argc) {
             subconscious_config.enable_background_embedding = true;
             subconscious_config.embedding_interval = std::chrono::seconds(safe_stoi(argv[++i], "--embed-interval"));
+        } else if (strcmp(argv[i], "--no-embed-interval") == 0) {
+            subconscious_config.enable_background_embedding = false;
         } else if (strcmp(argv[i], "--no-autonomous") == 0) {
             no_autonomous = true;
         } else if (strcmp(argv[i], "--merge-policy") == 0 && i + 1 < argc) {

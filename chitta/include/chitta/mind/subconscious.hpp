@@ -69,7 +69,7 @@ struct SubconsciousConfig {
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
-    bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool
+    bool enable_background_embedding{true};       // On by default; disable with --no-embed-interval
     bool enable_habit_formation{true};            // Auto-detect tool patterns and form habits
     bool enable_cls_replay{true};                 // CLS offline replay consolidation
     bool enable_sleep_consolidation{true};        // chitta-field encode + snapshot + demotion
