@@ -114,6 +114,29 @@ private:
     std::string cached_endpoint_;
 };
 
+// Bridge brain provider — routes dreams through chitta-bridge room API
+// (room_create → room_run → room_synthesize) with a local/gemma participant.
+// Falls back to LocalBrain if the bridge daemon is not running.
+class BridgeBrain : public BrainProvider {
+public:
+    explicit BridgeBrain(const std::string& model = "gemma4:26b")
+        : model_(model) {}
+
+    BrainResult think(const std::string& prompt,
+                       const BrainConfig& config = {}) override;
+
+    std::string provider_name() const override { return "bridge"; }
+    std::string model_name()    const override { return model_; }
+    void set_model(const std::string& m) override { model_ = m; }
+
+    std::vector<std::string> available_models() const override {
+        return {"gemma4:26b", "gemma4:12b"};
+    }
+
+private:
+    std::string model_;
+};
+
 // Factory function to create brain provider by name
 inline std::unique_ptr<BrainProvider> create_brain(const std::string& provider,
                                                      const std::string& model = "") {
@@ -121,9 +144,11 @@ inline std::unique_ptr<BrainProvider> create_brain(const std::string& provider,
         return std::make_unique<ClaudeBrain>(model.empty() ? "sonnet" : model);
     } else if (provider == "local") {
         return std::make_unique<LocalBrain>(model.empty() ? "gemma4:26b" : model);
+    } else if (provider == "bridge") {
+        return std::make_unique<BridgeBrain>(model.empty() ? "gemma4:26b" : model);
     }
-    // Default to local
-    return std::make_unique<LocalBrain>(model.empty() ? "gemma4:26b" : model);
+    // Default to bridge (local gemma via rooms, falls back to LocalBrain)
+    return std::make_unique<BridgeBrain>(model.empty() ? "gemma4:26b" : model);
 }
 
 }  // namespace chitta

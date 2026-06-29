@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
@@ -293,6 +294,111 @@ BrainResult LocalBrain::think(const std::string& prompt, const BrainConfig& conf
         result.error = "Empty response from " + cached_endpoint_;
     }
 
+    return result;
+}
+
+// BridgeBrain: routes dream through chitta-bridge room API with local/gemma participant.
+// Falls back to LocalBrain transparently if bridge is not reachable.
+BrainResult BridgeBrain::think(const std::string& prompt, const BrainConfig& config) {
+    // 1. Read bridge port + token from ~/.chitta-bridge/http.ports
+    const char* home_c = std::getenv("HOME");
+    int mcp_port = 0;
+    std::string token;
+    if (home_c) {
+        std::ifstream pf(std::string(home_c) + "/.chitta-bridge/http.ports");
+        std::string line;
+        while (std::getline(pf, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.rfind("mcp=", 0) == 0) mcp_port = std::stoi(line.substr(4));
+            if (line.rfind("token=", 0) == 0) token = line.substr(6);
+        }
+    }
+    if (mcp_port == 0 || token.empty()) {
+        // Bridge not configured — fall back to direct Ollama
+        LocalBrain local(model_);
+        return local.think(prompt, config);
+    }
+
+    std::string base_url = "http://127.0.0.1:" + std::to_string(mcp_port) + "/mcp";
+    std::string auth_hdr = "Authorization: Bearer " + token;
+
+    // Unique room ID per invocation
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::string room_id = "dream-" + std::to_string(now_ms) + "-" + std::to_string(getpid());
+
+    std::string parts_json = "[{\"name\":\"gemma\",\"backend\":\"local\",\"model\":\"" + model_ + "\"}]";
+    std::string synth_json = "{\"name\":\"gemma\",\"backend\":\"local\",\"model\":\"" + model_ + "\"}";
+
+    int timeout_secs = std::max(60, config.timeout_ms / 1000);
+    std::string tmp = "/tmp/chitta-bridge-" + std::to_string(getpid()) + ".json";
+
+    // POST a tools/call JSON-RPC to bridge MCP SSE endpoint, return result object
+    auto bridge_call = [&](const std::string& tool, const nlohmann::json& args) -> nlohmann::json {
+        nlohmann::json rpc = {{"jsonrpc","2.0"},{"id",1},{"method","tools/call"},
+                    {"params",{{"name",tool},{"arguments",args}}}};
+        { std::ofstream tf(tmp); tf << rpc.dump(); }
+
+        std::string resp = fork_exec_capture({
+            "curl", "-sf", "--max-time", std::to_string(timeout_secs),
+            "-X", "POST", base_url,
+            "-H", auth_hdr,
+            "-H", "Content-Type: application/json",
+            "-H", "Accept: application/json, text/event-stream",
+            "-d", "@" + tmp
+        }, timeout_secs + 5);
+        std::remove(tmp.c_str());
+
+        // Parse SSE: look for "data: {...}" lines
+        std::istringstream iss(resp);
+        std::string ln;
+        while (std::getline(iss, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            if (ln.rfind("data: ", 0) == 0) {
+                try {
+                    auto j = nlohmann::json::parse(ln.substr(6));
+                    if (j.contains("result")) return j["result"];
+                } catch (...) {}
+            }
+        }
+        return {};
+    };
+
+    // 2. Create room
+    auto cr = bridge_call("room_create", {
+        {"room_id", room_id}, {"topic", prompt}, {"participants", parts_json}
+    });
+    if (cr.empty()) {
+        // Bridge unreachable — fall back
+        std::remove(tmp.c_str());
+        LocalBrain local(model_);
+        return local.think(prompt, config);
+    }
+
+    // 3. Run 1 round
+    bridge_call("room_run", {{"room_id", room_id}, {"rounds", 1}});
+
+    // 4. Synthesize with local gemma
+    auto sr = bridge_call("room_synthesize", {{"room_id", room_id}, {"synthesizer", synth_json}});
+
+    // Extract text from MCP content array
+    std::string synthesis;
+    if (!sr.empty()) {
+        try {
+            if (sr.contains("content") && sr["content"].is_array()) {
+                for (const auto& c : sr["content"])
+                    if (c.value("type","") == "text") synthesis += c.value("text","");
+            }
+        } catch (...) { synthesis = sr.dump(); }
+    }
+
+    BrainResult result;
+    if (!synthesis.empty()) {
+        result.success   = true;
+        result.output    = synthesis;
+    } else {
+        result.error = "Bridge room returned empty synthesis for room " + room_id;
+    }
     return result;
 }
 
