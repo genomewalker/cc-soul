@@ -1,9 +1,9 @@
 {
-  "ts": "2026-06-29T03:57:30.629531+00:00",
+  "ts": "2026-06-29T04:24:18.427263+00:00",
   "version": 3,
   "limit": 20,
   "metric": "mean_nDCG",
-  "score": 0.8078071259944949,
+  "score": 0.7540625387545161,
   "n": 10,
   "records": [
     {
@@ -21,10 +21,10 @@
         5,
         9,
         11,
-        16
+        12
       ],
       "sig_fallback": false,
-      "ndcg": 0.5230445393599455,
+      "ndcg": 0.5307899641897603,
       "pass": true
     },
     {
@@ -53,10 +53,10 @@
       "n_gold": 1,
       "n_results": 20,
       "gold_positions": [
-        0
+        1
       ],
       "sig_fallback": false,
-      "ndcg": 1.0,
+      "ndcg": 0.6309297535714575,
       "pass": true
     },
     {
@@ -88,13 +88,14 @@
         0,
         6,
         7,
-        8,
         9,
         10,
-        12
+        11,
+        12,
+        14
       ],
       "sig_fallback": false,
-      "ndcg": 0.764289661476822,
+      "ndcg": 0.7587506247575497,
       "pass": true
     },
     {
@@ -106,11 +107,11 @@
       "n_gold": 1,
       "n_results": 20,
       "gold_positions": [
-        1
+        3
       ],
       "sig_fallback": false,
-      "ndcg": 0.6309297535714575,
-      "pass": true
+      "ndcg": 0.43067655807339306,
+      "pass": false
     },
     {
       "query": "forward bet prediction horizon",
@@ -158,11 +159,10 @@
       "gold_positions": [
         0,
         3,
-        9,
-        16
+        12
       ],
       "sig_fallback": false,
-      "ndcg": 0.7649707302997508,
+      "ndcg": 0.7946419117160276,
       "pass": true
     },
     {
