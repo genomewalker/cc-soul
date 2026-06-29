@@ -246,12 +246,15 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         gold_scores = [scores[p] for p in positions if p < len(scores)]
         if gold_scores:
             gold_max_score = max(gold_scores)
-            pos_set = set(positions)
-            non_gold_top = next((scores[i] for i in range(len(scores)) if i not in pos_set), None)
+            best_gold_pos = min(positions)
             if gold_max_score < ABSTAIN_SCORE_THRESHOLD:
                 epistemic_abstain = True
-            if non_gold_top is not None and (gold_max_score - non_gold_top) < ABSTAIN_BAND_EPS:
-                band_abstain = True
+            # Band abstain: only when a non-gold item is ranked above the best gold
+            # and their scores are within ε — forced ranking is noise, not signal.
+            if best_gold_pos > 0:
+                blocker_score = scores[best_gold_pos - 1]  # item ranked just above best gold
+                if blocker_score - gold_max_score < ABSTAIN_BAND_EPS:
+                    band_abstain = True
 
     return {
         "query": item["query"],
