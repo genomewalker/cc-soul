@@ -150,6 +150,22 @@ void QueueProcessor::run() {
                 std::string tool = j.value("tool", "");
                 auto args = j.value("args", json::object());
 
+                // Precompute the correction-supersession embedding BEFORE taking
+                // the exclusive lock. embed_text() is a model forward pass (tens–
+                // hundreds of ms) that touches no shared C++/Rust state, so running
+                // it under rpc_mutex_ blocks every reader/recall RPC needlessly.
+                // Only the rare semantic-correction path (no explicit target_id /
+                // force_supersede_ids) needs it; compute here, consume inside lock.
+                std::vector<float> correction_emb;
+                if (tool == "observe" && args.value("category", "wisdom") == "correction"
+                    && args.value("target_id", "").empty()
+                    && !args.contains("force_supersede_ids")) {
+                    std::string ct = args.value("title", "");
+                    std::string cc = args.value("content", "");
+                    if (!cc.empty())
+                        correction_emb = embed_text(ct.empty() ? cc : ct + "\n" + cc);
+                }
+
                 // FieldStore is always ready (synchronous init).
                 // distill_trigger spawns an LLM call (10–30s); it must NOT hold
                 // the unique rpc_mutex_ during that work, or every reader RPC
@@ -260,10 +276,8 @@ void QueueProcessor::run() {
                                     } catch (...) {}
                                 }
                             }
-                            // For semantic supersession we still need the embedding.
-                            // Compute it here (outside lock is impossible — lock is already held),
-                            // but this is a rare correction path, not the hot remember path.
-                            auto emb = embed_text(full_text);
+                            // Embedding precomputed before the lock (see top of loop).
+                            auto& emb = correction_emb;
                             std::string target_id_str = args.value("target_id", "");
                             if (!target_id_str.empty()) {
                                 // Explicit target: targeted supersession

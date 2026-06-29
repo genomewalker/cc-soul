@@ -189,8 +189,15 @@ inline std::string discover_gpu_endpoint(const std::string& model = "gemma4:26b"
     }
 
     // 2. Probe SLURM GPU nodes via squeue
-    std::string squeue_out = fork_exec_capture(
-        {"squeue", "--me", "--noheader", "--format=%j %T %N"}, 5);
+    // Retry on empty output: squeue can be slow/unresponsive at daemon startup,
+    // and an empty result here forces a CPU-GGUF fallback that serializes workers.
+    std::string squeue_out;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        squeue_out = fork_exec_capture(
+            {"squeue", "--me", "--noheader", "--format=%j %T %N"}, 5);
+        if (!squeue_out.empty()) break;
+        if (attempt < 2) std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
     if (!squeue_out.empty()) {
         std::istringstream iss(squeue_out);
         std::string line;
