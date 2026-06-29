@@ -26,6 +26,10 @@ _reranker = None
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 _RERANK_FETCH_MUL = 4  # fetch this many × limit, then rerank to top-limit
 
+_sigmoid = lambda x: 1.0 / (1.0 + math.exp(-x))
+ABSTAIN_SCORE_THRESHOLD = 0.6   # epistemic: sigmoid(cross-encoder) below threshold → undetermined
+ABSTAIN_BAND_EPS = 0.05         # posterior-band: gold/non-gold score gap < ε → rank is noise
+
 def _load_reranker():
     global _reranker
     if _reranker is not None:
@@ -132,16 +136,60 @@ def _recall_raw(query: str, limit: int, strategy: str = "") -> list[dict]:
         return []
 
 
-def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
+RRF_STRATEGIES = ("hybrid", "bm25", "field")  # multi-strategy fusion sources
+_RRF_K = 60  # RRF constant; 60 is standard literature default
+
+
+def _rerank_pool(query: str, pool: list[dict], limit: int) -> tuple[list[dict], list[float] | None]:
+    """Cross-encoder rerank a candidate pool. Returns (top_limit, normed_scores_or_None)."""
+    reranker = _load_reranker()
+    if not reranker or len(pool) <= limit:
+        return pool[:limit], None
+    pairs = [(query, h.get("text", "")) for h in pool]
+    raw = reranker.predict(pairs)
+    ranked = sorted(zip(raw, pool), key=lambda x: -float(x[0]))
+    top = ranked[:limit]
+    return [h for _, h in top], [_sigmoid(float(s)) for s, _ in top]
+
+
+def _rank_rrf(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
+    """Reciprocal Rank Fusion across RRF_STRATEGIES, then cross-encoder rerank.
+
+    Each strategy contributes 1/(k+rank+1) to every hit's RRF score.
+    The fused pool is reranked by cross-encoder for final ordering.
+    """
+    fetch = limit * _RERANK_FETCH_MUL
+    all_hits: dict[str, dict] = {}
+    rrf_scores: dict[str, float] = {}
+    for strategy in RRF_STRATEGIES:
+        for rank, hit in enumerate(_recall_raw(query, fetch, strategy)):
+            hid = str(hit["id"])
+            all_hits.setdefault(hid, hit)
+            rrf_scores[hid] = rrf_scores.get(hid, 0.0) + 1.0 / (_RRF_K + rank + 1)
+    pool = [all_hits[hid] for hid in sorted(rrf_scores, key=lambda x: -rrf_scores[x])]
+    return _rerank_pool(query, pool, limit)
+
+
+def _rank(query: str, limit: int, strategy: str = "") -> tuple[list[dict], list[float] | None]:
+    """Fetch + rerank. strategy='rrf' runs multi-strategy RRF fusion.
+    Returns (hits, sigmoid_normed_scores) or (hits, None) if no reranker."""
+    if strategy == "rrf":
+        return _rank_rrf(query, limit)
     reranker = _load_reranker()
     fetch = limit * _RERANK_FETCH_MUL if reranker else limit
     results = _recall_raw(query, fetch, strategy)
     if not reranker or len(results) <= limit:
-        return results[:limit]
+        return results[:limit], None
     pairs = [(query, h.get("text", "")) for h in results]
-    scores = reranker.predict(pairs)
-    ranked = sorted(zip(scores, results), key=lambda x: -float(x[0]))
-    return [h for _, h in ranked[:limit]]
+    raw = reranker.predict(pairs)
+    ranked = sorted(zip(raw, results), key=lambda x: -float(x[0]))
+    top = ranked[:limit]
+    return [h for _, h in top], [_sigmoid(float(s)) for s, _ in top]
+
+
+def recall(query: str, limit: int, strategy: str = "") -> list[dict]:
+    hits, _ = _rank(query, limit, strategy)
+    return hits
 
 
 def ndcg(positions: list[int], n_gold: int, k: int) -> float:
@@ -173,7 +221,7 @@ def bootstrap(limit: int, strategy: str = "") -> dict[str, list[str]]:
 def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dict:
     ids = gold_ids.get(item["desc"], [])
     sig = item["gold_signature"].lower()
-    results = recall(item["query"], limit, strategy)
+    results, scores = _rank(item["query"], limit, strategy)
     result_ids = [r["id"] for r in results]
     result_texts = [r.get("text", "").lower() for r in results]
 
@@ -190,6 +238,21 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     n_gold = max(len(ids), len(positions), 1)
     score = ndcg(positions, n_gold, limit)
 
+    # Abstain signals — two distinct triggers, do not collapse
+    epistemic_abstain = False   # cross-encoder unconfident (w ≤ threshold)
+    band_abstain = False        # gold/non-gold scores too close to trust ranking
+    gold_max_score = None
+    if scores and positions:
+        gold_scores = [scores[p] for p in positions if p < len(scores)]
+        if gold_scores:
+            gold_max_score = max(gold_scores)
+            pos_set = set(positions)
+            non_gold_top = next((scores[i] for i in range(len(scores)) if i not in pos_set), None)
+            if gold_max_score < ABSTAIN_SCORE_THRESHOLD:
+                epistemic_abstain = True
+            if non_gold_top is not None and (gold_max_score - non_gold_top) < ABSTAIN_BAND_EPS:
+                band_abstain = True
+
     return {
         "query": item["query"],
         "desc": item["desc"],
@@ -200,6 +263,10 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "sig_fallback": sig_fallback,
         "ndcg": score,
         "pass": score >= 0.5,
+        "epistemic_abstain": epistemic_abstain,
+        "band_abstain": band_abstain,
+        "abstain": epistemic_abstain or band_abstain,
+        "gold_max_score": gold_max_score,
     }
 
 
@@ -211,7 +278,7 @@ def main():
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-reranker", action="store_true", help="skip cross-encoder re-ranking")
-    ap.add_argument("--strategy", default="", help="recall strategy (e.g. 'field')")
+    ap.add_argument("--strategy", default="", help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank)")
     a = ap.parse_args()
     if a.no_reranker:
         global _reranker
@@ -237,6 +304,11 @@ def main():
 
     records = [grade_one(it, gold_ids, a.limit, a.strategy) for it in GOLDEN_SET]
     mean_ndcg = sum(r["ndcg"] for r in records) / len(records) if records else 0.0
+    active = [r for r in records if not r["abstain"]]
+    mean_ndcg_active = sum(r["ndcg"] for r in active) / len(active) if active else 0.0
+    n_pass = sum(1 for r in records if r["pass"] and not r["abstain"])
+    n_fail = sum(1 for r in records if not r["pass"] and not r["abstain"])
+    n_abstain = sum(1 for r in records if r["abstain"])
     ts = datetime.now(timezone.utc).isoformat()
 
     report = {
@@ -245,21 +317,36 @@ def main():
         "limit": a.limit,
         "metric": "mean_nDCG",
         "score": mean_ndcg,
+        "score_active": mean_ndcg_active,
         "n": len(records),
+        "n_pass": n_pass,
+        "n_fail": n_fail,
+        "n_abstain": n_abstain,
         "records": records,
     }
     RESULTS_PATH.write_text(json.dumps(report, indent=2) + "\n")
 
     if not a.quiet:
         for r in records:
-            color = GREEN if r["pass"] else RED
-            mark = "PASS" if r["pass"] else "FAIL"
-            pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
-            no_gold = f"{YELLOW}(no gold IDs){RESET}" if not r["n_gold"] else ""
-            sig_tag = f"{DIM}[sig]{RESET}" if r.get("sig_fallback") else ""
-            print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str} {no_gold}{sig_tag}")
+            if r["abstain"]:
+                reason = "epistemic" if r["epistemic_abstain"] else "band"
+                score_str = f"w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else "w=?"
+                pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
+                print(f"{YELLOW}[ABSTAIN/{reason}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}  {score_str}")
+            else:
+                color = GREEN if r["pass"] else RED
+                mark = "PASS" if r["pass"] else "FAIL"
+                pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
+                no_gold = f"{YELLOW}(no gold IDs){RESET}" if not r["n_gold"] else ""
+                sig_tag = f"{DIM}[sig]{RESET}" if r.get("sig_fallback") else ""
+                score_tag = f"  w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else ""
+                print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}{score_tag} {no_gold}{sig_tag}")
         verdict = GREEN if mean_ndcg >= a.min else RED
         print(f"\n{BOLD}{verdict}mean nDCG@{a.limit} = {mean_ndcg:.3f}{RESET}  (min={a.min})")
+        if n_abstain:
+            verdict2 = GREEN if mean_ndcg_active >= a.min else RED
+            print(f"  active (excl. {n_abstain} abstain): {BOLD}{verdict2}{mean_ndcg_active:.3f}{RESET}  "
+                  f"pass={n_pass} fail={n_fail} abstain={n_abstain}")
         print(f"report: {RESULTS_PATH}")
 
     print(f"SCORE={mean_ndcg:.4f}")
