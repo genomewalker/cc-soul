@@ -1,38 +1,54 @@
 {
-  "ts": "2026-06-29T05:20:20.191200+00:00",
+  "ts": "2026-06-29T12:18:13.892796+00:00",
   "version": 3,
   "limit": 20,
   "metric": "mean_nDCG",
-  "score": 0.7529877631765866,
+  "score": 0.9608659385078013,
+  "score_active": 0.9804390759326473,
   "n": 10,
+  "n_pass": 9,
+  "n_fail": 0,
+  "n_abstain": 1,
   "records": [
     {
       "query": "chaos nodes",
       "desc": "cluster alias",
       "gold_ids": [
-        "2106781630210244609",
-        "1555967557855347011",
-        "3766964318940168335"
+        "17475104458537960091",
+        "3766964318940168335",
+        "17204052980907638964"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
+        1,
+        2,
         4,
         5,
-        9,
-        11,
-        12
+        6,
+        10,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        19
       ],
       "sig_fallback": false,
-      "ndcg": 0.5307899641897603,
-      "pass": true
+      "ndcg": 0.7847077016841871,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9996856468581313
     },
     {
       "query": "how does provenance deduplication work",
       "desc": "prov dedup gate",
       "gold_ids": [
-        "18446679945552855042",
-        "17475104458537960066"
+        "17475104458537960066",
+        "18446679945552855042"
       ],
       "n_gold": 2,
       "n_results": 20,
@@ -42,7 +58,11 @@
       ],
       "sig_fallback": false,
       "ndcg": 1.0,
-      "pass": true
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9999043572557053
     },
     {
       "query": "how does domain reliability work",
@@ -53,11 +73,15 @@
       "n_gold": 1,
       "n_results": 20,
       "gold_positions": [
-        1
+        0
       ],
       "sig_fallback": false,
-      "ndcg": 0.6309297535714575,
-      "pass": true
+      "ndcg": 1.0,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9987317225812715
     },
     {
       "query": "why does recall get capped per realm",
@@ -72,31 +96,40 @@
       ],
       "sig_fallback": false,
       "ndcg": 1.0,
-      "pass": true
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9995988961475172
     },
     {
       "query": "NFS resurrection problem",
       "desc": "NFS gotcha",
       "gold_ids": [
         "18283549743256698883",
-        "18017687741466148925",
+        "18239848227681599504",
         "18017687741466148926"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
         0,
+        1,
+        5,
         7,
         8,
         9,
         10,
         11,
-        12,
-        16
+        15
       ],
       "sig_fallback": false,
-      "ndcg": 0.7480028689782549,
-      "pass": true
+      "ndcg": 0.8665020653909947,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9997374119106496
     },
     {
       "query": "dream sweep gap filling",
@@ -107,11 +140,15 @@
       "n_gold": 1,
       "n_results": 20,
       "gold_positions": [
-        3
+        0
       ],
       "sig_fallback": false,
-      "ndcg": 0.43067655807339306,
-      "pass": false
+      "ndcg": 1.0,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9831807871202596
     },
     {
       "query": "forward bet prediction horizon",
@@ -126,52 +163,73 @@
       ],
       "sig_fallback": false,
       "ndcg": 1.0,
-      "pass": true
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9994562772254179
     },
     {
       "query": "how to build chitta-field",
       "desc": "build toolchain",
       "gold_ids": [
-        "10390583829663318066",
+        "18446679945552855058",
         "17475104458537960223",
-        "10390583829663318175"
+        "422798148281303106"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
+        0,
         1,
-        19
+        2,
+        3,
+        8
       ],
-      "sig_fallback": true,
-      "ndcg": 0.40292271522765544,
-      "pass": false
+      "sig_fallback": false,
+      "ndcg": 0.9708923176105698,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9999263217991753
     },
     {
       "query": "how does semantic search work",
       "desc": "search arch",
       "gold_ids": [
-        "17475104458537960058",
-        "18446679945552855059",
+        "422798148281303107",
+        "17475104458537959682",
         "17475104458537959678"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
         0,
+        1,
+        2,
         3,
-        12
+        4,
+        5,
+        6,
+        9,
+        11
       ],
       "sig_fallback": false,
-      "ndcg": 0.7946419117160276,
-      "pass": true
+      "ndcg": 0.9865573003922616,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9998026332691413
     },
     {
       "query": "distillation pipeline wisdom episode",
       "desc": "distillation pipeline",
       "gold_ids": [
-        "18283549743256699034",
-        "18283549743256699033",
-        "18283549743256699037"
+        "18283549743256698927",
+        "18283549743256698932",
+        "18283549743256699033"
       ],
       "n_gold": 3,
       "n_results": 20,
@@ -189,14 +247,21 @@
         10,
         11,
         12,
+        13,
+        14,
         15,
+        16,
         17,
         18,
         19
       ],
       "sig_fallback": false,
-      "ndcg": 0.9919138600093167,
-      "pass": true
+      "ndcg": 1.0,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9999373730492327
     }
   ]
 }

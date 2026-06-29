@@ -338,21 +338,31 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
 
     std::string topic;
 
+    // Exclude compliance:auto memories from gap recall — their content starts with
+    // "[compliance:auto]" and are housekeeping corrections, not curiosity gaps.
+    auto is_compliance = [](const std::string& s) {
+        return s.size() >= 16 && s.substr(0, 16) == "[compliance:auto";
+    };
+
     // Priority 1: open questions / gaps (by kind)
     auto gaps = field_store_->recall_by_kind("question", 5);
-    if (!gaps.empty()) {
-        topic = gaps[0].content;
+    for (const auto& g : gaps) {
+        if (is_compliance(g.content)) continue;
+        topic = g.content;
         if (topic.size() > 100) topic = topic.substr(0, 100);
+        break;
     }
 
     // Priority 1b: [gap]-tagged memories written by dream agent via `chitta remember`
     if (topic.empty()) {
         auto gap_hits = field_store_->recall_keyword("[gap]", 5);
-        if (!gap_hits.empty()) {
-            topic = gap_hits[0].content;
+        for (const auto& h : gap_hits) {
+            if (is_compliance(h.content)) continue;
+            topic = h.content;
             if (topic.size() > 6 && topic.substr(0, 6) == "[gap] ")
                 topic = topic.substr(6);
             if (topic.size() > 100) topic = topic.substr(0, 100);
+            break;
         }
     }
 
@@ -360,7 +370,7 @@ ToolResult FieldRpcHandler::tool_dream_wander(const json& params) {
     if (topic.empty()) {
         auto low_conf = field_store_->recall_by_kind("episode", 20);
         for (const auto& h : low_conf) {
-            if (h.confidence > 0.0f && h.confidence < 0.5f) {
+            if (h.confidence > 0.0f && h.confidence < 0.5f && !is_compliance(h.content)) {
                 topic = h.content;
                 if (topic.size() > 100) topic = topic.substr(0, 100);
                 break;
