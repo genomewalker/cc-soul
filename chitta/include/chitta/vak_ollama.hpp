@@ -1,13 +1,15 @@
 #pragma once
 // OllamaYantra — VakYantra implementation backed by the Ollama embeddings API.
-// Model: nomic-embed-text:v1.5  Dimension: 768  Batch: 16
+// Model: nomic-embed-text:v1.5  Dimension: 768  Batch: 64 × PARALLEL_CALLS concurrent
 // Replaces AntahkaranaYantra (ONNX) entirely.
 #include "chitta/vak.hpp"
 #include "chitta/llm_http.hpp"
 #include <nlohmann/json.hpp>
 #include <chitta/httplib.h>
 #include <cmath>
+#include <atomic>
 #include <mutex>
+#include <future>
 #include <chrono>
 #include <thread>
 
@@ -15,9 +17,10 @@ namespace chitta {
 
 class OllamaYantra : public VakYantra {
 public:
-    static constexpr size_t BATCH = 16;
-    static constexpr int    MAX_RETRIES = 3;
-    static constexpr int    TIMEOUT_MS  = 30000;
+    static constexpr size_t BATCH          = 64;  // items per HTTP call
+    static constexpr size_t PARALLEL_CALLS = 2;   // concurrent HTTP calls (one per GPU)
+    static constexpr int    MAX_RETRIES    = 3;
+    static constexpr int    TIMEOUT_MS     = 60000;
 
     explicit OllamaYantra(
         std::string model     = "nomic-embed-text:v1.5",
@@ -56,26 +59,41 @@ public:
     ) {
         std::vector<Artha> results(vaks.size());
 
+        // Collect all sub-batches, then fire PARALLEL_CALLS concurrently so both GPUs work.
+        struct SubBatch { size_t offset; std::vector<std::string> texts; };
+        std::vector<SubBatch> sub_batches;
         for (size_t offset = 0; offset < vaks.size(); offset += BATCH) {
             size_t end = std::min(offset + BATCH, vaks.size());
-            std::vector<std::string> batch_input;
-            batch_input.reserve(end - offset);
-            for (size_t i = offset; i < end; ++i) {
-                batch_input.push_back(add_prefix(vaks[i], mode));
-            }
+            SubBatch sb; sb.offset = offset;
+            sb.texts.reserve(end - offset);
+            for (size_t i = offset; i < end; ++i)
+                sb.texts.push_back(add_prefix(vaks[i], mode));
+            sub_batches.push_back(std::move(sb));
+        }
 
-            auto batch_vecs = embed_batch(batch_input);
-            for (size_t i = 0; i < batch_vecs.size(); ++i) {
-                results[offset + i] = Artha{std::move(batch_vecs[i]), 1.0f, vaks[offset + i]};
+        for (size_t bi = 0; bi < sub_batches.size(); ) {
+            size_t wave_end = std::min(bi + PARALLEL_CALLS, sub_batches.size());
+            std::vector<std::future<std::vector<Vector>>> futures;
+            for (size_t wi = bi; wi < wave_end; ++wi) {
+                auto& sb = sub_batches[wi];
+                futures.push_back(std::async(std::launch::async,
+                    [this, texts = sb.texts]() mutable { return embed_batch(texts); }));
             }
+            for (size_t wi = bi; wi < wave_end; ++wi) {
+                auto batch_vecs = futures[wi - bi].get();
+                size_t off = sub_batches[wi].offset;
+                for (size_t i = 0; i < batch_vecs.size(); ++i)
+                    results[off + i] = Artha{std::move(batch_vecs[i]), 1.0f, vaks[off + i]};
+            }
+            bi = wave_end;
         }
         return results;
     }
 
 private:
-    std::string model_;
-    std::string base_url_;
-    bool        ready_;
+    std::string        model_;
+    std::string        base_url_;
+    std::atomic<bool>  ready_;
     mutable std::mutex mtx_;
 
     std::string add_prefix(const std::string& text, EmbedMode mode) const {
@@ -166,7 +184,9 @@ private:
                         std::to_string(res ? res->status : -1) + " after " +
                         std::to_string(MAX_RETRIES) + " retries — returning zero-vecs");
                     if (res) log("[ollama-embed] response body: " + res->body.substr(0, 200));
-                    ready_ = false;
+                    // Don't permanently poison ready_: ollama may be briefly busy (LLM load).
+                    // Re-probe on next call via ready() → re-enable automatically.
+                    ready_ = probe();
                     return out;
                 }
 
