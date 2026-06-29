@@ -982,6 +982,16 @@ void Subconscious::embed_loop() {
     for (int i = 0; i < 150 && running_.load(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
+    // One-time cleanup: clear states whose payloads are missing (orphan states from
+    // prior crashes or partial writes). These never become embeddable.
+    if (field_store_) {
+        size_t purged = field_store_->purge_orphan_embed_pending();
+        if (purged > 0) {
+            std::cerr << "[embed_loop] Purged " << purged << " orphan embed_pending states\n";
+            field_store_->flush();
+        }
+    }
+
     while (running_.load()) {
         auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
         if (!pending.empty()) {
@@ -1001,8 +1011,10 @@ void Subconscious::embed_loop() {
                 batch_ids.push_back(id);
                 batch_texts.push_back(prefix + chitta::ssl::retrieval_text(content));
             }
-            if (!unembed_ids.empty())
+            if (!unembed_ids.empty()) {
                 field_store_->force_clear_embed_pending(unembed_ids);
+                field_store_->flush();  // persist clears so they survive daemon restart
+            }
 
             // One ONNX session_->Run() for the whole batch.
             if (!batch_ids.empty() && embedder_ && embedder_->ready()) {
@@ -1028,10 +1040,6 @@ void Subconscious::embed_loop() {
         // Periodic maintenance every 10 embed cycles (~5 min at 30s/cycle).
         if (++embed_cycle_count_ % 10 == 0)
             field_store_->maybe_compact_wal(50);
-        // Episode pruning every 200 cycles (~1.7h at 30s/cycle).
-        if (embed_cycle_count_ % 200 == 0)
-            field_store_->prune_episodes(90, 10000);
-
         if (embed_cycle_count_ % 50 == 0)
             field_store_->promote_staged_memories();
         // Sleep config_.embedding_interval in small increments so shutdown is responsive.
