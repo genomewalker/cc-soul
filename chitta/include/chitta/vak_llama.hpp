@@ -159,6 +159,32 @@ private:
         ready_ = false;
     }
 
+    // Reinitialize the llama context from the already-loaded model. Called after a decode
+    // failure to recover from a corrupted context state without reloading the model weights.
+    // Caller must hold mtx_. Returns true on success.
+    bool reinit_context() {
+        if (!model_) return false;
+        if (ctx_) { llama_free(ctx_); ctx_ = nullptr; }
+
+        llama_context_params cparams = llama_context_default_params();
+        cparams.n_ctx        = n_ctx_eff_;
+        cparams.n_batch      = n_ctx_eff_;
+        cparams.n_ubatch     = n_ctx_eff_;
+        cparams.embeddings   = true;
+        cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        if (const char* t = std::getenv("CHITTA_EMBED_THREADS")) {
+            int nt = std::atoi(t);
+            if (nt > 0) { cparams.n_threads = nt; cparams.n_threads_batch = nt; }
+        }
+        ctx_ = llama_init_from_model(model_, cparams);
+        if (!ctx_) {
+            log("[llama-embed] context reinit failed — embedder disabled");
+            ready_ = false;
+            return false;
+        }
+        return true;
+    }
+
     Vector embed_one(const std::string& text) {
         std::lock_guard<std::mutex> lock(mtx_);
         Vector v;  // default: zero vector
@@ -189,8 +215,19 @@ private:
 
         llama_batch batch = llama_batch_get_one(toks.data(), (int)toks.size());
         if (llama_decode(ctx_, batch) != 0) {
-            log("[llama-embed] decode failed for text len=" + std::to_string(text.size()));
-            return v;
+            // Context may be in a bad state (e.g. exhausted KV cache, corrupted state).
+            // Reinitialize ctx_ from the already-loaded model and retry once — avoids
+            // falling back to CPU-only encode() which pegs the CPU for the rest of the
+            // daemon lifetime.
+            log("[llama-embed] decode failed (len=" + std::to_string(text.size()) +
+                "); reinitializing context and retrying");
+            if (!reinit_context()) return v;
+            llama_memory_clear(llama_get_memory(ctx_), false);
+            batch = llama_batch_get_one(toks.data(), (int)toks.size());
+            if (llama_decode(ctx_, batch) != 0) {
+                log("[llama-embed] decode failed after context reinit — dropping embedding");
+                return v;
+            }
         }
 
         // Prefer pooled sequence embedding; fall back to per-token mean if unavailable.
