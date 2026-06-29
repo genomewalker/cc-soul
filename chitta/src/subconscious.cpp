@@ -180,6 +180,11 @@ void Subconscious::process_loop() {
             run_correction_promotion();
         }
 
+        // Episode pruning: evict old/weak episode memories
+        if (field_store_ && time_for_prune_episodes()) {
+            run_prune_episodes();
+        }
+
         // Background embedding runs in embed_thread_ (dedicated thread, no rpc_mutex).
 
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
@@ -964,6 +969,26 @@ void Subconscious::run_correction_promotion() {
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Correction promotion failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_prune_episodes() const {
+    auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
+        std::chrono::steady_clock::now() - last_prune_episodes_).count();
+    return elapsed >= 6;
+}
+
+void Subconscious::run_prune_episodes() {
+    last_prune_episodes_ = std::chrono::steady_clock::now();
+    stats_.hygiene_runs++;
+    stats_.last_hygiene_at = now_ms();
+    try {
+        int64_t deleted = field_store_->prune_episodes(90, 10000);
+        if (deleted > 0) {
+            std::cerr << "[subconscious] Episode pruning: deleted " << deleted << " episodes\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Episode pruning failed: " << e.what() << "\n";
     }
 }
 

@@ -329,6 +329,21 @@ def main():
     }
     RESULTS_PATH.write_text(json.dumps(report, indent=2) + "\n")
 
+    # Store [gap] memories for abstain cases — seeds future dream curiosity
+    for r in records:
+        if r.get("abstain"):
+            reason = "epistemic" if r.get("epistemic_abstain") else "band"
+            gap_content = (
+                f"[gap] query={r['query']!r} reason={reason} "
+                f"nDCG={r['ndcg']:.3f} gold_score={r.get('gold_max_score') or 'n/a'}"
+            )
+            subprocess.run(
+                ["chitta", "remember", "--content", gap_content,
+                 "--realm", "project:cc-soul", "--type", "wisdom",
+                 "--tags", "gap,abstain,grader", "--visibility", "1"],
+                capture_output=True, timeout=10,
+            )
+
     if not a.quiet:
         for r in records:
             if r["abstain"]:
