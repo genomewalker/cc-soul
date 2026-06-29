@@ -49,7 +49,7 @@ jobs:
       - name: Install dependencies
         shell: bash -l {0}
         run: |
-          conda install -y "python=3.11" cmake nlohmann_json sqlite
+          conda install -y "python=3.11" cmake nlohmann_json sqlite openblas
           conda install -y -c conda-forge "python=3.11" onnxruntime-cpp
           python --version
           echo "PYO3_PYTHON=$CONDA_PREFIX/bin/python3" >> "$GITHUB_ENV"
