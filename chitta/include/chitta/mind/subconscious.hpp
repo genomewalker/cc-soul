@@ -61,7 +61,7 @@ struct SubconsciousConfig {
     std::chrono::minutes belief_maintenance_interval{120};  // Belief maintenance every 2 hours
     bool enable_belief_maintenance{true};
     size_t max_queue_size{1000};
-    size_t embedding_batch_size{40};              // Batched ONNX inference
+    size_t embedding_batch_size{256};             // Items per embed_loop cycle (OllamaYantra batches 16/HTTP call)
     float correction_confidence{0.8f};
     bool enable_hygiene{true};
     bool enable_theme_maintenance{true};          // xMemory theme maintenance

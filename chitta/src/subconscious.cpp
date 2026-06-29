@@ -1034,8 +1034,11 @@ void Subconscious::embed_loop() {
 
         if (embed_cycle_count_ % 50 == 0)
             field_store_->promote_staged_memories();
-        // Sleep 30s in small increments so shutdown is responsive.
-        for (int i = 0; i < 300 && running_.load(); ++i)
+        // Sleep config_.embedding_interval in small increments so shutdown is responsive.
+        auto sleep_ticks = std::max(static_cast<long>(1),
+            static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                config_.embedding_interval).count() / 100));
+        for (long i = 0; i < sleep_ticks && running_.load(); ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
