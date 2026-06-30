@@ -21,6 +21,40 @@ import argparse, json, math, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import numpy as _np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+
+
+def g_entropy(scores):
+    """Shannon entropy of the softmax over recall scores."""
+    if len(scores) < 2:
+        return 0.0
+    mx = max(scores)
+    exps = [math.exp(s - mx) for s in scores]
+    total = sum(exps)
+    probs = [e / total for e in exps]
+    return -sum(p * math.log(p + 1e-12) for p in probs)
+
+
+def s_entropy(scores):
+    """Effective-rank entropy via eigenvalues of the score outer product.
+
+    Requires numpy; returns None when numpy is unavailable.
+    """
+    if not _HAS_NUMPY or len(scores) < 2:
+        return 0.0 if _HAS_NUMPY else None
+    arr = _np.asarray(scores, dtype=float)
+    gram = _np.outer(arr, arr)
+    eig = _np.linalg.eigvalsh(gram)
+    eig = eig[eig > 0]
+    if eig.size == 0:
+        return 0.0
+    probs = eig / eig.sum()
+    return float(-_np.sum(probs * _np.log(probs)))
+
 # Cross-encoder reranker — loaded once, used for all queries
 _reranker = None
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
@@ -270,6 +304,8 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "band_abstain": band_abstain,
         "abstain": epistemic_abstain or band_abstain,
         "gold_max_score": gold_max_score,
+        "g_entropy": g_entropy(scores) if scores else 0.0,
+        "s_entropy": s_entropy(scores) if scores else (0.0 if _HAS_NUMPY else None),
     }
 
 
@@ -314,6 +350,16 @@ def main():
     n_abstain = sum(1 for r in records if r["abstain"])
     ts = datetime.now(timezone.utc).isoformat()
 
+    g_vals = [r["g_entropy"] for r in records if r.get("g_entropy") is not None]
+    mean_g_entropy = sum(g_vals) / len(g_vals) if g_vals else 0.0
+    if len(g_vals) > 1:
+        g_var = sum((g - mean_g_entropy) ** 2 for g in g_vals) / (len(g_vals) - 1)
+        abstain_g_entropy_threshold = mean_g_entropy + 1.5 * math.sqrt(g_var)
+    else:
+        abstain_g_entropy_threshold = None
+    s_vals = [r["s_entropy"] for r in records if r.get("s_entropy") is not None]
+    mean_s_entropy = sum(s_vals) / len(s_vals) if s_vals else None
+
     report = {
         "ts": ts,
         "version": GOLDEN_VERSION,
@@ -325,6 +371,9 @@ def main():
         "n_pass": n_pass,
         "n_fail": n_fail,
         "n_abstain": n_abstain,
+        "mean_g_entropy": mean_g_entropy,
+        "abstain_g_entropy_threshold": abstain_g_entropy_threshold,
+        "mean_s_entropy": mean_s_entropy,
         "records": records,
     }
     RESULTS_PATH.write_text(json.dumps(report, indent=2) + "\n")
