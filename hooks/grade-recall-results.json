@@ -1,54 +1,54 @@
 {
-  "ts": "2026-06-29T12:18:13.892796+00:00",
-  "version": 3,
+  "ts": "2026-06-30T11:58:21.248308+00:00",
+  "version": 6,
   "limit": 20,
   "metric": "mean_nDCG",
-  "score": 0.9608659385078013,
-  "score_active": 0.9804390759326473,
-  "n": 10,
-  "n_pass": 9,
-  "n_fail": 0,
-  "n_abstain": 1,
+  "score": 0.5298103951431377,
+  "score_active": 0.623558656715801,
+  "n": 30,
+  "n_pass": 13,
+  "n_fail": 7,
+  "n_abstain": 10,
+  "mean_g_entropy": 2.9378905642162465,
+  "abstain_g_entropy_threshold": 2.998207766442078,
+  "mean_s_entropy": 1.1023649803170026,
   "records": [
     {
       "query": "chaos nodes",
       "desc": "cluster alias",
       "gold_ids": [
-        "17475104458537960091",
         "3766964318940168335",
-        "17204052980907638964"
+        "17475104458537960091",
+        "1555967557855347011"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
         1,
         2,
-        4,
         5,
-        6,
-        10,
+        11,
         12,
-        13,
-        14,
-        15,
         16,
-        17,
+        18,
         19
       ],
       "sig_fallback": false,
-      "ndcg": 0.7847077016841871,
+      "ndcg": 0.6877222617003528,
       "pass": true,
       "epistemic_abstain": false,
       "band_abstain": true,
       "abstain": true,
-      "gold_max_score": 0.9996856468581313
+      "gold_max_score": 0.9996856468581313,
+      "g_entropy": 2.9957286186963445,
+      "s_entropy": 0.9913811503961382
     },
     {
       "query": "how does provenance deduplication work",
       "desc": "prov dedup gate",
       "gold_ids": [
-        "17475104458537960066",
-        "18446679945552855042"
+        "18446679945552855042",
+        "17475104458537960066"
       ],
       "n_gold": 2,
       "n_results": 20,
@@ -62,7 +62,9 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9999043572557053
+      "gold_max_score": 0.9999043572557053,
+      "g_entropy": 2.9233932416579433,
+      "s_entropy": 1.1961620701953564
     },
     {
       "query": "how does domain reliability work",
@@ -81,7 +83,9 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9987317225812715
+      "gold_max_score": 0.9987317219772767,
+      "g_entropy": 2.939992637223772,
+      "s_entropy": 1.1796320804348712
     },
     {
       "query": "why does recall get capped per realm",
@@ -100,14 +104,16 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9995988961475172
+      "gold_max_score": 0.9995988961475172,
+      "g_entropy": 2.9531121634067956,
+      "s_entropy": 1.2192955009321698
     },
     {
       "query": "NFS resurrection problem",
       "desc": "NFS gotcha",
       "gold_ids": [
         "18283549743256698883",
-        "18239848227681599504",
+        "18017687741466148925",
         "18017687741466148926"
       ],
       "n_gold": 3,
@@ -115,21 +121,23 @@
       "gold_positions": [
         0,
         1,
-        5,
-        7,
+        2,
+        6,
         8,
         9,
         10,
         11,
-        15
+        12
       ],
       "sig_fallback": false,
-      "ndcg": 0.8665020653909947,
+      "ndcg": 0.9087304104650107,
       "pass": true,
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9997374119106496
+      "gold_max_score": 0.9997374119106496,
+      "g_entropy": 2.9033632577573227,
+      "s_entropy": 1.0271905085450428
     },
     {
       "query": "dream sweep gap filling",
@@ -148,7 +156,9 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9831807871202596
+      "gold_max_score": 0.9831807871202596,
+      "g_entropy": 2.956829029433591,
+      "s_entropy": 1.200152599738045
     },
     {
       "query": "forward bet prediction horizon",
@@ -167,40 +177,41 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9994562772254179
+      "gold_max_score": 0.9994562772254179,
+      "g_entropy": 2.953414842734059,
+      "s_entropy": 0.9005412360211626
     },
     {
       "query": "how to build chitta-field",
       "desc": "build toolchain",
       "gold_ids": [
-        "18446679945552855058",
-        "17475104458537960223",
-        "422798148281303106"
+        "10390583829663318066",
+        "10390583829663318175",
+        "17475104458537960223"
       ],
       "n_gold": 3,
       "n_results": 20,
       "gold_positions": [
         0,
-        1,
-        2,
-        3,
-        8
+        1
       ],
-      "sig_fallback": false,
-      "ndcg": 0.9708923176105698,
+      "sig_fallback": true,
+      "ndcg": 0.7653606369886217,
       "pass": true,
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9999263217991753
+      "gold_max_score": 0.9999263217991753,
+      "g_entropy": 2.991781343800621,
+      "s_entropy": 1.129355463759817
     },
     {
       "query": "how does semantic search work",
       "desc": "search arch",
       "gold_ids": [
-        "422798148281303107",
-        "17475104458537959682",
-        "17475104458537959678"
+        "17475104458537959678",
+        "18446679945552855059",
+        "10390583829663318035"
       ],
       "n_gold": 3,
       "n_results": 20,
@@ -210,26 +221,26 @@
         2,
         3,
         4,
-        5,
         6,
-        9,
-        11
+        8
       ],
       "sig_fallback": false,
-      "ndcg": 0.9865573003922616,
+      "ndcg": 0.9848330959553522,
       "pass": true,
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9998026332691413
+      "gold_max_score": 0.9998026332691413,
+      "g_entropy": 2.890163689639523,
+      "s_entropy": 1.3253122960740353
     },
     {
       "query": "distillation pipeline wisdom episode",
       "desc": "distillation pipeline",
       "gold_ids": [
-        "18283549743256698927",
-        "18283549743256698932",
-        "18283549743256699033"
+        "18283549743256699034",
+        "18283549743256699033",
+        "10041025933319602227"
       ],
       "n_gold": 3,
       "n_results": 20,
@@ -250,10 +261,161 @@
         13,
         14,
         15,
+        17,
+        18,
+        19
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.9982176817663795,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9999373730492327,
+      "g_entropy": 2.875032919096,
+      "s_entropy": 1.1735148368914927
+    },
+    {
+      "query": "how does the dream cycle run",
+      "desc": "dream cycle sadhana brain",
+      "gold_ids": [
+        "16373682459373469809",
+        "17475104458537959768",
+        "846867757206077532"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        10,
+        11
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.25771900700059075,
+      "pass": false,
+      "epistemic_abstain": true,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.0036390318139314795,
+      "g_entropy": 2.9270507564560013,
+      "s_entropy": 1.0282936706043386
+    },
+    {
+      "query": "how does the grader abstain on uncertain queries",
+      "desc": "abstain signal cross encoder recall",
+      "gold_ids": [
+        "7456630303272992845",
+        "2106781630210244649"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.8855307539779824,
+      "s_entropy": 0.7347734675401001
+    },
+    {
+      "query": "how does hybrid recall fuse multiple strategies",
+      "desc": "RRF fusion hybrid bm25 field strategy",
+      "gold_ids": [
+        "17475104458537959678",
+        "17475104458537959682",
+        "17475104458537960058"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.941781838567184,
+      "s_entropy": 1.3640755329661864
+    },
+    {
+      "query": "how does dream wander fill knowledge gaps",
+      "desc": "gap memory curiosity dream wander topic",
+      "gold_ids": [
+        "4452360169313009692"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.907071967536428,
+      "s_entropy": 1.0510425545152438
+    },
+    {
+      "query": "how to recover chitta-field after NFS failure",
+      "desc": "chitta field store snapshot NFS resurrection",
+      "gold_ids": [
+        "16090553898779017224"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        6
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.3333333333333333,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9698085421870878,
+      "g_entropy": 2.902015054856446,
+      "s_entropy": 1.1018168415519705
+    },
+    {
+      "query": "why does dream publication only work with local brain",
+      "desc": "BridgeBrain local gemma room create dream",
+      "gold_ids": [
+        "16373682459373469812",
+        "16373682459373469832",
+        "16373682459373469847"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
         16,
         17,
         18,
         19
+      ],
+      "sig_fallback": true,
+      "ndcg": 0.3647203075446716,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9971802833906427,
+      "g_entropy": 2.9957317352436945,
+      "s_entropy": 0.5792009529486496
+    },
+    {
+      "query": "how are chitta forward bets resolved",
+      "desc": "forward bet resolution prediction check",
+      "gold_ids": [
+        "17475104458537960067"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        0
       ],
       "sig_fallback": false,
       "ndcg": 1.0,
@@ -261,7 +423,293 @@
       "epistemic_abstain": false,
       "band_abstain": false,
       "abstain": false,
-      "gold_max_score": 0.9999373730492327
+      "gold_max_score": 0.9997750557817775,
+      "g_entropy": 2.929454853259691,
+      "s_entropy": 1.4706655400460327
+    },
+    {
+      "query": "why does cmake rebuild not pick up rust source changes",
+      "desc": "cmake relink rust rebuild",
+      "gold_ids": [
+        "7418759137082736643"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        5
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.3562071871080222,
+      "pass": false,
+      "epistemic_abstain": true,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.5232834104540444,
+      "g_entropy": 2.9115933874899507,
+      "s_entropy": 1.1416039375569316
+    },
+    {
+      "query": "how to recover HNSW index after corruption",
+      "desc": "HNSW recovery reindex",
+      "gold_ids": [
+        "2106781630210244611",
+        "2106781630210244612"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9976185774485635,
+      "g_entropy": 2.924373277106505,
+      "s_entropy": 1.1071293295863323
+    },
+    {
+      "query": "how are BM25 and vector search combined",
+      "desc": "BM25 HNSW blend alpha",
+      "gold_ids": [
+        "18446679945552855059",
+        "422798148281303049",
+        "18446679945552855051"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        3
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.20210734650054757,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9929605077863504,
+      "g_entropy": 2.889761882704281,
+      "s_entropy": 0.8474343744295394
+    },
+    {
+      "query": "how does chitta-bridge install work",
+      "desc": "chitta-bridge install skills",
+      "gold_ids": [
+        "4029922828349341697",
+        "6938893573655887875",
+        "8352859668640432141"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1,
+        8,
+        9,
+        13,
+        15,
+        16
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.8140313091406551,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9976388515127033,
+      "g_entropy": 2.9777601675889236,
+      "s_entropy": 1.138344870967403
+    },
+    {
+      "query": "what strategies does chitta routing combine",
+      "desc": "multiway routing strategy blend",
+      "gold_ids": [
+        "10364209500650471470"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        4
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.38685280723454163,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9803764131218387,
+      "g_entropy": 2.9099500692811016,
+      "s_entropy": 1.231488094225503
+    },
+    {
+      "query": "what is Modern Hopfield network in chitta",
+      "desc": "Hopfield field memory network",
+      "gold_ids": [
+        "17475104458537959678",
+        "17475104458537959682"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [
+        0,
+        1
+      ],
+      "sig_fallback": false,
+      "ndcg": 1.0,
+      "pass": true,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": 0.9978965469793183,
+      "g_entropy": 2.9320327911677433,
+      "s_entropy": 1.1752295394263832
+    },
+    {
+      "query": "what tools does the chitta-bridge plugin expose",
+      "desc": "chitta-bridge plugin tools",
+      "gold_ids": [
+        "4029922828349341697"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        5
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.3562071871080222,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": true,
+      "abstain": true,
+      "gold_max_score": 0.9891303628253257,
+      "g_entropy": 2.9928776547789604,
+      "s_entropy": 0.9674276569239862
+    },
+    {
+      "query": "what binary format do chitta snapshots use",
+      "desc": "V23 snapshot format",
+      "gold_ids": [
+        "4236524911499149313"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.98820236698344,
+      "s_entropy": 1.246178975038728
+    },
+    {
+      "query": "how does graph traversal find related memories",
+      "desc": "graph_traverse BFS",
+      "gold_ids": [
+        "8869586535482130565",
+        "8869586535482130564"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.995693074243968,
+      "s_entropy": 1.4741866553304677
+    },
+    {
+      "query": "what does the dream pipeline do",
+      "desc": "dream-pipeline refactor",
+      "gold_ids": [
+        "846867757206077485",
+        "17475104458537959775",
+        "17475104458537959722"
+      ],
+      "n_gold": 3,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.9908635155956054,
+      "s_entropy": 0.7148866775397118
+    },
+    {
+      "query": "what caused recall to block for nearly a second",
+      "desc": "multihop: recall lock contention",
+      "gold_ids": [
+        "3322374163728957501",
+        "3322374163728957500"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [
+        9
+      ],
+      "sig_fallback": false,
+      "ndcg": 0.17723928678404774,
+      "pass": false,
+      "epistemic_abstain": true,
+      "band_abstain": false,
+      "abstain": true,
+      "gold_max_score": 0.18342663432177705,
+      "g_entropy": 2.8823349607861832,
+      "s_entropy": 1.0581187474874343
+    },
+    {
+      "query": "why do chitta recall scores look the same for every result",
+      "desc": "multihop: score collapse anisotropy",
+      "gold_ids": [
+        "3442188985189793802",
+        "3442188985189793801"
+      ],
+      "n_gold": 2,
+      "n_results": 20,
+      "gold_positions": [],
+      "sig_fallback": false,
+      "ndcg": 0.0,
+      "pass": false,
+      "epistemic_abstain": false,
+      "band_abstain": false,
+      "abstain": false,
+      "gold_max_score": null,
+      "g_entropy": 2.975199884408062,
+      "s_entropy": 1.2325693985482535
+    },
+    {
+      "query": "how does chitta dream wander curiosity gap",
+      "desc": "multihop: dream wander curiosity",
+      "gold_ids": [
+        "4452360169313009692"
+      ],
+      "n_gold": 1,
+      "n_results": 20,
+      "gold_positions": [
+        8
+      ],
+      "sig_fallback": true,
+      "ndcg": 0.3010299956639812,
+      "pass": false,
+      "epistemic_abstain": true,
+      "band_abstain": false,
+      "abstain": true,
+      "gold_max_score": 0.3312871522609256,
+      "g_entropy": 2.8946251910092684,
+      "s_entropy": 1.063944849288748
     }
   ]
 }
