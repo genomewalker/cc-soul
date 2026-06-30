@@ -11,6 +11,7 @@
     ToolResult tool_grow(const json& params);
     ToolResult tool_set_affect(const json& params);
     ToolResult tool_get(const json& params);
+    ToolResult tool_get_embeddings(const json& params);
     ToolResult tool_expand_memory(const json& params);
     ToolResult tool_update(const json& params);
     ToolResult tool_query(const json& params);

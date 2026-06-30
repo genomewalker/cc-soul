@@ -295,6 +295,13 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["get"] = [this](const json& p) { return tool_get(p); };
 
+    tools_.push_back({{"name","get_embeddings"},{"description","Batch-fetch raw embedding vectors for memory IDs. Returns JSON object mapping id→vector. Used for computing S-entropy (Gram matrix effective rank) over recall candidates."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"ids", {{"type","array"},{"items",{{"type","string"}}},{"description","Array of memory ID strings"}}}
+        }},{"required",{"ids"}}}}
+    });
+    handlers_["get_embeddings"] = [this](const json& p) { return tool_get_embeddings(p); };
+
     tools_.push_back({{"name","expand_memory"},{"description","Expand a memory to full hierarchical context"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"id",{{"type","string"}}},{"depth",{{"type","integer"}}}

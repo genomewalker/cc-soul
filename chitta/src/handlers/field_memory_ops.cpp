@@ -347,6 +347,22 @@ ToolResult FieldRpcHandler::tool_get(const json& params) {
     return ToolResult::ok(content.substr(0, 500), result);
 }
 
+ToolResult FieldRpcHandler::tool_get_embeddings(const json& params) {
+    if (!params.contains("ids")) return ToolResult::error("ids array required");
+    std::vector<uint64_t> ids;
+    for (const auto& v : params["ids"]) {
+        uint64_t id = 0;
+        if (v.is_string()) id = std::stoull(v.get<std::string>());
+        else if (v.is_number()) id = v.get<uint64_t>();
+        if (id) ids.push_back(id);
+    }
+    if (ids.empty()) return ToolResult::error("No valid ids");
+    std::string emb_json = field_store_->get_memory_embeddings_batch(ids);
+    json result = json::parse(emb_json, nullptr, false);
+    if (result.is_discarded()) return ToolResult::error("Failed to fetch embeddings");
+    return ToolResult::ok("Embeddings for " + std::to_string(ids.size()) + " memories", result);
+}
+
 ToolResult FieldRpcHandler::tool_expand_memory(const json& params) {
     uint64_t id = extract_id(params);
     if (id == 0) return ToolResult::error("id is required");

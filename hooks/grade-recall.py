@@ -17,7 +17,7 @@ Usage:
 
 Exit 0 if mean_nDCG@LIMIT >= --min, else 1.
 """
-import argparse, json, math, os, subprocess, sys
+import argparse, json, math, os, subprocess, sys, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,21 +39,39 @@ def g_entropy(scores):
     return -sum(p * math.log(p + 1e-12) for p in probs)
 
 
-def s_entropy(scores):
-    """Effective-rank entropy via eigenvalues of the score outer product.
+def s_entropy_from_embeddings(result_ids):
+    """Effective-rank entropy: eigenvalues of the cosine Gram matrix of real embedding vectors.
 
-    Requires numpy; returns None when numpy is unavailable.
+    Calls `chitta get_embeddings` to fetch 1024-dim vectors per candidate.
+    Returns None when numpy unavailable or embeddings can't be fetched.
     """
-    if not _HAS_NUMPY or len(scores) < 2:
+    if not _HAS_NUMPY or len(result_ids) < 2:
         return 0.0 if _HAS_NUMPY else None
-    arr = _np.asarray(scores, dtype=float)
-    gram = _np.outer(arr, arr)
-    eig = _np.linalg.eigvalsh(gram)
-    eig = eig[eig > 0]
-    if eig.size == 0:
-        return 0.0
-    probs = eig / eig.sum()
-    return float(-_np.sum(probs * _np.log(probs)))
+    try:
+        out = subprocess.run(
+            ["chitta", "get_embeddings", "--ids", json.dumps([str(i) for i in result_ids]), "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if out.returncode != 0:
+            return None
+        data = json.loads(out.stdout)
+        emb_map = data.get("embeddings", data.get("structured", {}))
+        vecs = [emb_map[str(rid)] for rid in result_ids if str(rid) in emb_map]
+        if len(vecs) < 2:
+            return None
+        E = _np.asarray(vecs, dtype=float)
+        norms = _np.linalg.norm(E, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        E = E / norms
+        gram = E @ E.T
+        eig = _np.linalg.eigvalsh(gram)
+        eig = eig[eig > 1e-10]
+        if eig.size == 0:
+            return 0.0
+        probs = eig / eig.sum()
+        return float(-_np.sum(probs * _np.log(probs + 1e-12)))
+    except Exception:
+        return None
 
 # Cross-encoder reranker — loaded once, used for all queries
 _reranker = None
@@ -78,7 +96,7 @@ def _load_reranker():
         _reranker = False  # sentinel: tried and failed
     return _reranker
 
-GOLDEN_VERSION = 3
+GOLDEN_VERSION = 6
 
 # Natural-language queries a user would actually type, paired with:
 #   bootstrap_query: a targeted query to find the gold memory during bootstrap
@@ -145,6 +163,129 @@ GOLDEN_SET = [
         "gold_signature": "distill",
         "desc": "distillation pipeline",
     },
+    # --- restored from goldids v4 ---
+    {
+        "query": "how does the dream cycle run",
+        "bootstrap_query": "dream-pipeline dream_start local-brain gemma4 publish_path sadhana_manager",
+        "gold_signature": "publish_path",
+        "desc": "dream cycle sadhana brain",
+    },
+    {
+        "query": "how does the grader abstain on uncertain queries",
+        "bootstrap_query": "G0 grader nDCG abstain band epistemic cross-encoder ABSTAIN PASS FAIL",
+        "gold_signature": "0 FAIL",
+        "desc": "abstain signal cross encoder recall",
+    },
+    {
+        "query": "how does hybrid recall fuse multiple strategies",
+        "bootstrap_query": "RRF Reciprocal Rank Fusion hybrid BM25 field HNSW rrf_k chitta-field",
+        "gold_signature": "rrf_k",
+        "desc": "RRF fusion hybrid bm25 field strategy",
+    },
+    {
+        "query": "how does dream wander fill knowledge gaps",
+        "bootstrap_query": "dream_wander curiosity gap-finding exploration cc-soul dream topic",
+        "gold_signature": "curiosity-first",
+        "desc": "gap memory curiosity dream wander topic",
+    },
+    {
+        "query": "how to recover chitta-field after NFS failure",
+        "bootstrap_query": "chitta-field snapshot recovery NFS restore rebuild binary restore-from-NFS",
+        "gold_signature": "restore-from-NFS-snapshot",
+        "desc": "chitta field store snapshot NFS resurrection",
+    },
+    {
+        "query": "why does dream publication only work with local brain",
+        "bootstrap_query": "dream publication local brain provider BridgeBrain restriction only-works",
+        "gold_signature": "only-works-with-local-brain",
+        "desc": "BridgeBrain local gemma room create dream",
+    },
+    {
+        "query": "how are chitta forward bets resolved",
+        "bootstrap_query": "chitta forward bets testable prediction horizon resolution wisdom",
+        "gold_signature": "prediction horizon",
+        "desc": "forward bet resolution prediction check",
+    },
+    # --- expanded eval set (v6) ---
+    {
+        "query": "why does cmake rebuild not pick up rust source changes",
+        "bootstrap_query": "cmake build relink rust source archive chitta compilation",
+        "gold_signature": "cmake-build-only-relinks-existing-archives",
+        "desc": "cmake relink rust rebuild",
+    },
+    {
+        "query": "how to recover HNSW index after corruption",
+        "bootstrap_query": "chittad reindex HNSW emb files direct-mode recovery rebuild",
+        "gold_signature": "chittad reindex",
+        "desc": "HNSW recovery reindex",
+    },
+    {
+        "query": "how are BM25 and vector search combined",
+        "bootstrap_query": "dam_blend_alpha BM25 HNSW weight blending strategy",
+        "gold_signature": "dam_blend_alpha",
+        "desc": "BM25 HNSW blend alpha",
+    },
+    {
+        "query": "how does chitta-bridge install work",
+        "bootstrap_query": "chitta-bridge codex plugin install path skills configuration install.sh",
+        "gold_signature": "install.sh",
+        "desc": "chitta-bridge install skills",
+    },
+    {
+        "query": "what strategies does chitta routing combine",
+        "bootstrap_query": "multi-strategy routing BM25 HNSW Hopfield triplet-graph field",
+        "gold_signature": "multi-strategy-routing",
+        "desc": "multiway routing strategy blend",
+    },
+    {
+        "query": "what is Modern Hopfield network in chitta",
+        "bootstrap_query": "Field-RAG Modern Hopfield associative memory network field pattern",
+        "gold_signature": "Modern Hopfield",
+        "desc": "Hopfield field memory network",
+    },
+    {
+        "query": "what tools does the chitta-bridge plugin expose",
+        "bootstrap_query": "chitta-bridge MCP tools review rescue room soul skills",
+        "gold_signature": "chitta-bridge Codex plugin created",
+        "desc": "chitta-bridge plugin tools",
+    },
+    {
+        "query": "what binary format do chitta snapshots use",
+        "bootstrap_query": "chitta-field store V23 sectioned snapshot format binary magic",
+        "gold_signature": "V23 sectioned",
+        "desc": "V23 snapshot format",
+    },
+    {
+        "query": "how does graph traversal find related memories",
+        "bootstrap_query": "chitta graph_traverse start hops bfs neighbor nodes triplet",
+        "gold_signature": "graph_traverse",
+        "desc": "graph_traverse BFS",
+    },
+    {
+        "query": "what does the dream pipeline do",
+        "bootstrap_query": "dream-pipeline sadhana gemma meditation publish local brain refactor",
+        "gold_signature": "dream-pipeline-refactor",
+        "desc": "dream-pipeline refactor",
+    },
+    # --- multi-hop: indirect vocabulary bridge from symptom → root cause ---
+    {
+        "query": "what caused recall to block for nearly a second",
+        "bootstrap_query": "smart_recall hybrid_recall EXCLUSIVE lock blocking 800ms is_read_only_tool field_handler RwLock",
+        "gold_signature": "EXCLUSIVE lock",
+        "desc": "multihop: recall lock contention",
+    },
+    {
+        "query": "why do chitta recall scores look the same for every result",
+        "bootstrap_query": "bge-large anisotropic cosine uniform scores flat embedding space chitta-field Platt calibration",
+        "gold_signature": "anisotropic",
+        "desc": "multihop: score collapse anisotropy",
+    },
+    {
+        "query": "how does chitta dream wander curiosity gap",
+        "bootstrap_query": "dream_wander curiosity gap-finding exploration cc-soul dream topic",
+        "gold_signature": "curiosity-first",
+        "desc": "multihop: dream wander curiosity",
+    },
 ]
 
 RESULTS_PATH    = Path(__file__).resolve().parent / "grade-recall-results.json"
@@ -204,11 +345,106 @@ def _rank_rrf(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
     return _rerank_pool(query, pool, limit)
 
 
+_CHITTA_RPC_PORT = int(os.environ.get("CHITTA_RPC_PORT", "7432"))
+
+
+def _chitta_rpc(tool: str, args: dict) -> dict:
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": tool, "arguments": args}}).encode()
+    req = urllib.request.Request(f"http://localhost:{_CHITTA_RPC_PORT}",
+                                 data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read()).get("result", {})
+
+
+def _graph_hop(seed_ids: list[str], max_hops: int = 2, max_nodes: int = 30) -> set[str]:
+    """BFS via triplet graph from seed IDs. Returns neighbor memory IDs (numeric strings only)."""
+    found: set[str] = set()
+    for sid in seed_ids[:5]:
+        try:
+            result = _chitta_rpc("graph_traverse", {"start": str(sid), "max_hops": max_hops, "max_nodes": max_nodes})
+            for hit in result.get("structured", {}).get("hits", []):
+                node = str(hit.get("node", ""))
+                if node.isdigit() or (node.lstrip("-").isdigit()):
+                    found.add(node)
+        except Exception:
+            pass
+    return found - set(seed_ids)
+
+
+def _fetch_memory(mid: str) -> dict | None:
+    try:
+        out = subprocess.run(["chitta", "get", "--id", mid, "--json"],
+                             capture_output=True, text=True, timeout=10)
+        d = json.loads(out.stdout)
+        return {"id": mid, "text": d.get("content", ""), "realm": d.get("realm", ""),
+                "relevance": 0.0, "confidence": d.get("confidence", 0.5)}
+    except Exception:
+        return None
+
+
+_G_ENTROPY_HOP_THRESHOLD = 2.995  # ceiling: above → recall is maximally diffuse → trigger hop
+
+
+def _rank_multihop(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
+    """Entropy-gated graph hop: hybrid recall → g_entropy check → triplet-graph expansion → rerank.
+
+    Only triggers when g_entropy > _G_ENTROPY_HOP_THRESHOLD (diffuse, low-confidence recall).
+    """
+    fetch = limit * _RERANK_FETCH_MUL
+    primary = _recall_raw(query, fetch, "hybrid")
+
+    reranker = _load_reranker()
+    if reranker and len(primary) > limit:
+        pairs = [(query, h.get("text", "")) for h in primary]
+        raw_scores = reranker.predict(pairs)
+        ranked_primary = sorted(zip(raw_scores, primary), key=lambda x: -float(x[0]))
+        primary_top = [h for _, h in ranked_primary[:limit]]
+        primary_scores = [_sigmoid(float(s)) for s, _ in ranked_primary[:limit]]
+    else:
+        primary_top = primary[:limit]
+        primary_scores = None
+
+    # Gate: expand only when BOTH uncertain top-score AND diffuse distribution
+    # Top-score alone catches underscored golds; g_entropy alone is too compressed (2.87–2.99)
+    top_score = max(primary_scores) if primary_scores else 1.0
+    ge = g_entropy(primary_scores) if primary_scores else 0.0
+    if top_score >= ABSTAIN_SCORE_THRESHOLD or ge <= _G_ENTROPY_HOP_THRESHOLD or not primary_top:
+        return primary_top, primary_scores
+
+    all_hits: dict[str, dict] = {str(h["id"]): h for h in primary}
+    rrf_scores: dict[str, float] = {}
+    for rank, h in enumerate(primary):
+        hid = str(h["id"])
+        rrf_scores[hid] = rrf_scores.get(hid, 0.0) + 1.0 / (_RRF_K + rank + 1)
+
+    # Pass 1: graph hop — traverse triplet graph, keep neighbors that score > 0.3 vs query
+    seed_ids = [str(h["id"]) for h in primary_top[:5]]
+    neighbor_ids = _graph_hop(seed_ids, max_hops=2, max_nodes=40)
+    if neighbor_ids and reranker:
+        neighbor_mems = [m for mid in list(neighbor_ids)[:20]
+                         if str(mid) not in all_hits and (m := _fetch_memory(mid))
+                         and (m.get("realm", "") in ("", GRADE_REALM))]
+        if neighbor_mems:
+            hop_pairs = [(query, m.get("text", "")) for m in neighbor_mems]
+            hop_scores = reranker.predict(hop_pairs)
+            for score, mem in zip(hop_scores, neighbor_mems):
+                if _sigmoid(float(score)) > 0.30:  # only keep plausible neighbors
+                    hid = str(mem["id"])
+                    all_hits[hid] = mem
+                    rrf_scores[hid] = rrf_scores.get(hid, 0.0) + 1.0 / (_RRF_K + 0 + 1)
+
+    merged_pool = [all_hits[hid] for hid in sorted(rrf_scores, key=lambda x: -rrf_scores[x])]
+    return _rerank_pool(query, merged_pool, limit)
+
+
 def _rank(query: str, limit: int, strategy: str = "") -> tuple[list[dict], list[float] | None]:
-    """Fetch + rerank. strategy='rrf' runs multi-strategy RRF fusion.
+    """Fetch + rerank. strategy='rrf' runs multi-strategy RRF; 'multihop' adds entropy-gated graph hop.
     Returns (hits, sigmoid_normed_scores) or (hits, None) if no reranker."""
     if strategy == "rrf":
         return _rank_rrf(query, limit)
+    if strategy == "multihop":
+        return _rank_multihop(query, limit)
     reranker = _load_reranker()
     fetch = limit * _RERANK_FETCH_MUL if reranker else limit
     results = _recall_raw(query, fetch, strategy)
@@ -305,7 +541,7 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "abstain": epistemic_abstain or band_abstain,
         "gold_max_score": gold_max_score,
         "g_entropy": g_entropy(scores) if scores else 0.0,
-        "s_entropy": s_entropy(scores) if scores else (0.0 if _HAS_NUMPY else None),
+        "s_entropy": s_entropy_from_embeddings(result_ids) if result_ids else (0.0 if _HAS_NUMPY else None),
     }
 
 

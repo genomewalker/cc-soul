@@ -233,6 +233,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"get", "Get a node by ID",
      {{"id", "Node ID", true, nullptr}}},
 
+    {"get_embeddings", "Batch-fetch raw embedding vectors for memory IDs (for S-entropy / Gram matrix)",
+     {{"ids", "JSON array of memory ID strings", true, nullptr}}},
+
     {"update", "Update node content",
      {{"id", "Node ID", true, nullptr},
       {"content", "New content", true, nullptr}}},
