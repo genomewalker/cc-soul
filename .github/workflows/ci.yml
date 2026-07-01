@@ -15,6 +15,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Guard against automatic episode pruning
+        run: ./scripts/check-no-auto-prune.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

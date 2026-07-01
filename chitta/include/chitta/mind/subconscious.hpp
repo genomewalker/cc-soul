@@ -320,11 +320,6 @@ private:
     void run_correction_promotion();
     bool time_for_correction_promotion() const;
 
-    // Episode pruning: evict old/weak episode memories every 6 hours
-    std::chrono::steady_clock::time_point last_prune_episodes_{std::chrono::steady_clock::now()};
-    void run_prune_episodes();
-    bool time_for_prune_episodes() const;
-
     // Background embedding: embed pending memories using VakYantra
     void run_background_embedding();
     void embed_loop();

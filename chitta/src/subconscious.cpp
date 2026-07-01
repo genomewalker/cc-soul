@@ -180,10 +180,12 @@ void Subconscious::process_loop() {
             run_correction_promotion();
         }
 
-        // Episode pruning: evict old/weak episode memories
-        if (field_store_ && time_for_prune_episodes()) {
-            run_prune_episodes();
-        }
+        // Episode pruning is manual-only (RPC tool `prune_episodes`) — see
+        // register_system_tools.cpp. Do NOT add an automatic periodic call here:
+        // it silently truncates episode count to 80% of max_count regardless of
+        // how much real history exists, and has already caused two data-loss
+        // incidents (removed in 9faaf4d9, reintroduced in a1b1abae). Enforced by
+        // scripts/check-no-auto-prune.sh in CI.
 
         // Background embedding runs in embed_thread_ (dedicated thread, no rpc_mutex).
 
@@ -969,26 +971,6 @@ void Subconscious::run_correction_promotion() {
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Correction promotion failed: " << e.what() << "\n";
-    }
-}
-
-bool Subconscious::time_for_prune_episodes() const {
-    auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
-        std::chrono::steady_clock::now() - last_prune_episodes_).count();
-    return elapsed >= 6;
-}
-
-void Subconscious::run_prune_episodes() {
-    last_prune_episodes_ = std::chrono::steady_clock::now();
-    stats_.hygiene_runs++;
-    stats_.last_hygiene_at = now_ms();
-    try {
-        int64_t deleted = field_store_->prune_episodes(90, 10000);
-        if (deleted > 0) {
-            std::cerr << "[subconscious] Episode pruning: deleted " << deleted << " episodes\n";
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[subconscious] Episode pruning failed: " << e.what() << "\n";
     }
 }
 
