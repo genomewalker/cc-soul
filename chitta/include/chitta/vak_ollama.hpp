@@ -128,6 +128,7 @@ private:
             try {
                 auto [host, port, path] = parse_url(base_url_ + "/api/embed");
                 httplib::Client cli(host, port);
+                cli.set_connection_timeout(2, 0);  // dead node: fail fast, not 300s default
                 cli.set_read_timeout(TIMEOUT_MS / 1000, 0);
                 cli.set_write_timeout(5, 0);
                 auto res = cli.Post(path.c_str(), body_str, "application/json");
@@ -162,6 +163,7 @@ private:
             try {
                 auto [host, port, path] = parse_url(base_url_ + "/api/embed");
                 httplib::Client cli(host, port);
+                cli.set_connection_timeout(2, 0);  // dead node: fail fast, not 300s default
                 cli.set_read_timeout(TIMEOUT_MS / 1000, 0);
                 cli.set_write_timeout(5, 0);
 
