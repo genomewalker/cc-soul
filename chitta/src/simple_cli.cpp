@@ -1104,6 +1104,78 @@ void print_usage(const char* prog) {
               ;
 }
 
+#ifdef CHITTA_WITH_LLAMA_CPP
+// FailoverYantra — wraps the HTTP embed endpoint (dedicated GPU slurm job) and fails
+// over to the in-process GGUF when the endpoint dies mid-life (walltime, node loss).
+// Without this, a dead endpoint silently returns empty embeddings and every recall
+// degrades to BM25-only (hybrid nDCG@20 0.72 → 0.33) until a daemon restart re-runs
+// the embed-priority chain. The LlamaYantra fallback is constructed lazily on first
+// failover so the model costs no RAM while the endpoint is healthy. Once failed over
+// it stays on the GGUF until restart (the endpoint URL is start-time-resolved anyway).
+class FailoverYantra : public chitta::VakYantra {
+public:
+    FailoverYantra(std::shared_ptr<chitta::VakYantra> primary,
+                   std::string gguf_path, std::string mind_path)
+        : primary_(std::move(primary)),
+          gguf_path_(std::move(gguf_path)),
+          mind_path_(std::move(mind_path)) {}
+
+    chitta::Artha transform(const std::string& vak) override {
+        return transform(vak, chitta::EmbedMode::Document);
+    }
+
+    chitta::Artha transform(const std::string& vak, chitta::EmbedMode mode) override {
+        if (primary_->ready()) {
+            chitta::Artha a = primary_->transform(vak, mode);
+            if (!a.nu.data.empty()) return a;
+        }
+        auto fb = fallback();
+        return fb ? fb->transform(vak, mode) : chitta::Artha{};
+    }
+
+    std::vector<chitta::Artha> transform_batch(const std::vector<std::string>& vaks) override {
+        if (primary_->ready()) {
+            auto out = primary_->transform_batch(vaks);
+            for (const auto& a : out)
+                if (!a.nu.data.empty()) return out;  // any success → endpoint alive
+        }
+        auto fb = fallback();
+        return fb ? fb->transform_batch(vaks)
+                  : std::vector<chitta::Artha>(vaks.size());
+    }
+
+    size_t dimension() const override { return primary_->dimension(); }
+    bool ready() const override { return primary_->ready() || !fallback_failed_.load(); }
+    std::string execution_provider_name() const override {
+        return primary_->ready() ? primary_->execution_provider_name() : "CPU";
+    }
+
+private:
+    std::shared_ptr<chitta::VakYantra> fallback() {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!fallback_ && !fallback_failed_.load()) {
+            auto ll = std::make_shared<chitta::LlamaYantra>(gguf_path_, mind_path_);
+            if (ll->ready()) {
+                std::cerr << "[embed] endpoint down — failover to in-process GGUF "
+                          << gguf_path_ << "\n";
+                fallback_ = ll;
+            } else {
+                fallback_failed_ = true;
+                std::cerr << "[embed] endpoint down and GGUF failover failed: "
+                          << gguf_path_ << "\n";
+            }
+        }
+        return fallback_;
+    }
+
+    std::shared_ptr<chitta::VakYantra> primary_;
+    std::string gguf_path_, mind_path_;
+    std::mutex mu_;
+    std::shared_ptr<chitta::VakYantra> fallback_;
+    std::atomic<bool> fallback_failed_{false};
+};
+#endif
+
 int main(int argc, char* argv[]) {
     // CRITICAL: Set thread limits BEFORE any ONNX/OpenMP code loads
     // Must be at the very start of main() to take effect
@@ -1346,7 +1418,7 @@ int main(int argc, char* argv[]) {
         }
     }
 #ifdef CHITTA_WITH_LLAMA_CPP
-    if (!inner_yantra) {
+    {
         namespace fs = std::filesystem;
         std::string gguf;
         const char* env_model = std::getenv("CHITTA_EMBED_MODEL");
@@ -1374,8 +1446,14 @@ int main(int argc, char* argv[]) {
             if (fs::exists(p)) gguf = fs::canonical(p).string();
         }
         if (!gguf.empty()) {
-            auto llama_yantra = std::make_shared<chitta::LlamaYantra>(gguf, mind_path);
-            if (llama_yantra->ready()) inner_yantra = llama_yantra;
+            if (!inner_yantra) {
+                auto llama_yantra = std::make_shared<chitta::LlamaYantra>(gguf, mind_path);
+                if (llama_yantra->ready()) inner_yantra = llama_yantra;
+            } else {
+                // HTTP endpoint chosen — arm mid-life failover to the local GGUF.
+                inner_yantra = std::make_shared<FailoverYantra>(inner_yantra, gguf, mind_path);
+                std::cerr << "[embed] GGUF failover armed: " << gguf << "\n";
+            }
         }
     }
 #endif
