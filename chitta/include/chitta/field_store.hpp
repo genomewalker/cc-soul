@@ -307,6 +307,16 @@ char* cf_ledger_contradictions(const struct CfHandle* h);
 int64_t cf_predicate_attach(const struct CfHandle* h, uint64_t memory_id, const char* check_cmd);
 char*   cf_predicate_run(const struct CfHandle* h, uint64_t memory_id);
 char*   cf_predicate_list(const struct CfHandle* h, uint64_t memory_id);
+
+// Span Lane FFI (verbatim transcript atoms; no LLM/GPU on query path)
+char* cf_span_query(struct CfHandle* h, const char* query, const char* realm, size_t k);
+char* cf_span_backfill(struct CfHandle* h, const char* projects_dir);
+int64_t cf_span_ingest(struct CfHandle* h, const char* transcript_path);
+char* cf_span_stats(struct CfHandle* h);
+// Memory↔span edge
+char* cf_span_for_memory(struct CfHandle* h, uint64_t memory_id, size_t k);
+int64_t cf_span_ingest_memory(struct CfHandle* h, uint64_t memory_id, const char* text, const char* realm);
+char* cf_span_backfill_memories(struct CfHandle* h);
 }
 
 namespace chitta {
@@ -956,6 +966,58 @@ public:
     std::string recall_motif_value_json(const std::string& tool, const std::string& entity, size_t k = 5) {
         char* raw = cf_recall_motif_value(handle_, tool.c_str(), entity.c_str(), k);
         if (!raw) { cf_soft(-1, __func__); return "[]"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    // Span Lane: verbatim transcript atoms, realm-scoped, no LLM/GPU on query path.
+    std::string span_query_json(const std::string& query, const std::string& realm, size_t k = 6) {
+        char* raw = cf_span_query(handle_, query.c_str(),
+                                  realm.empty() ? nullptr : realm.c_str(), k);
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string span_backfill_json(const std::string& projects_dir) {
+        char* raw = cf_span_backfill(handle_, projects_dir.c_str());
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    int64_t span_ingest(const std::string& transcript_path) {
+        return cf_span_ingest(handle_, transcript_path.c_str());
+    }
+
+    std::string span_stats_json() {
+        char* raw = cf_span_stats(handle_);
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    // Memory→span forward edge: the verbatim atoms a recalled memory references.
+    std::string span_for_memory_json(uint64_t memory_id, size_t k = 6) {
+        char* raw = cf_span_for_memory(handle_, memory_id, k);
+        if (!raw) { cf_soft(-1, __func__); return "[]"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    int64_t span_ingest_memory(uint64_t memory_id, const std::string& text, const std::string& realm) {
+        return cf_span_ingest_memory(handle_, memory_id, text.c_str(),
+                                     realm.empty() ? nullptr : realm.c_str());
+    }
+
+    std::string span_backfill_memories_json() {
+        char* raw = cf_span_backfill_memories(handle_);
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;

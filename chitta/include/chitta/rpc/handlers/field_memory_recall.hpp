@@ -117,6 +117,11 @@
     ToolResult tool_consolidation_pass(const json& params);
     ToolResult tool_refutation_stats(const json& params);
     ToolResult tool_recall_motif_value(const json& params);
+    // Span Lane: verbatim transcript atoms (realm-scoped, no LLM/GPU on query path)
+    ToolResult tool_span_query(const json& params);
+    ToolResult tool_span_backfill(const json& params);
+    ToolResult tool_span_backfill_memories(const json& params);
+    ToolResult tool_span_stats(const json& params);
     ToolResult tool_executor_flush(const json& params);
     ToolResult tool_list_policies(const json& params);
     ToolResult tool_recall_true_counterfactual(const json& params);

@@ -208,6 +208,20 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"limit", "Max results", false, "10"},
       {"realm", "Memory realm", false, nullptr}}},
 
+    {"span_query", "Retrieve verbatim transcript atoms (paths, URLs, file:line, bash commands, errors). Exact-substring, no LLM/GPU, realm-scoped.",
+     {{"query", "Substring/token to match", true, nullptr},
+      {"realm", "Restrict to realm (empty = unscoped)", false, nullptr},
+      {"k", "Max atoms", false, "6"}}},
+
+    {"span_backfill", "Backfill the span lane over all transcripts (incremental, idempotent).",
+     {{"projects_dir", "Transcript root (default ~/.claude/projects)", false, nullptr}}},
+
+    {"span_backfill_memories", "Backfill the memory↔span edge over all live memories (idempotent).",
+     {}},
+
+    {"span_stats", "Span lane size: unique atoms, disk bytes, redactions.",
+     {}},
+
     {"smart_recall", "Intelligent recall with automatic query intent classification",
      {{"query", "Natural language query (e.g., 'last week', 'show preferences')", true, nullptr},
       {"limit", "Max results", false, "20"},

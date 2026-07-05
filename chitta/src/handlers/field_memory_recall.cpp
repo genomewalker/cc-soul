@@ -22,6 +22,21 @@ int64_t parse_date_ms(const std::string& s) {
     std::time_t epoch = timegm(&t);
     return epoch < 0 ? 0 : static_cast<int64_t>(epoch) * 1000;
 }
+// Span Lane class (u8) → human label. UUID/HEX classes exist in the enum but are
+// intentionally not extracted; kept here so labels stay aligned if that changes.
+const char* span_class_label(int c) {
+    switch (c) {
+        case 0: return "path";
+        case 1: return "url";
+        case 2: return "uuid";
+        case 3: return "hex";
+        case 4: return "issue";
+        case 5: return "file:line";
+        case 6: return "bash";
+        case 7: return "error";
+        default: return "atom";
+    }
+}
 } // namespace
 
 namespace chitta {
@@ -419,7 +434,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     ss << "Found " << hits.size() << " results";
     if (!realm.empty()) ss << " in realm '" << realm << "'";
     ss << ":\n";
-    for (const auto& r : results_json) {
+    for (auto& r : results_json) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "]";
         int64_t ts = r.value("ts_ms", int64_t(0));
@@ -431,11 +446,53 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             ss << " (on: " << buf << ")";
         }
         ss << " " << r.value("text", "").substr(0, 400) << "\n";
+
+        // Memory→span forward edge: hyperlink this belief to the exact atoms its
+        // text references (paths/commands/ids), un-paraphrased. Directly fixes the
+        // ellesmere class — the distilled belief now carries the verbatim path.
+        uint64_t mid = 0;
+        try { mid = std::stoull(r.value("id", "0")); } catch (...) {}
+        if (mid != 0) {
+            auto linked = json::parse(field_store_->span_for_memory_json(mid, 4), nullptr, false);
+            if (linked.is_array() && !linked.empty()) {
+                r["atoms"] = linked;
+                ss << "    ↳ ";
+                bool first = true;
+                for (const auto& a : linked) {
+                    if (!first) ss << " · ";
+                    first = false;
+                    ss << a.value("text", "");
+                }
+                ss << "\n";
+            }
+        }
+    }
+
+    // Co-present the Span Lane: a separate, capped, realm-scoped block of verbatim
+    // transcript atoms. Disjoint from distilled memories above — no RRF fusion, no
+    // payload fetch, exact text shown inline. Realm-scoped by construction so a span
+    // seen only in project A never surfaces in a project-B recall (case #2).
+    json atoms_json = json::array();
+    {
+        std::string span_raw = field_store_->span_query_json(query, realm, 6);
+        auto atoms = json::parse(span_raw, nullptr, false);
+        if (atoms.is_array() && !atoms.empty()) {
+            atoms_json = atoms;
+            ss << "\n--- verbatim atoms (transcript-sourced, exact, no LLM) ---\n";
+            for (const auto& a : atoms) {
+                ss << "  [" << span_class_label(a.value("class", -1)) << "] "
+                   << a.value("text", "");
+                uint32_t cnt = a.value("count", 0u);
+                if (cnt > 1) ss << "  (x" << cnt << ")";
+                ss << "\n";
+            }
+        }
     }
 
     std::string recall_status = results_json.empty() ? "empty" : (weak ? "weak" : "ok");
     auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm},
                                             {"status", recall_status},
+                                            {"atoms", atoms_json},
                                             {"abstain", weak}, {"max_relevance", max_rel}});
     fire_recall_callback(results_json, 1);
     return result;
@@ -1149,6 +1206,80 @@ ToolResult FieldRpcHandler::tool_recall_motif_value(const json& params) {
         ss << "No motif data yet for " << tool << "(" << entity << ") — accumulate more events.";
     }
     return ToolResult::ok(ss.str(), {{"hits", parsed.is_array() ? parsed : json::array()}});
+}
+
+ToolResult FieldRpcHandler::tool_span_query(const json& params) {
+    std::string query = params.value("query", "");
+    std::string realm = params.value("realm", "");
+    size_t k          = static_cast<size_t>(params.value("k", 6));
+    if (query.empty())
+        return ToolResult::error("query is required");
+    std::string raw = field_store_->span_query_json(query, realm, k);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_array() && !parsed.empty()) {
+        ss << "Verbatim atoms" << (realm.empty() ? "" : " [realm=" + realm + "]")
+           << " (" << parsed.size() << ", transcript-sourced, no LLM):\n";
+        for (const auto& h : parsed) {
+            ss << "  [" << span_class_label(h.value("class", -1)) << "] "
+               << h.value("text", "");
+            uint32_t count = h.value("count", 0u);
+            if (count > 1) ss << "  (x" << count << ")";
+            std::string sess = h.value("session", "");
+            if (!sess.empty()) ss << "  @" << sess << ":" << h.value("line", 0u);
+            ss << "\n";
+        }
+    } else {
+        ss << "No verbatim atoms for \"" << query << "\""
+           << (realm.empty() ? "" : " in realm " + realm) << ".";
+    }
+    return ToolResult::ok(ss.str(), {{"atoms", parsed.is_array() ? parsed : json::array()}});
+}
+
+ToolResult FieldRpcHandler::tool_span_backfill(const json& params) {
+    std::string dir = params.value("projects_dir", "");
+    if (dir.empty()) {
+        const char* home = std::getenv("HOME");
+        dir = std::string(home ? home : "") + "/.claude/projects";
+    }
+    std::string raw = field_store_->span_backfill_json(dir);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "span_backfill: unique=" << parsed.value("unique", 0)
+           << " new=" << parsed.value("new", 0)
+           << " redacted=" << parsed.value("redacted", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_span_backfill_memories(const json& /*params*/) {
+    std::string raw = field_store_->span_backfill_memories_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "span_backfill_memories: linked=" << parsed.value("linked", 0)
+           << " new_spans=" << parsed.value("new_spans", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_span_stats(const json& /*params*/) {
+    std::string raw = field_store_->span_stats_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "span_stats: unique=" << parsed.value("unique", 0)
+           << " disk_bytes=" << parsed.value("disk_bytes", 0)
+           << " redacted_total=" << parsed.value("redacted_total", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
 ToolResult FieldRpcHandler::tool_executor_flush(const json& /*params*/) {

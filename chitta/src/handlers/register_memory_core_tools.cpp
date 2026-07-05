@@ -540,6 +540,32 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["recall_motif_value"] = [this](const json& p) { return tool_recall_motif_value(p); };
 
+    tools_.push_back({{"name","span_query"},{"description","Retrieve verbatim transcript atoms (file paths, URLs, file:line locators, bash commands, error signatures) captured across all sessions. No LLM/GPU: exact-substring recall over a deduplicated span index. Realm-scoped by default to prevent cross-project bleed. Use when you need an exact locator you saw before, not a paraphrase."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"query",  {{"type","string"},{"description","Substring or token to match against stored atoms"}}},
+            {"realm",  {{"type","string"},{"description","Restrict to this realm (project); empty = unscoped"}}},
+            {"k",      {{"type","integer"},{"description","Max atoms to return (default 6)"}}}
+        }},{"required",{"query"}}}}
+    });
+    handlers_["span_query"] = [this](const json& p) { return tool_span_query(p); };
+
+    tools_.push_back({{"name","span_backfill"},{"description","Backfill the span lane over all transcripts under projects_dir (default ~/.claude/projects). Incremental + idempotent via per-file watermarks. Reports unique atoms, new atoms, redaction count."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"projects_dir", {{"type","string"},{"description","Transcript root (default ~/.claude/projects)"}}}
+        }}}}
+    });
+    handlers_["span_backfill"] = [this](const json& p) { return tool_span_backfill(p); };
+
+    tools_.push_back({{"name","span_backfill_memories"},{"description","Backfill the memory↔span edge: run the atom extractor over every live memory's text so distilled beliefs link to the verbatim paths/commands/ids they mention. Idempotent (per-memory content hash); superseded memories relink. Reports memories linked + new spans."},
+        {"inputSchema",{{"type","object"},{"properties",{}}}}
+    });
+    handlers_["span_backfill_memories"] = [this](const json& p) { return tool_span_backfill_memories(p); };
+
+    tools_.push_back({{"name","span_stats"},{"description","Report span lane size: unique atoms, on-disk bytes, total redactions."},
+        {"inputSchema",{{"type","object"},{"properties",{}}}}
+    });
+    handlers_["span_stats"] = [this](const json& p) { return tool_span_stats(p); };
+
     tools_.push_back({{"name","executor_flush"},{"description","Promote shadow intervention policies that have passed the 20-event / lift>0.15 gate, demote policies whose source rule is refuted, and report active policy stats. Safe to call any time; idempotent."},
         {"inputSchema",{{"type","object"},{"properties",{}}}}
     });
