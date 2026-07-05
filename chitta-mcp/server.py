@@ -236,6 +236,8 @@ ADVANCED_TOOLS = {
     "ledger_health",
     # Falsifiable memories / predicate store (v6.1)
     "predicate_attach", "predicate_run", "predicate_list",
+    # Span lane maintenance (span_query stays listed; these are backfill/diagnostics)
+    "span_backfill", "span_backfill_memories", "span_stats",
 }
 
 # Combined set of tools to hide from listing (but still callable)
