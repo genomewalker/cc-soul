@@ -55,6 +55,7 @@ private:
     std::vector<float> embed_text(const std::string& text);
     static std::string category_to_kind(const std::string& cat);
     void write_failed_item(const std::string& line, const std::exception& e);
+    static void write_checkpoint(const std::string& ckpt_path, size_t processed);
 
     FieldStore& field_store_;
     VakYantra* yantra_;
