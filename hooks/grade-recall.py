@@ -553,7 +553,7 @@ def main():
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-reranker", action="store_true", help="skip cross-encoder re-ranking")
-    ap.add_argument("--strategy", default="", help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank)")
+    ap.add_argument("--strategy", default="hybrid", help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank). Default hybrid = what prompt-core.sh production recall uses; measured strict superset of pure-semantic on the golden set (pass -1 abstain +2, 0 regressions).")
     a = ap.parse_args()
     if a.no_reranker:
         global _reranker
