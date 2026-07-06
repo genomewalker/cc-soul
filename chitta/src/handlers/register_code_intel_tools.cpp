@@ -42,7 +42,8 @@ void FieldRpcHandler::register_code_intel_tools() {
     tools_.push_back({{"name","symbol_callees"},{"description","Find all symbols that the given symbol calls"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"name",{{"type","string"}}},{"id",{{"type","integer"}}},
-            {"kind",{{"type","string"}}},{"project",{{"type","string"}}}
+            {"kind",{{"type","string"}}},{"project",{{"type","string"}}},
+            {"path",{{"type","string"},{"description","Path substring to disambiguate duplicate names"}}}
         }}}}
     });
     handlers_["symbol_callees"] = [this](const json& p) { return tool_symbol_callees(p); };

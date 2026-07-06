@@ -78,6 +78,14 @@
         if (exact.empty()) return from_cf_hit(hits[0]);
         if (exact.size() == 1) return exact[0];
 
+        // Disambiguate by path substring (duplicate names across checkouts)
+        std::string path_filter = params.value("path", "");
+        if (!path_filter.empty()) {
+            for (const auto& s : exact) {
+                if (s.file_path.find(path_filter) != std::string::npos) return s;
+            }
+        }
+
         // Disambiguate by kind
         std::string kind = params.value("kind", "");
         if (!kind.empty()) {

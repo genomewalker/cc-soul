@@ -189,6 +189,9 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
     }
 
     size_t max_files = static_cast<size_t>(params.value("max_files", 500));
+    // force=true re-extracts unchanged files (backfill after extractor fixes);
+    // normal edits still flow through the content-hash gate.
+    bool force = params.value("force", false);
 
     std::vector<std::string> exclude = {
         "node_modules", ".git", "build", "__pycache__", "venv", "target", ".venv",
@@ -269,7 +272,7 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
         auto [file_id, was_updated] = field_store_->upsert_code_file_v2(
             fp, project, mtime, hash, commit, author, git_ts);
 
-        if (was_updated) {
+        if (was_updated || force) {
             changed_files.insert(fp);
         }
     }
@@ -425,39 +428,72 @@ ToolResult FieldRpcHandler::tool_find_symbol(const json& params) {
 ToolResult FieldRpcHandler::tool_symbol_callers(const json& params) {
     if (subconscious_) subconscious_->notify_query();
 
-    auto sym_opt = resolve_symbol_field(params);
-    if (!sym_opt) return ToolResult::error("Symbol not found. Provide 'name' or 'id'.");
-    const auto& sym = *sym_opt;
+    std::string name = params.value("name", "");
+    if (name.empty()) return ToolResult::error("Symbol name is required");
+    size_t limit = static_cast<size_t>(params.value("limit", 20));
 
-    auto caller_ids = field_store_->get_callers(sym.id);
-    if (caller_ids.empty()) {
-        return ToolResult::ok(
-            "No callers found for " + sym.kind + " " + sym.name,
-            {{"symbol", sym.name}, {"callers", json::array()}}
-        );
-    }
+    // Callsite triplets store the caller as "file:line" (subject). Resolve
+    // that locus to the innermost enclosing function/method for a
+    // human-readable caller name.
+    auto enclosing_symbol_at =
+        [this](const std::string& locus) -> std::optional<ResolvedSymbol> {
+        size_t colon = locus.rfind(':');
+        if (colon == std::string::npos) return std::nullopt;
+        std::string file = locus.substr(0, colon);
+        uint32_t line = 0;
+        try { line = static_cast<uint32_t>(std::stoul(locus.substr(colon + 1))); }
+        catch (...) { return std::nullopt; }
 
-    std::ostringstream ss;
-    ss << "Found " << caller_ids.size() << " callers for " << sym.kind << " " << sym.name << ":\n";
-
-    json callers_json = json::array();
-    for (uint64_t cid : caller_ids) {
-        // Find the caller symbol by scanning
-        auto all = field_store_->search_symbols_by_name("", 1000);
-        for (const auto& h : all) {
-            if (h.symbol_id == cid) {
-                auto c = from_cf_hit(h);
-                ss << "  " << c.kind << " " << c.name << " @" << c.file_path << ":" << c.line_start << "\n";
-                callers_json.push_back(sym_to_json(c));
-                break;
+        std::optional<ResolvedSymbol> best;
+        for (const auto& h : field_store_->symbols_in_file(file)) {
+            std::string kind(reinterpret_cast<const char*>(h.kind));
+            if (kind != "function" && kind != "method") continue;
+            if (h.line_start > line || h.line_end < line) continue;
+            if (!best || (h.line_end - h.line_start) <
+                         (best->line_end - best->line_start)) {
+                best = from_cf_hit(h);
             }
         }
+        return best;
+    };
+
+    // Call graph lives in triplets: <file:line> -calls-> <callee_leaf>
+    json arr;
+    try { arr = json::parse(field_store_->query_object(name)); }
+    catch (...) { arr = json::array(); }
+
+    std::ostringstream ss;
+    json callers_json = json::array();
+    std::unordered_set<std::string> seen;
+    for (const auto& t : arr) {
+        if (t.value("predicate", "") != "calls") continue;
+        std::string locus = t.value("subject", "");
+        auto enc = enclosing_symbol_at(locus);
+        if (enc) {
+            const auto& c = *enc;
+            if (!seen.insert(c.name + "@" + c.file_path).second) continue;
+            ss << "  " << c.kind << " " << c.name << " @" << c.file_path
+               << ":" << c.line_start << " (callsite " << locus << ")\n";
+            json cj = sym_to_json(c);
+            cj["callsite"] = locus;
+            callers_json.push_back(cj);
+        } else {
+            // No indexed enclosing symbol (top-level code, macro body) —
+            // still report the raw callsite locus.
+            if (!seen.insert(locus).second) continue;
+            ss << "  callsite " << locus << "\n";
+            callers_json.push_back({{"callsite", locus}});
+        }
+        if (callers_json.size() >= limit) break;
     }
 
-    return ToolResult::ok(ss.str(), {
-        {"symbol", sym.name}, {"symbol_id", sym.id},
-        {"callers", callers_json}, {"count", callers_json.size()}
-    });
+    if (callers_json.empty()) {
+        return ToolResult::ok("No callers found for " + name,
+            {{"symbol", name}, {"callers", json::array()}});
+    }
+    return ToolResult::ok(
+        "Found " + std::to_string(callers_json.size()) + " callers for " + name + ":\n" + ss.str(),
+        {{"symbol", name}, {"callers", callers_json}, {"count", callers_json.size()}});
 }
 
 ToolResult FieldRpcHandler::tool_symbol_callees(const json& params) {
@@ -466,35 +502,41 @@ ToolResult FieldRpcHandler::tool_symbol_callees(const json& params) {
     auto sym_opt = resolve_symbol_field(params);
     if (!sym_opt) return ToolResult::error("Symbol not found. Provide 'name' or 'id'.");
     const auto& sym = *sym_opt;
+    size_t limit = static_cast<size_t>(params.value("limit", 50));
 
-    auto callee_ids = field_store_->get_callees(sym.id);
-    if (callee_ids.empty()) {
-        return ToolResult::ok(
-            "No callees found for " + sym.kind + " " + sym.name,
-            {{"symbol", sym.name}, {"callees", json::array()}}
-        );
-    }
-
+    // Callsite triplet subjects are "file:line" — walk the symbol's line
+    // range and collect its call edges.
     std::ostringstream ss;
-    ss << "Found " << callee_ids.size() << " callees for " << sym.kind << " " << sym.name << ":\n";
-
     json callees_json = json::array();
-    for (uint64_t cid : callee_ids) {
-        auto all = field_store_->search_symbols_by_name("", 1000);
-        for (const auto& h : all) {
-            if (h.symbol_id == cid) {
-                auto c = from_cf_hit(h);
-                ss << "  " << c.kind << " " << c.name << " @" << c.file_path << ":" << c.line_start << "\n";
-                callees_json.push_back(sym_to_json(c));
-                break;
-            }
+    std::unordered_set<std::string> seen;
+    for (uint32_t line = sym.line_start;
+         line <= sym.line_end && callees_json.size() < limit; line++) {
+        json arr;
+        try {
+            arr = json::parse(field_store_->query_subject(
+                sym.file_path + ":" + std::to_string(line)));
+        } catch (...) { continue; }
+        for (const auto& t : arr) {
+            if (t.value("predicate", "") != "calls") continue;
+            std::string callee = t.value("object", "");
+            if (callee.empty() || !seen.insert(callee).second) continue;
+            ss << "  " << sym.name << " -> " << callee
+               << " @" << sym.file_path << ":" << line << "\n";
+            callees_json.push_back({{"callee", callee}, {"line", line}});
+            if (callees_json.size() >= limit) break;
         }
     }
 
-    return ToolResult::ok(ss.str(), {
-        {"symbol", sym.name}, {"symbol_id", sym.id},
-        {"callees", callees_json}, {"count", callees_json.size()}
-    });
+    if (callees_json.empty()) {
+        return ToolResult::ok(
+            "No callees found for " + sym.kind + " " + sym.name,
+            {{"symbol", sym.name}, {"callees", json::array()}});
+    }
+    return ToolResult::ok(
+        "Found " + std::to_string(callees_json.size()) + " callees for " +
+            sym.kind + " " + sym.name + ":\n" + ss.str(),
+        {{"symbol", sym.name}, {"symbol_id", sym.id},
+         {"callees", callees_json}, {"count", callees_json.size()}});
 }
 
 ToolResult FieldRpcHandler::tool_read_symbol(const json& params) {
@@ -567,8 +609,24 @@ ToolResult FieldRpcHandler::tool_search_symbols(const json& params) {
     if (query.empty()) return ToolResult::error("Query is required");
 
     std::string kind = params.value("kind", "");
+    std::string project = params.value("project", "");
     size_t limit = static_cast<size_t>(params.value("limit", 10));
     bool is_code_query = looks_like_code_query(query);
+
+    // Project scope: restrict hits to the project's indexed files.
+    std::unordered_set<std::string> project_files;
+    if (!project.empty()) {
+        try {
+            auto files = json::parse(field_store_->list_code_files(project));
+            for (const auto& f : files) project_files.insert(f.value("path", ""));
+        } catch (...) {}
+        if (project_files.empty()) {
+            return ToolResult::ok("No indexed files for project: " + project,
+                {{"symbols", json::array()}, {"mode", "none"}});
+        }
+    }
+    // Over-fetch when filtering so the scope doesn't starve results.
+    size_t fetch = project_files.empty() ? limit : limit * 8;
 
     json symbols_json = json::array();
     std::unordered_set<uint64_t> seen_ids;
@@ -576,7 +634,7 @@ ToolResult FieldRpcHandler::tool_search_symbols(const json& params) {
     std::string search_mode;
 
     // BM25-style name search
-    auto bm25_hits = field_store_->search_symbols_by_name(query, limit);
+    auto bm25_hits = field_store_->search_symbols_by_name(query, fetch);
     if (!bm25_hits.empty()) search_mode = "name";
 
     // Semantic search if not code query and yantra available
@@ -584,7 +642,7 @@ ToolResult FieldRpcHandler::tool_search_symbols(const json& params) {
     if (!is_code_query && yantra_) {
         auto emb = embed_query(query);
         if (!emb.empty()) {
-            semantic_hits = field_store_->search_symbols_semantic(emb, limit);
+            semantic_hits = field_store_->search_symbols_semantic(emb, fetch);
             search_mode = bm25_hits.empty() ? "semantic" : "hybrid";
         }
     }
@@ -593,6 +651,7 @@ ToolResult FieldRpcHandler::tool_search_symbols(const json& params) {
         if (seen_ids.count(h.symbol_id) || symbols_json.size() >= limit) return;
         auto s = from_cf_hit(h);
         if (!kind.empty() && s.kind != kind) return;
+        if (!project_files.empty() && !project_files.count(s.file_path)) return;
         seen_ids.insert(h.symbol_id);
 
         std::string disp = display_path(s.file_path);
@@ -837,7 +896,16 @@ ToolResult FieldRpcHandler::tool_codebase_overview(const json& params) {
         return ToolResult::ok(ss.str(), {{"files", 0}});
     }
 
-    size_t total_symbols = field_store_->symbol_count();
+    // Scoped count: sum symbols per project file. Global count only when
+    // no project filter is given.
+    size_t total_symbols = 0;
+    if (project.empty()) {
+        total_symbols = field_store_->symbol_count();
+    } else {
+        for (const auto& f : files) {
+            total_symbols += field_store_->symbols_in_file(f.value("path", "")).size();
+        }
+    }
     std::ostringstream ss;
     ss << "Codebase: " << (project.empty() ? "(all)" : project) << "\n";
     ss << "  Files: " << files.size() << "\n";
@@ -877,10 +945,23 @@ ToolResult FieldRpcHandler::tool_clear_codebase(const json& params) {
         });
     }
 
+    // Drop the project's callsite triplets first, or the call graph keeps
+    // orphaned <file:line> -calls-> edges after the symbols are gone.
+    size_t triplets_invalidated = 0;
+    try {
+        auto files = json::parse(field_store_->list_code_files(project));
+        for (const auto& f : files) {
+            field_store_->invalidate_triplets_by_source_file(f.value("path", ""));
+            triplets_invalidated++;
+        }
+    } catch (...) {}
+
     int rc = field_store_->clear_project(project);
     std::ostringstream ss;
-    ss << "Cleared codebase: " << project << " (rc=" << rc << ")";
-    return ToolResult::ok(ss.str(), {{"project", project}, {"rc", rc}});
+    ss << "Cleared codebase: " << project << " (rc=" << rc
+       << ", callsite triplets invalidated for " << triplets_invalidated << " files)";
+    return ToolResult::ok(ss.str(), {{"project", project}, {"rc", rc},
+        {"files_triplet_invalidated", triplets_invalidated}});
 }
 
 ToolResult FieldRpcHandler::tool_clear_triplets(const json& params) {
