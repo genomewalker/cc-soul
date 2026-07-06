@@ -85,10 +85,16 @@ ABSTAIN_BAND_EPS = 0.05         # posterior-band: gold/non-gold score gap < ε �
 # C2 self-monitoring ("feeling of knowing") — monotone binning of the daemon's
 # Platt-calibrated max_relevance (field_memory_recall.cpp: sigma(3.27*cos-0.85)),
 # a production hybrid-lane scalar: no cross-encoder, no torch, endpoint-free.
-# Calibrated on GOLDEN_SET v6 + C2_PROBES (2026-07): gold-hit@3 by bin
-# KNOWN 8/9 (.89) > THIN 9/21 (.43) > UNKNOWN 0/6 (.00); hit@10 9/9 > 10/21 > 0/6.
-C2_KNOWN_MAXREL = 0.86
-C2_THIN_MAXREL = 0.81  # all 6 out-of-domain probes < 0.81; all 30 answerable >= 0.814
+#
+# 2-BAND (v5.70.1 correction): the 3-band KNOWN(>=.86)/THIN(>=.81) split shipped
+# in v5.70.0 calibrated on an earlier store state, but store drift inverted the
+# KNOWN-vs-THIN boundary (re-measured KNOWN gold-hit@3 .62 < THIN .64) and no
+# threshold restored monotonic k=3 separation. Re-scoped to 2 honest bands:
+# KNOWN (confident-but-verify, maxrel >= .81) vs UNKNOWN (< .81). KNOWN-vs-UNKNOWN
+# IS monotonic — all 6 probes UNKNOWN, hit@10 clean. C2_THIN_MAXREL retained as
+# an alias of the single boundary so ignition_admit and older refs keep working.
+C2_KNOWN_MAXREL = 0.81   # single confident-band cut (was 0.86 in the 3-band)
+C2_THIN_MAXREL = 0.81    # boundary: all 6 out-of-domain probes < .81; all 30 answerable >= .814
 
 # Out-of-domain probes: no gold exists by construction — must land in UNKNOWN.
 C2_PROBES = [
@@ -102,9 +108,27 @@ C2_PROBES = [
 
 
 def c2_tag(max_relevance: float, n_results: int) -> str:
-    if n_results == 0 or max_relevance < C2_THIN_MAXREL:
+    # 2-band: confident-but-verify (KNOWN) vs boundary (UNKNOWN).
+    if n_results == 0 or max_relevance < C2_KNOWN_MAXREL:
         return "UNKNOWN"
-    return "KNOWN" if max_relevance >= C2_KNOWN_MAXREL else "THIN"
+    return "KNOWN"
+
+
+def _platt(cos: float) -> float:
+    """Daemon's Platt calibration (field_memory_recall.cpp:521) applied per-item.
+    max_relevance == max(_platt(sim) for items); ignition uses the same scale."""
+    return 1.0 / (1.0 + math.exp(-(3.27 * cos - 0.85)))
+
+
+def ignition_admit(platt_scores: list[float], budget: int = 3) -> tuple[list[int], list[int]]:
+    """Per-item bimodal admit on the C2-calibrated scale: >= KNOWN cut ignites
+    (admitted, up to prod budget), [THIN, KNOWN) is the dead-band ([gap]),
+    below THIN drops. A flat low recall ignites nothing — the no-ignition case.
+    Returns (admitted_idx, gap_idx)."""
+    admitted = [i for i, p in enumerate(platt_scores) if p >= C2_KNOWN_MAXREL][:budget]
+    gap = [i for i, p in enumerate(platt_scores)
+           if C2_THIN_MAXREL <= p < C2_KNOWN_MAXREL and i not in admitted]
+    return admitted, gap
 
 def _load_reranker():
     global _reranker
@@ -331,7 +355,8 @@ def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
         cmd += ["--strategy", strategy]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
-        return json.loads(out.stdout)
+        parsed = json.loads(out.stdout)
+        return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
 
@@ -575,6 +600,14 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     c2_full = _recall_full(item["query"], 10, "hybrid")
     c2_maxrel = c2_full.get("max_relevance", 0.0)
     c2 = c2_tag(c2_maxrel, len(c2_full.get("results", [])))
+
+    # Ignition eval data: per-item Platt + gold positions on the SAME hybrid pool
+    # C2 read — baseline and treatment share one recall, same-session by construction.
+    hyb = c2_full.get("results", [])
+    hyb_platt = [_platt(h.get("similarity", 0.0)) for h in hyb]
+    hyb_ids = [h["id"] for h in hyb]
+    hyb_gold = sorted({i for i, h in enumerate(hyb) if sig in h.get("text", "").lower()}
+                      | {hyb_ids.index(g) for g in ids if g in hyb_ids})
     result_ids = [r["id"] for r in results]
     result_texts = [r.get("text", "").lower() for r in results]
 
@@ -625,6 +658,8 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "gold_max_score": gold_max_score,
         "c2": c2,
         "c2_maxrel": c2_maxrel,
+        "hyb_platt": hyb_platt,
+        "hyb_gold_positions": hyb_gold,
         "g_entropy": g_entropy(scores) if scores else 0.0,
         "s_entropy": s_entropy_from_embeddings(result_ids) if result_ids else (0.0 if _HAS_NUMPY else None),
     }
@@ -642,6 +677,10 @@ def main():
     ap.add_argument("--c2", action="store_true",
                     help="C2 calibration report: bin queries by KNOWN/THIN/UNKNOWN, "
                          "verify gold-hit-rate is monotonic; exit 1 if miscalibrated")
+    ap.add_argument("--ignition", action="store_true",
+                    help="ignition A/B on one shared hybrid pool per query: baseline "
+                         "top-3 admit vs per-item bimodal admit (Platt >= C2 KNOWN cut); "
+                         "reports admitted-are-gold precision + gold coverage; exit 1 on kill")
     a = ap.parse_args()
     if a.no_reranker:
         global _reranker
@@ -669,12 +708,13 @@ def main():
 
     if a.c2:
         # Calibration = honesty check: the tag must PREDICT gold presence.
-        bins = {"KNOWN": [], "THIN": [], "UNKNOWN": []}
+        # 2-band (v5.70.1): KNOWN (confident-but-verify, maxrel >= .81) vs UNKNOWN.
+        bins = {"KNOWN": [], "UNKNOWN": []}
         for r in records:
             bins[r["c2"]].append(r)
-        print(f"{BOLD}C2 calibration (KNOWN>={C2_KNOWN_MAXREL} THIN>={C2_THIN_MAXREL} on max_relevance){RESET}")
+        print(f"{BOLD}C2 calibration 2-band (KNOWN>={C2_KNOWN_MAXREL} on max_relevance){RESET}")
         rates = []
-        for tag in ("KNOWN", "THIN", "UNKNOWN"):
+        for tag in ("KNOWN", "UNKNOWN"):
             b = bins[tag]
             h3 = sum(1 for r in b if any(p < 3 for p in r["gold_positions"]))
             h10 = sum(1 for r in b if any(p < 10 for p in r["gold_positions"]))
@@ -698,6 +738,42 @@ def main():
         ok = monotonic and probes_ok
         verdict = GREEN + "CALIBRATED" + RESET if ok else RED + "MISCALIBRATED" + RESET
         print(f"\n{BOLD}{verdict}{RESET} monotonic={monotonic} probes_not_known={probes_ok}")
+        sys.exit(0 if ok else 1)
+
+    if a.ignition:
+        # A/B on the shared per-query hybrid pool: baseline = prod fixed top-3 admit,
+        # treatment = ignition_admit. Same recall, same ranking — nDCG is identical
+        # by construction (ignition is admit-only); the treatment metric is precision.
+        b_adm = b_gold = t_adm = t_gold = t_gap = 0
+        b_hits = t_hits = 0
+        no_ignite = []
+        for r in records:
+            gold = set(r["hyb_gold_positions"])
+            base = list(range(min(3, len(r["hyb_platt"]))))
+            adm, gap = ignition_admit(r["hyb_platt"])
+            b_adm += len(base); b_gold += len(gold & set(base))
+            t_adm += len(adm);  t_gold += len(gold & set(adm)); t_gap += len(gap)
+            b_hits += bool(gold & set(base)); t_hits += bool(gold & set(adm))
+            if not adm:
+                no_ignite.append(r["desc"])
+            if not a.quiet:
+                print(f"  base {len(gold & set(base))}/{len(base)}  ign {len(gold & set(adm))}/{len(adm)}"
+                      f" gap:{len(gap)}  maxrel={r['c2_maxrel']:.3f}  {r['desc'][:44]}")
+        n = len(records)
+        pool_ndcg = sum(ndcg(r["hyb_gold_positions"], max(len(r["gold_ids"]), len(r["hyb_gold_positions"]), 1), 10)
+                        for r in records) / n if n else 0.0
+        bp = b_gold / b_adm if b_adm else 0.0
+        tp = t_gold / t_adm if t_adm else 0.0
+        print(f"\n{BOLD}Ignition A/B (n={n}, shared hybrid pool, no-rerank){RESET}")
+        print(f"  nDCG@10 (identical both arms): {pool_ndcg:.4f}")
+        print(f"  baseline top-3 : precision {b_gold}/{b_adm} ({bp:.3f})  coverage {b_hits}/{n} ({b_hits/n:.3f})")
+        print(f"  ignition       : precision {t_gold}/{t_adm} ({tp:.3f})  coverage {t_hits}/{n} ({t_hits/n:.3f})"
+              f"  dead-band items {t_gap}")
+        if no_ignite:
+            print(f"  no-ignition queries ({len(no_ignite)}): " + "; ".join(d[:32] for d in no_ignite))
+        ok = tp > bp and t_hits >= b_hits
+        verdict = GREEN + "PASS" + RESET if ok else RED + "KILL" + RESET
+        print(f"\n{BOLD}{verdict}{RESET} precision_up={tp > bp} coverage_kept={t_hits >= b_hits}")
         sys.exit(0 if ok else 1)
 
     mean_ndcg = sum(r["ndcg"] for r in records) / len(records) if records else 0.0

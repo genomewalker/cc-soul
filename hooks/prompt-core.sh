@@ -109,6 +109,12 @@ record_ingest_metric "true"
 # Use clean query for all recall and pattern detection (strip markup from QUERY)
 QUERY="$CLEAN_QUERY"
 
+# Intent detection must see the user's literal words: the anaphora enrichment
+# below is a RECALL anchor, and letting it feed the intent classifier both
+# triggers on the previous turn's words and stores the previous turn's text
+# inside [preference]/[belief] memories (echo-chamber contamination).
+_INTENT_QUERY="$QUERY"
+
 # Context enrichment: short/anaphoric queries ("add that", "do it", "fix this") have
 # no referent — prepend the previous turn so recall has an anchor.
 _word_count=$(echo "$QUERY" | wc -w)
@@ -256,6 +262,24 @@ else
        printf '%s' "$_hyb_out" | grep -qE '^(No (memories|messages|results) found|Found 0 results)'; then
         _c2_pct=0
     fi
+    # Hybrid-timeout degrade: if the hybrid lane crossed MAX_WAIT under 4-lane
+    # contention (empty file → maxrel unparsed → C2 tag silently drops), fetch
+    # the header alone with a standalone limit-1 hybrid call. No lane contention
+    # this time, so it almost always returns well under MAX_WAIT. This preserves
+    # the exact Platt maxrel scalar the C2 tag is calibrated on — the semantic
+    # lane's per-item [NN%] is display_pct (raw similarity/RRF), NOT the same
+    # quantity, so we must not substitute it. A tag that degrades to a WRONG band
+    # is worse than one that briefly retries; if this too times out, _c2_pct
+    # stays unset and the tag honestly omits (no signal beats a wrong signal).
+    if [[ -z "${_c2_pct:-}" ]]; then
+        _c2_deg=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" \
+                  --strategy hybrid --limit 1 --realm "$REALM" 2>/dev/null || true)
+        _c2_pct=$(printf '%s\n' "$_c2_deg" | grep -oP '^Found .*\(maxrel \K[0-9]+(?=%\))' | head -1)
+        if [[ -z "$_c2_pct" && -n "$_c2_deg" ]] && \
+           printf '%s' "$_c2_deg" | grep -qE '^(No (memories|messages|results) found|Found 0 results)'; then
+            _c2_pct=0
+        fi
+    fi
 
     # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
     # Extract text field and reformat as [kw][50%] [type] text
@@ -361,17 +385,24 @@ while IFS= read -r line; do
 done <<< "$memories"
 
 # C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
-# max_relevance (from the hybrid-lane header). Thresholds calibrated on
-# GOLDEN_SET v6 + out-of-domain probes (grade-recall.py --c2): gold-hit@3
-# monotonic KNOWN .89 > THIN .43 > UNKNOWN .00. THIN/UNKNOWN carry a
-# behavioral instruction, not just a label: do not overtrust this recall.
+# max_relevance (from the hybrid-lane header) into TWO honest bands.
+#
+# History: v5.70.0 shipped a 3-band KNOWN(>=86)/THIN(>=81)/UNKNOWN tag. It
+# calibrated cleanly on an earlier store state, but store drift inverted the
+# KNOWN-vs-THIN boundary (re-measured KNOWN gold-hit@3 0.62 < THIN 0.64), and no
+# threshold restored monotonic separation at k=3. A "KNOWN=trust" tag that can be
+# rank-1-wrong on a sparse store is worse than a coarser honest one, so we
+# re-scoped to 2 bands: KNOWN+THIN merged into one "confident-but-verify" band
+# (maxrel >= 81), UNKNOWN below. KNOWN-ish vs UNKNOWN IS monotonic (probes all
+# UNKNOWN, hit@10 clean). Both bands carry a behavioral nudge — on a sparse store
+# even high maxrel can be rank-1-wrong, so the confident band still says verify.
+# (3-band sharpness is recoverable once #13 write-time densification lifts the
+# unlinked golds out of the high-maxrel-but-wrong set — same sparse-edge root.)
 _c2_tag=""; _c2_phrase=""
 if [[ -n "${_c2_pct:-}" ]]; then
-    if [[ "$_c2_pct" -ge 86 ]]; then
+    if [[ "$_c2_pct" -ge 81 ]]; then
         _c2_tag="KNOWN"
-    elif [[ "$_c2_pct" -ge 81 ]]; then
-        _c2_tag="THIN"
-        _c2_phrase=" | weak recall — verify before trusting; recall() more if it matters"
+        _c2_phrase=" | relevant memory present — verify before fully trusting; recall() more if it matters"
     else
         _c2_tag="UNKNOWN"
         _c2_phrase=" | boundary of known memory — do not lean on this; ask or recall explicitly"
@@ -504,7 +535,7 @@ _DETECTED_INTENT=""
 _DETECTED_SCORE=""
 
 if [[ -f "$_CLASSIFIER_MODEL" && -x "$_CLASSIFIER_SCRIPT" ]]; then
-    _clf_out=$(echo "$QUERY" | python3 "$_CLASSIFIER_SCRIPT" "$_CLASSIFIER_MODEL" "$_CLASSIFIER_THRESHOLD" 2>/dev/null || true)
+    _clf_out=$(echo "$_INTENT_QUERY" | python3 "$_CLASSIFIER_SCRIPT" "$_CLASSIFIER_MODEL" "$_CLASSIFIER_THRESHOLD" 2>/dev/null || true)
     if [[ -n "$_clf_out" ]]; then
         _DETECTED_INTENT="${_clf_out%% *}"
         _DETECTED_SCORE="${_clf_out##* }"
@@ -512,7 +543,7 @@ if [[ -f "$_CLASSIFIER_MODEL" && -x "$_CLASSIFIER_SCRIPT" ]]; then
 fi
 
 # Skip intent detection when user is quoting/discussing hook output (feedback loop prevention)
-if echo "$QUERY" | grep -qE "(\[LEARN\]|\[DISCIPLINE\]|UserPromptSubmit says|learn_correction NOW|context-bloat)"; then
+if echo "$_INTENT_QUERY" | grep -qE "(\[LEARN\]|\[DISCIPLINE\]|UserPromptSubmit says|learn_correction NOW|context-bloat)"; then
     LEARNING_HINTS=""
     _skip_intent=1
 else
@@ -527,39 +558,38 @@ _regex_milestone=0
 _regex_frustration=0
 
 if [[ $_skip_intent -eq 0 ]]; then
-echo "$QUERY" | grep -qiE "(that'?s (wrong|incorrect|not right|not what)|you('re| are) (wrong|incorrect|mistaken|off)|use your memory|check.*your memory|did you forget|you forgot\b|you missed\b|that breaks\b|wrong order\b|not like that\b|not this way\b|before.*not after\b|I (said|meant) .{0,30}not\b|^no[,. ].{0,50}(instead|should|is|use|try|that|the)\b)" \
+echo "$_INTENT_QUERY" | grep -qiE "(that'?s (wrong|incorrect|not right|not what)|you('re| are) (wrong|incorrect|mistaken|off)|use your memory|check.*your memory|did you forget|you forgot\b|you missed\b|that breaks\b|wrong order\b|not like that\b|not this way\b|before.*not after\b|I (said|meant) .{0,30}not\b|^no[,. ].{0,50}(instead|should|is|use|try|that|the)\b)" \
     && _regex_correction=1 || true
-echo "$QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b)" \
+echo "$_INTENT_QUERY" | grep -qiE "(I (prefer|like|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|always use\b|never use\b|don'?t use\b|use .* instead\b|prefer .* over\b|no inline\b|no comments\b|no stubs\b|no placeholders\b|^(always|never) [a-z])" \
     && _regex_preference=1 || true
-echo "$QUERY" | grep -qiE "(I always|we always|I never|we never|our convention|our standard|we typically|we usually|by convention|in this (project|codebase|repo)|the standard (approach|way)|we (always|never) use|our (approach|workflow|setup) is)" \
+echo "$_INTENT_QUERY" | grep -qiE "(I always|we always|I never|we never|our convention|our standard|we typically|we usually|by convention|in this (project|codebase|repo)|the standard (approach|way)|we (always|never) use|our (approach|workflow|setup) is)" \
     && _regex_belief=1 || true
-echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)" \
+echo "$_INTENT_QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)" \
     && _regex_milestone=1 || true
-echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)" \
+echo "$_INTENT_QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)" \
     && _regex_frustration=1 || true
 
-# Merge: correction requires BOTH model + regex to reduce false positives;
-# other categories: model OR regex is sufficient.
+# Merge: every auto-stored category requires BOTH model + regex — model-alone
+# stored questions/probes as durable memories (echo chamber: ask about X twice
+# and recall returns your own prompt as C2:KNOWN); tested equally leaky for
+# milestone ("run the pipeline again" → [milestone] on model verdict alone).
 _intent_correction=0
 _intent_preference=0
 _intent_belief=0
 _intent_milestone=0
 
 [[ "$_DETECTED_INTENT" == "correction" && $_regex_correction -eq 1 ]] && _intent_correction=1 || true
-[[ "$_DETECTED_INTENT" == "preference"  ]] && _intent_preference=1  || true
-[[ "$_DETECTED_INTENT" == "belief"      ]] && _intent_belief=1      || true
-[[ "$_DETECTED_INTENT" == "milestone"   ]] && _intent_milestone=1   || true
-[[ $_regex_preference -eq 1 ]]  && _intent_preference=1  || true
-[[ $_regex_belief -eq 1 ]]      && _intent_belief=1      || true
-[[ $_regex_milestone -eq 1 ]]   && _intent_milestone=1   || true
+[[ "$_DETECTED_INTENT" == "preference" && $_regex_preference -eq 1 ]] && _intent_preference=1 || true
+[[ "$_DETECTED_INTENT" == "belief"     && $_regex_belief -eq 1     ]] && _intent_belief=1     || true
+[[ "$_DETECTED_INTENT" == "milestone"  && $_regex_milestone -eq 1  ]] && _intent_milestone=1  || true
 
 # --- ACT on detected intents ---
 
 if [[ $_intent_correction -eq 1 ]]; then
-    correction_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    correction_ctx=$(echo "$_INTENT_QUERY" | head -c 200 | tr '\n' ' ')
     LEARNING_HINTS="[LEARN] ⚠️ CORRECTION detected - call learn_correction NOW
   User said: \"${correction_ctx}\""
-    echo "$QUERY" > "$MIND_PATH/.last_correction_context"
+    echo "$_INTENT_QUERY" > "$MIND_PATH/.last_correction_context"
     _corr_payload=$(jq -n --arg c "[correction] $correction_ctx" --arg r "$REALM" \
         '{content: $c, category: "correction", realm: $r, tags: ["correction","auto"], visibility: 2}')
     queue_write "observe" "$_corr_payload" 2>/dev/null || true
@@ -567,14 +597,14 @@ fi
 
 if [[ $_intent_preference -eq 1 ]]; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Preference detected → use learn_preference tool"
-    _pref_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    _pref_ctx=$(echo "$_INTENT_QUERY" | head -c 200 | tr '\n' ' ')
     _pref_payload=$(jq -n --arg c "[preference] $_pref_ctx" --arg r "$REALM" \
         '{content: $c, category: "preference", realm: $r, tags: ["preference","auto"], visibility: 2}')
     queue_write "observe" "$_pref_payload" 2>/dev/null || true
 fi
 
 if [[ $_intent_belief -eq 1 ]]; then
-    _belief_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    _belief_ctx=$(echo "$_INTENT_QUERY" | head -c 200 | tr '\n' ' ')
     _belief_payload=$(jq -n --arg c "[belief] $_belief_ctx" --arg r "$REALM" \
         '{content: $c, category: "belief", realm: $r, tags: ["belief","auto"], visibility: 2}')
     queue_write "observe" "$_belief_payload" 2>/dev/null || true
@@ -585,7 +615,7 @@ if [[ $_regex_frustration -eq 1 ]]; then
 fi
 
 if [[ $_intent_milestone -eq 1 ]]; then
-    milestone_text=$(echo "$QUERY" | head -c 300 | tr '\n' ' ')
+    milestone_text=$(echo "$_INTENT_QUERY" | head -c 300 | tr '\n' ' ')
     queue_write "observe" "{\"content\":\"[milestone] $milestone_text\",\"category\":\"milestone\",\"realm\":\"$REALM\",\"tags\":[\"milestone\"]}"
 fi
 fi  # end _skip_intent guard
