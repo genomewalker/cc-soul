@@ -342,7 +342,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"path", "Directory path to analyze", true, nullptr},
       {"project", "Project name (auto-detected if empty)", false, nullptr},
       {"max_files", "Max files to process", false, "500"},
-      {"exclude", "Comma-separated directories to exclude", false, nullptr}}},
+      {"exclude", "Comma-separated directories to exclude", false, nullptr},
+      {"force", "Reprocess all files even if unchanged (repopulates callsites)", false, "false"}}},
 
     {"find_symbol", "Search for symbols by name",
      {{"name", "Symbol name to search", true, nullptr},
