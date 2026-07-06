@@ -250,6 +250,12 @@ else
     # max_relevance — the "feeling of knowing" scalar the C2 tag is calibrated on
     # (grade-recall.py --c2: gold-hit@3 monotonic KNOWN>THIN>UNKNOWN). Free: no extra call.
     _c2_pct=$(printf '%s\n' "$_hyb_out" | grep -oP '^Found .*\(maxrel \K[0-9]+(?=%\))' | head -1)
+    # Empty hybrid result is the strongest UNKNOWN evidence, not a missing signal.
+    # (A truly empty lane file = timeout = genuinely no signal: leave _c2_pct unset.)
+    if [[ -z "$_c2_pct" && -n "$_hyb_out" ]] && \
+       printf '%s' "$_hyb_out" | grep -qE '^(No (memories|messages|results) found|Found 0 results)'; then
+        _c2_pct=0
+    fi
 
     # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
     # Extract text field and reformat as [kw][50%] [type] text
@@ -354,8 +360,26 @@ while IFS= read -r line; do
     fi
 done <<< "$memories"
 
-# [admit] summary: admitted per lane + rejected per cause. Only lanes/causes
-# with nonzero counts are shown to keep the line minimal.
+# C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
+# max_relevance (from the hybrid-lane header). Thresholds calibrated on
+# GOLDEN_SET v6 + out-of-domain probes (grade-recall.py --c2): gold-hit@3
+# monotonic KNOWN .89 > THIN .43 > UNKNOWN .00. THIN/UNKNOWN carry a
+# behavioral instruction, not just a label: do not overtrust this recall.
+_c2_tag=""; _c2_phrase=""
+if [[ -n "${_c2_pct:-}" ]]; then
+    if [[ "$_c2_pct" -ge 86 ]]; then
+        _c2_tag="KNOWN"
+    elif [[ "$_c2_pct" -ge 81 ]]; then
+        _c2_tag="THIN"
+        _c2_phrase=" | weak recall — verify before trusting; recall() more if it matters"
+    else
+        _c2_tag="UNKNOWN"
+        _c2_phrase=" | boundary of known memory — do not lean on this; ask or recall explicitly"
+    fi
+fi
+
+# [admit] summary: C2 tag + admitted per lane + rejected per cause. Only
+# lanes/causes with nonzero counts are shown to keep the line minimal.
 ADMIT_LINE=""
 if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap)) -gt 0 ]]; then
     _in=""
@@ -369,23 +393,7 @@ if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap)) -gt 0
     [[ $_drop_dup  -gt 0 ]] && _out="$_out dup:$_drop_dup"
     [[ $_drop_meta -gt 0 ]] && _out="$_out meta:$_drop_meta"
     [[ $_drop_cap  -gt 0 ]] && _out="$_out cap:$_drop_cap"
-    ADMIT_LINE="[admit]${_in:- none} | drop${_out:- none}"
-fi
-
-# C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
-# max_relevance. Thresholds calibrated on GOLDEN_SET v6 + out-of-domain probes
-# (grade-recall.py --c2): gold-hit@3 KNOWN .89 > THIN .43 > UNKNOWN .00.
-# THIN/UNKNOWN are behavioral instructions, not labels: they tell the reading
-# agent not to overtrust the memories above.
-C2_LINE=""
-if [[ -n "${_c2_pct:-}" ]]; then
-    if [[ "$_c2_pct" -ge 86 ]]; then
-        C2_LINE="[c2:KNOWN $_c2_pct%]"
-    elif [[ "$_c2_pct" -ge 81 ]]; then
-        C2_LINE="[c2:THIN $_c2_pct%] recall is weak here — verify before trusting; recall() more if this matters"
-    else
-        C2_LINE="[c2:UNKNOWN $_c2_pct%] boundary of known memory — items above may be tangential; do not assume, ask or recall explicitly"
-    fi
+    ADMIT_LINE="[admit]${_c2_tag:+ C2:$_c2_tag($_c2_pct%)}${_in:- none} | drop${_out:- none}${_c2_phrase}"
 fi
 
 # ===========================================
@@ -894,11 +902,24 @@ if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
         OUTPUT=$(printf '%s' "$OUTPUT" | "$_SQZ_BIN" compress --cmd soul 2>/dev/null || printf '%s' "$OUTPUT")
     fi
     _append "[soul]"$'\n'
+    # Reserve budget for the [admit]/C2 line BEFORE appending memories: a
+    # truncated self-monitoring signal is worse than slightly shorter memory
+    # text (the 500-char cap was silently cutting it mid-line).
+    if [[ -n "$ADMIT_LINE" ]]; then
+        _admit_need=$(( ${#ADMIT_LINE} + 2 ))
+        _room=$(( MAX_OUTPUT_CHARS - ${#FINAL_OUTPUT} - _admit_need ))
+        (( _room < 0 )) && _room=0
+        [[ ${#OUTPUT} -gt $_room ]] && OUTPUT="${OUTPUT:0:$_room}"
+    fi
     _append "$OUTPUT"
     # OUTPUT may lose its trailing newline through sqz compress — guarantee a
     # break before the [admit] summary so it renders on its own line.
     [[ -n "$ADMIT_LINE" ]] && _append $'\n'"${ADMIT_LINE}"$'\n'
-    [[ -n "$C2_LINE" ]] && _append "${C2_LINE}"$'\n'
+elif [[ "$_c2_tag" == "UNKNOWN" && -n "$ADMIT_LINE" ]]; then
+    # Nothing cleared the bar AND recall says this is outside known memory:
+    # the boundary itself is the signal — render just the admit line so the
+    # agent knows recall ran and came back empty-handed, not that it was skipped.
+    _append "[soul]"$'\n'"${ADMIT_LINE}"$'\n'
 fi
 
 # 4. Narrative status (one-liner, cheap)
