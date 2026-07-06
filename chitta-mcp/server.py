@@ -855,8 +855,10 @@ def handle_read_function(arguments: dict) -> str:
 
 def handle_symbol_callers(arguments: dict) -> str:
     """
-    Find all callers of a symbol without grep.
-    Query triplets where object = symbol_name and predicate = calls.
+    Find all callers of a symbol.
+    Delegates to the daemon's symbol_callers tool, which walks the callsite
+    triplet graph (predicate=calls) and resolves each callsite's file:line
+    to the enclosing function/method name.
     """
     name = arguments.get("name", "")
     limit = int(arguments.get("limit", 20))
@@ -864,37 +866,14 @@ def handle_symbol_callers(arguments: dict) -> str:
     if not name:
         return "Error: name parameter required"
 
-    # Query triplets where this symbol is called
-    response = daemon_call("query", {"object": name, "predicate": "calls"}, structured=True)
-
-    try:
-        data = json.loads(response)
-        triplets = data.get("triplets", []) if isinstance(data, dict) else data
-
-        if not triplets:
-            return f"No callers found for: {name}"
-
-        # Format results (dedupe by caller)
-        seen = set()
-        results = []
-        for t in triplets:
-            caller = t.get("subject", "unknown")
-            if caller not in seen:
-                seen.add(caller)
-                results.append(f"  {caller} → {name}")
-                if len(results) >= limit:
-                    break
-
-        return f"Callers of {name} ({len(results)} found):\n" + "\n".join(results)
-
-    except json.JSONDecodeError:
-        return response  # Return raw response
+    return daemon_call("symbol_callers", {"name": name, "limit": limit})
 
 
 def handle_symbol_callees(arguments: dict) -> str:
     """
     Find all symbols that this symbol calls.
-    Query triplets where subject = symbol_name and predicate = calls.
+    Delegates to the daemon's symbol_callees tool, which scans the symbol's
+    line range for callsite triplets (predicate=calls).
     """
     name = arguments.get("name", "")
     limit = int(arguments.get("limit", 20))
@@ -902,31 +881,7 @@ def handle_symbol_callees(arguments: dict) -> str:
     if not name:
         return "Error: name parameter required"
 
-    # Query triplets where this symbol calls others
-    response = daemon_call("query", {"subject": name, "predicate": "calls"}, structured=True)
-
-    try:
-        data = json.loads(response)
-        triplets = data.get("triplets", []) if isinstance(data, dict) else data
-
-        if not triplets:
-            return f"No callees found for: {name}"
-
-        # Format results (dedupe by callee)
-        seen = set()
-        results = []
-        for t in triplets:
-            callee = t.get("object", "unknown")
-            if callee not in seen:
-                seen.add(callee)
-                results.append(f"  {name} → {callee}")
-                if len(results) >= limit:
-                    break
-
-        return f"{name} calls ({len(results)} found):\n" + "\n".join(results)
-
-    except json.JSONDecodeError:
-        return response  # Return raw response
+    return daemon_call("symbol_callees", {"name": name, "limit": limit})
 
 
 def handle_verify_correction(arguments: dict) -> str:

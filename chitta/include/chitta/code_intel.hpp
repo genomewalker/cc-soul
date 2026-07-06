@@ -5,6 +5,8 @@
 // Supports: C/C++, Python, JavaScript/TypeScript, Go, Rust, Java, Ruby, C#, Swift
 
 #include <tree_sitter/api.h>
+#include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 #include <iterator>
@@ -1065,8 +1067,8 @@ private:
         }
         // Call expressions: func(...) or obj.method(...)
         else if (strcmp(type, "call") == 0) {
-            TSNode func_node = find_child(node, "function");
-            TSNode args_node = find_child(node, "arguments");
+            TSNode func_node = find_child_by_field(node, "function");
+            TSNode args_node = find_child_by_field(node, "arguments");
             if (ts_node_is_null(func_node)) {
                 // Try first child as function
                 if (ts_node_child_count(node) > 0) {
@@ -1088,11 +1090,11 @@ private:
                 if (strcmp(func_type, "attribute") == 0) {
                     // obj.method() - attribute call
                     cs.kind = CallKind::MemberCall;
-                    TSNode attr_node = find_child(func_node, "attribute");
+                    TSNode attr_node = find_child_by_field(func_node, "attribute");
                     if (!ts_node_is_null(attr_node)) {
                         cs.callee_leaf = node_text(attr_node, source);
                     }
-                    TSNode obj_node = find_child(func_node, "object");
+                    TSNode obj_node = find_child_by_field(func_node, "object");
                     if (!ts_node_is_null(obj_node)) {
                         cs.receiver_text = node_text(obj_node, source);
                     }
@@ -1274,8 +1276,8 @@ private:
         }
         // Call expressions
         else if (strcmp(type, "call_expression") == 0) {
-            TSNode func_node = find_child(node, "function");
-            TSNode args_node = find_child(node, "arguments");
+            TSNode func_node = find_child_by_field(node, "function");
+            TSNode args_node = find_child_by_field(node, "arguments");
             if (ts_node_is_null(func_node)) {
                 if (ts_node_child_count(node) > 0) {
                     func_node = ts_node_child(node, 0);
@@ -1295,11 +1297,11 @@ private:
                 const char* func_type = ts_node_type(func_node);
                 if (strcmp(func_type, "member_expression") == 0) {
                     cs.kind = CallKind::MemberCall;
-                    TSNode prop = find_child(func_node, "property");
+                    TSNode prop = find_child_by_field(func_node, "property");
                     if (!ts_node_is_null(prop)) {
                         cs.callee_leaf = node_text(prop, source);
                     }
-                    TSNode obj = find_child(func_node, "object");
+                    TSNode obj = find_child_by_field(func_node, "object");
                     if (!ts_node_is_null(obj)) {
                         cs.receiver_text = node_text(obj, source);
                     }
@@ -1316,8 +1318,8 @@ private:
         }
         // new expression
         else if (strcmp(type, "new_expression") == 0) {
-            TSNode constructor = find_child(node, "constructor");
-            TSNode args_node = find_child(node, "arguments");
+            TSNode constructor = find_child_by_field(node, "constructor");
+            TSNode args_node = find_child_by_field(node, "arguments");
             if (ts_node_is_null(constructor) && ts_node_child_count(node) > 0) {
                 constructor = ts_node_child(node, 1);  // Skip 'new' keyword
             }
@@ -1478,8 +1480,8 @@ private:
         }
         // Call expressions
         else if (strcmp(type, "call_expression") == 0) {
-            TSNode func_node = find_child(node, "function");
-            TSNode args_node = find_child(node, "arguments");
+            TSNode func_node = find_child_by_field(node, "function");
+            TSNode args_node = find_child_by_field(node, "arguments");
             if (ts_node_is_null(func_node) && ts_node_child_count(node) > 0) {
                 func_node = ts_node_child(node, 0);
             }
@@ -1497,11 +1499,11 @@ private:
                 const char* func_type = ts_node_type(func_node);
                 if (strcmp(func_type, "selector_expression") == 0) {
                     cs.kind = CallKind::MemberCall;
-                    TSNode field = find_child(func_node, "field");
+                    TSNode field = find_child_by_field(func_node, "field");
                     if (!ts_node_is_null(field)) {
                         cs.callee_leaf = node_text(field, source);
                     }
-                    TSNode operand = find_child(func_node, "operand");
+                    TSNode operand = find_child_by_field(func_node, "operand");
                     if (!ts_node_is_null(operand)) {
                         cs.receiver_text = node_text(operand, source);
                     }
@@ -1703,8 +1705,8 @@ private:
         }
         // Call expressions
         else if (strcmp(type, "call_expression") == 0) {
-            TSNode func_node = find_child(node, "function");
-            TSNode args_node = find_child(node, "arguments");
+            TSNode func_node = find_child_by_field(node, "function");
+            TSNode args_node = find_child_by_field(node, "arguments");
             if (ts_node_is_null(func_node) && ts_node_child_count(node) > 0) {
                 func_node = ts_node_child(node, 0);
             }
@@ -1722,22 +1724,22 @@ private:
                 const char* func_type = ts_node_type(func_node);
                 if (strcmp(func_type, "field_expression") == 0) {
                     cs.kind = CallKind::MemberCall;
-                    TSNode field = find_child(func_node, "field");
+                    TSNode field = find_child_by_field(func_node, "field");
                     if (!ts_node_is_null(field)) {
                         cs.callee_leaf = node_text(field, source);
                     }
-                    TSNode value = find_child(func_node, "value");
+                    TSNode value = find_child_by_field(func_node, "value");
                     if (!ts_node_is_null(value)) {
                         cs.receiver_text = node_text(value, source);
                     }
                     cs.member_op = ".";
                 } else if (strcmp(func_type, "scoped_identifier") == 0) {
                     cs.kind = CallKind::Qualified;
-                    TSNode path_node = find_child(func_node, "path");
+                    TSNode path_node = find_child_by_field(func_node, "path");
                     if (!ts_node_is_null(path_node)) {
                         cs.scope_text = node_text(path_node, source);
                     }
-                    TSNode name = find_child(func_node, "name");
+                    TSNode name = find_child_by_field(func_node, "name");
                     if (!ts_node_is_null(name)) {
                         cs.callee_leaf = node_text(name, source);
                     }

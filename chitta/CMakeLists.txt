@@ -460,6 +460,9 @@ if(CHITTA_BUILD_TESTS)
     add_executable(llm_probe_test src/llm_probe_test.cpp)
     target_link_libraries(llm_probe_test PRIVATE chitta)
     add_test(NAME llm_probe_test COMMAND llm_probe_test)
+    add_executable(callsite_extract_test src/callsite_extract_test.cpp)
+    target_link_libraries(callsite_extract_test PRIVATE chitta)
+    add_test(NAME callsite_extract_test COMMAND callsite_extract_test)
 endif()
 
 # RPATH configuration for runtime library discovery
