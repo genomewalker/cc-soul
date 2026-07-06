@@ -317,6 +317,7 @@ char* cf_span_stats(struct CfHandle* h);
 char* cf_span_for_memory(struct CfHandle* h, uint64_t memory_id, size_t k);
 int64_t cf_span_ingest_memory(struct CfHandle* h, uint64_t memory_id, const char* text, const char* realm);
 char* cf_span_backfill_memories(struct CfHandle* h);
+int   cf_span_flush(struct CfHandle* h);
 }
 
 namespace chitta {
@@ -1021,6 +1022,11 @@ public:
         std::string result(raw);
         cf_free_string(raw);
         return result;
+    }
+
+    // Persist span links deferred off the memory-write hot path (1 = saved).
+    int span_flush() {
+        return cf_span_flush(handle_);
     }
 
     std::string executor_flush_json() {
