@@ -550,7 +550,13 @@ ToolResult FieldRpcHandler::tool_list_memories_brief(const json& params) {
         json results = json::array();
         for (const auto& m : arr) {
             std::string content = m.value("content", "");
-            std::string preview = content.substr(0, 80);
+            // Truncate on a UTF-8 boundary: a byte-slice at 80 can split a
+            // multibyte char (e.g. an em-dash straddling byte 80), leaving an
+            // invalid sequence. brief.dump() below uses the throwing handler, so
+            // a bad preview aborts the whole page → the CLI --json sees `null`.
+            size_t cut = std::min<size_t>(content.size(), 80);
+            while (cut > 0 && (static_cast<unsigned char>(content[cut]) & 0xC0) == 0x80) --cut;
+            std::string preview = content.substr(0, cut);
             uint64_t mid = m["id"].is_number() ? m["id"].get<uint64_t>() : 0;
             json brief = {
                 {"id",         mid},
@@ -562,7 +568,9 @@ ToolResult FieldRpcHandler::tool_list_memories_brief(const json& params) {
                 {"confidence", m.value("confidence", 0.0f)},
             };
             results.push_back(brief);
-            ss << brief.dump() << "\n";
+            // Use the replacing handler: a memory whose stored content is not
+            // valid UTF-8 must not throw and null the entire page.
+            ss << brief.dump(-1, ' ', false, json::error_handler_t::replace) << "\n";
         }
         return ToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
     } catch (...) {
