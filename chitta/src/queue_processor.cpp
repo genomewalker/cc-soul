@@ -33,20 +33,52 @@ QueueProcessor::QueueProcessor(FieldStore& field_store,
 {}
 
 void QueueProcessor::start() {
-    // Recover from crash: if a .processing file exists, rename it back to queue
-    // so the items are reprocessed rather than lost.
+    // Recover from crash: if a .processing file exists, re-queue only the
+    // UNPROCESSED suffix. The batch loop checkpoints its progress to a .ckpt
+    // sidecar after each field_store_.sync(), so every line before the
+    // watermark is durably applied — re-appending it would duplicate data.
+    // No/unreadable .ckpt → watermark 0 → full re-queue (old behavior).
     std::string processing_path = queue_path_ + ".processing";
     if (std::ifstream(processing_path).good()) {
-        // Append recovered items to any existing queue file
-        std::ifstream src(processing_path, std::ios::binary);
-        std::ofstream dst(queue_path_, std::ios::binary | std::ios::app);
-        dst << src.rdbuf();
-        src.close();
-        dst.close();
+        std::string ckpt_path = processing_path + ".ckpt";
+        size_t skip = 0;
+        {
+            std::ifstream ck(ckpt_path);
+            if (ck.good()) ck >> skip;  // stays 0 on parse failure
+        }
+        // Append the unprocessed suffix to any existing queue file. Count
+        // non-empty lines only — the batch loop's watermark indexes the same
+        // filtered sequence.
+        size_t requeued = 0;
+        {
+            std::ifstream src(processing_path);
+            std::ofstream dst(queue_path_, std::ios::app);
+            std::string line;
+            size_t idx = 0;
+            while (std::getline(src, line)) {
+                if (line.empty()) continue;
+                if (idx++ >= skip) { dst << line << "\n"; ++requeued; }
+            }
+        }
         std::remove(processing_path.c_str());
-        std::cerr << "[queue] crash recovery: re-queued items from " << processing_path << "\n";
+        std::remove(ckpt_path.c_str());
+        std::cerr << "[queue] crash recovery: re-queued " << requeued
+                  << " items from " << processing_path
+                  << " (skipped " << skip << " already processed)\n";
     }
     thread_ = std::thread([this]() { run(); });
+}
+
+// Persist the batch watermark: number of items of the current .processing
+// batch that are durably applied (call only after field_store_.sync()).
+// Write-then-rename so a crash mid-write can't leave a truncated count.
+void QueueProcessor::write_checkpoint(const std::string& ckpt_path, size_t processed) {
+    std::string tmp = ckpt_path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        out << processed << "\n";
+    }
+    std::rename(tmp.c_str(), ckpt_path.c_str());
 }
 
 void QueueProcessor::stop() {
@@ -150,6 +182,14 @@ void QueueProcessor::run() {
             continue;
         }
         batch_remaining_ = lines.size();
+
+        // Checkpoint cadence: sync + watermark every N items so a crash (or
+        // the shutdown-timeout force-exit) reprocesses at most N items instead
+        // of the whole batch. The watermark only advances past durably synced
+        // work, so recovery never skips an unsynced write.
+        std::string ckpt_path = processing_path + ".ckpt";
+        constexpr size_t kCkptInterval = 200;
+        size_t processed = 0;
 
         // Process each queued request — all writes go to chitta-field
         for (const auto& line : lines) {
@@ -568,14 +608,30 @@ void QueueProcessor::run() {
                 write_failed_item(line, e);
             }
             batch_remaining_--;
+            ++processed;
+            if (processed % kCkptInterval == 0) {
+                field_store_.sync();
+                write_checkpoint(ckpt_path, processed);
+            }
         }
 
         // Durable fdatasync of this batch's WAL appends, OFF the rpc_mutex (put_memory only
         // flush_buf()s under the lock now). One fsync per queue batch, not per item.
         field_store_.sync();
 
+        if (processed < lines.size()) {
+            // Graceful shutdown mid-batch: leave .processing + final watermark
+            // for recovery. Previously this path fell through to the remove()
+            // below and silently dropped the unprocessed tail.
+            write_checkpoint(ckpt_path, processed);
+            std::cerr << "[queue] shutdown mid-batch: " << processed << "/"
+                      << lines.size() << " done, remainder recovered on restart\n";
+            break;
+        }
+
         // Remove after successful processing — crash before this leaves .processing for recovery
         std::remove(processing_path.c_str());
+        std::remove(ckpt_path.c_str());
 
         if (verbose_mode) {
             std::cerr << "[queue] Processed " << lines.size() << " items, total=" << queue_count_ << "\n";
