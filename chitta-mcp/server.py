@@ -1957,10 +1957,15 @@ def handle_recall_smart(arguments: dict) -> str:
 def handle_recall_gateway(arguments: dict) -> str:
     """Unified recall with strategy routing and optional cross-encoder reranking.
 
-    Strategies: semantic (default), priority, temporal, hybrid, smart, field
+    Strategies: hybrid (default), semantic, priority, temporal, smart, field
     disable_hdc: if True, skip HDC lane in RRF (ablation/benchmarking)
+
+    Default is hybrid: measured strict superset of pure-semantic on the golden
+    set (nDCG@20 +0.08 active, +2 pass, 0 regressions) — hybrid's BM25 lane
+    catches literal tokens (filenames, IDs, paths) that pure-semantic misses at
+    low cosine similarity. Callers wanting the old behavior pass strategy="semantic".
     """
-    strategy = arguments.pop("strategy", "semantic")
+    strategy = arguments.pop("strategy", "hybrid")
     tool_map = {
         "semantic": "recall",
         "priority": "recall_by_priority",
