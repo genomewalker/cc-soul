@@ -88,6 +88,13 @@ public:
                          const std::string& failed_path) {
         queue_count_ = count; queue_fail_count_ = fails; failed_queue_path_ = failed_path;
     }
+    // Live queue depth for queue_status: in-flight claimed batch + distill counter
+    // + the queue file path (unclaimed lines counted on demand). Read-only, lock-free.
+    void set_queue_live(std::atomic<size_t>* distill, const std::atomic<size_t>* batch_remaining,
+                        const std::string& queue_path) {
+        queue_distill_count_ = distill; queue_batch_remaining_ = batch_remaining;
+        queue_path_ = queue_path;
+    }
     using RecallCallback = std::function<void(const std::vector<uint64_t>&, int)>;
     void set_recall_callback(RecallCallback cb) { recall_callback_ = std::move(cb); }
 
@@ -447,7 +454,10 @@ private:
     SadhanaManager* sadhana_manager_ = nullptr;
     std::atomic<size_t>* queue_count_ = nullptr;
     std::atomic<size_t>* queue_fail_count_ = nullptr;
+    std::atomic<size_t>* queue_distill_count_ = nullptr;
+    const std::atomic<size_t>* queue_batch_remaining_ = nullptr;
     std::string failed_queue_path_;
+    std::string queue_path_;
     RecallCallback recall_callback_;
     WriteNotifyCallback write_notify_fn_;
     EmbedQueue* embed_queue_ = nullptr;

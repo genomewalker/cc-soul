@@ -43,6 +43,10 @@ public:
     std::atomic<size_t>& distill_count() { return queue_distill_count_; }
     std::atomic<size_t>& fail_count() { return queue_fail_count_; }
 
+    // Live depth of the claimed batch still being processed (queue_status).
+    const std::atomic<size_t>& batch_remaining() const { return batch_remaining_; }
+    const std::string& queue_path() const { return queue_path_; }
+
 private:
     void run();
 
@@ -61,6 +65,7 @@ private:
     std::atomic<size_t>& queue_count_;
     std::atomic<size_t>& queue_distill_count_;
     std::atomic<size_t>& queue_fail_count_;
+    std::atomic<size_t> batch_remaining_{0};
 
     std::thread thread_;
 };

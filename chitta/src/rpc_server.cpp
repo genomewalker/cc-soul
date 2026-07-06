@@ -222,6 +222,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"span_stats", "Span lane size: unique atoms, disk bytes, redactions.",
      {}},
 
+    {"queue_status", "Live work-queue depth: pending (in-flight + unclaimed), processed, distilled, failed, pending embeddings, dead-letters.",
+     {}},
+
     {"smart_recall", "Intelligent recall with automatic query intent classification",
      {{"query", "Natural language query (e.g., 'last week', 'show preferences')", true, nullptr},
       {"limit", "Max results", false, "20"},

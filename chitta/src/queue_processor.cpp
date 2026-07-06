@@ -149,6 +149,7 @@ void QueueProcessor::run() {
             std::remove(processing_path.c_str());
             continue;
         }
+        batch_remaining_ = lines.size();
 
         // Process each queued request — all writes go to chitta-field
         for (const auto& line : lines) {
@@ -566,6 +567,7 @@ void QueueProcessor::run() {
                 // Write to dead-letter file for inspection/retry
                 write_failed_item(line, e);
             }
+            batch_remaining_--;
         }
 
         // Durable fdatasync of this batch's WAL appends, OFF the rpc_mutex (put_memory only
