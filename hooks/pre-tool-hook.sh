@@ -354,11 +354,22 @@ case "$MATCHER" in
             _file_hash=$(printf '%s:%s' "$file_path" "$_file_mtime" | md5sum | cut -c1-16)
             _read_cache="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.read_cache_${_session_id}"
             if grep -qF "$_file_hash" "$_read_cache" 2>/dev/null; then
+                _dd_offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
                 if _should_enforce; then
-                    # advisory-only in enforce mode too: Edit tool requires a prior Read; hard-deny breaks Edit for unchanged files
-                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines). Use sqz_read_file — returns a 13-token §ref§ for cached content."}}' \
-                        "$(basename "$file_path")" "$line_count"
+                    # Enforce (safe): a re-read of an UNCHANGED file this session is almost
+                    # always redundant (content already in context / sqz cache). TRUNCATE to
+                    # 40 lines rather than hard-deny — a Read still occurs so Edit's
+                    # read-precondition stays satisfied, and any genuinely-needed bytes are
+                    # recoverable via offset or sqz_read_file. This matters because silent
+                    # context compaction is frequent: a post-compaction re-read is legitimate,
+                    # so it must never be blocked — only trimmed. Escape hatch: CC_SOUL_ALLOW_READ=1
+                    # or the .allow_read_<id> flag (resolved above) bypasses this whole block.
+                    _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "truncate" "read-dedup" 1
+                    _dd_path=$(echo -n "$file_path" | jq -Rs '.')
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines) — returning 40. Use sqz_read_file for the full cached content (13-token §ref§), or Read with offset for a specific range.","updatedInput":{"file_path":%s,"limit":40,"offset":%s}}}' \
+                        "$(basename "$file_path")" "$line_count" "$_dd_path" "$_dd_offset"
+                    printf '%s\n' "$_file_hash" >> "$_read_cache" 2>/dev/null || true
+                    exit 0
                 else
                     _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "advisory" "read-dedup" 0
                     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[read-dedup] %s already read this session (%d lines). sqz_read_file returns a 13-token §ref§ for cached content."}}\n' \
