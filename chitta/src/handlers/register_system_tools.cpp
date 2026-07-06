@@ -41,7 +41,7 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["spectral_drift"] = [this](const json& p) { return tool_spectral_drift(p); };
 
-    tools_.push_back({{"name","queue_status"},{"description","Show async queue stats: processed, failed, dead-letter path"},
+    tools_.push_back({{"name","queue_status"},{"description","Live work-queue depth (pending in-flight + unclaimed), processed/distilled/failed counters, pending embeddings, dead-letters"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
     handlers_["queue_status"] = [this](const json& p) { return tool_queue_status(p); };

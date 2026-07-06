@@ -27,15 +27,18 @@ TOOLS = [
                                 "type": "string"
                         },
                         "shared_realms": {
-                                "description": "Additional realms to share with",
+                                "description": "Additional realms",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "tags": {
-                                "description": "Optional tags (comma-separated string or JSON array)",
-                                "type": "string"
+                                "description": "Optional tags",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
                         },
                         "type": {
                                 "description": "Node type (wisdom, insight, signal, episode)",
@@ -51,10 +54,6 @@ TOOLS = [
                                                 "type": "string"
                                         }
                                 ]
-                        },
-                        "write_policy": {
-                                "description": "off (default) = store immediately; merge_aware = LLM dedup check first",
-                                "type": "string"
                         }
                 },
                 "required": [
@@ -64,41 +63,116 @@ TOOLS = [
         }
     ),
     Tool(
-        name="recall",
-        description="Search memory. Strategies: semantic (default), priority (by importance), temporal (by time), hybrid (semantic+keyword+graph), smart (auto-routed best match)",
+        name="remember_batch",
+        description="Store multiple memories in a single round-trip (high-throughput bulk ingest)",
         inputSchema={
                 "properties": {
-                        "strategy": {
-                                "description": "Search strategy: semantic|priority|temporal|hybrid|smart (default: semantic)",
-                                "type": "string"
-                        },
-                        "query": {
-                                "description": "Search query",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max results (default 10)",
-                                "anyOf": [{"type": "integer"}, {"type": "string"}]
-                        },
-                        "min_confidence": {
-                                "description": "Minimum confidence threshold (default: 0)",
-                                "type": "number"
+                        "items": {
+                                "description": "Array of memory objects (same fields as remember)",
+                                "items": {
+                                        "properties": {
+                                                "content": {
+                                                        "type": "string"
+                                                },
+                                                "realm": {
+                                                        "type": "string"
+                                                },
+                                                "source_session": {
+                                                        "type": "string"
+                                                },
+                                                "tags": {
+                                                        "items": {
+                                                                "type": "string"
+                                                        },
+                                                        "type": "array"
+                                                },
+                                                "valid_from": {
+                                                        "type": "string"
+                                                },
+                                                "visibility": {
+                                                        "anyOf": [
+                                                                {
+                                                                        "type": "integer"
+                                                                },
+                                                                {
+                                                                        "type": "string"
+                                                                }
+                                                        ]
+                                                }
+                                        },
+                                        "required": [
+                                                "content"
+                                        ],
+                                        "type": "object"
+                                },
+                                "type": "array"
                         },
                         "realm": {
-                                "description": "Filter by realm (empty = all realms)",
+                                "description": "Default realm for all items",
                                 "type": "string"
+                        }
+                },
+                "required": [
+                        "items"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="flush_embeddings",
+        description="Flush the pending embedding queue synchronously — call after remember_batch to ensure HNSW/semantic recall is available immediately. Returns {flushed: N}.",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall",
+        description="Search memory by semantic similarity with realm filtering",
+        inputSchema={
+                "properties": {
+                        "explain": {
+                                "description": "Include score decomposition per hit (default: False)",
+                                "type": "boolean"
                         },
-                        "tag": {
-                                "description": "Filter by tag",
-                                "type": "string"
+                        "gwt_mode": {
+                                "description": "Global Workspace Theory mode (default: False)",
+                                "type": "boolean"
                         },
                         "include_global": {
                                 "description": "Include global memories (default: True)",
                                 "type": "boolean"
                         },
-                        "expand": {
-                                "description": "Enable SSL query expansion with NL variants for better recall of SSL-format memories (default: true)",
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_confidence": {
+                                "description": "Minimum confidence threshold",
+                                "type": "number"
+                        },
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "separation_mode": {
+                                "description": "Diverse results via MMR (default: False)",
                                 "type": "boolean"
+                        },
+                        "tag": {
+                                "description": "Filter by tag",
+                                "type": "string"
                         }
                 },
                 "required": [
@@ -109,15 +183,15 @@ TOOLS = [
     ),
     Tool(
         name="recall_temporal",
-        description="Search memories within a time window (defaults to last 7 days if no dates), optionally with semantic filtering",
+        description="Search memories within a time window (defaults to last 7 days)",
         inputSchema={
                 "properties": {
                         "end": {
-                                "description": "End date (ISO8601 or YYYY-MM-DD)",
+                                "description": "End date",
                                 "type": "string"
                         },
                         "include_global": {
-                                "description": "Include global memories (default: True)",
+                                "description": "Include global memories",
                                 "type": "boolean"
                         },
                         "limit": {
@@ -148,8 +222,39 @@ TOOLS = [
         }
     ),
     Tool(
+        name="recall_keyword",
+        description="BM25 keyword search",
+        inputSchema={
+                "properties": {
+                        "explain": {
+                                "description": "Include score decomposition per hit (default: False)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="explore_recall",
-        description="Lightweight recall - returns titles/scores only, no full content (for iterative exploration)",
+        description="Lightweight recall - titles/scores only",
         inputSchema={
                 "properties": {
                         "limit": {
@@ -176,11 +281,11 @@ TOOLS = [
     ),
     Tool(
         name="explore_peek",
-        description="Get summary of a memory (first 200 chars) without loading full content",
+        description="Get summary of a memory (first 200 chars)",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID to peek",
+                                "description": "Memory ID",
                                 "type": "string"
                         }
                 },
@@ -192,11 +297,11 @@ TOOLS = [
     ),
     Tool(
         name="explore_expand",
-        description="Get full content of a memory (use sparingly during exploration)",
+        description="Get full content of a memory",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID to expand",
+                                "description": "Memory ID",
                                 "type": "string"
                         }
                 },
@@ -208,15 +313,15 @@ TOOLS = [
     ),
     Tool(
         name="explore_neighbors",
-        description="Get nodes connected to this node via triplets",
+        description="Get nodes connected via triplets",
         inputSchema={
                 "properties": {
                         "direction": {
-                                "description": "outgoing, incoming, or both (default: both)",
+                                "description": "outgoing, incoming, or both",
                                 "type": "string"
                         },
                         "node": {
-                                "description": "Node name to find neighbors of",
+                                "description": "Node name",
                                 "type": "string"
                         }
                 },
@@ -271,15 +376,14 @@ TOOLS = [
     ),
     Tool(
         name="query_triplets_temporal",
-        description="Query triplets at a specific point in time (temporal fact versioning)",
+        description="Query triplets at a point in time",
         inputSchema={
                 "properties": {
                         "at_date": {
-                                "description": "Date to query at (YYYY-MM-DD). Default: now",
+                                "description": "YYYY-MM-DD",
                                 "type": "string"
                         },
                         "limit": {
-                                "description": "Max results (default 50)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -290,15 +394,12 @@ TOOLS = [
                                 ]
                         },
                         "object": {
-                                "description": "Filter by object entity",
                                 "type": "string"
                         },
                         "predicate": {
-                                "description": "Filter by relationship type",
                                 "type": "string"
                         },
                         "subject": {
-                                "description": "Filter by subject entity",
                                 "type": "string"
                         }
                 },
@@ -307,11 +408,10 @@ TOOLS = [
     ),
     Tool(
         name="triplet_history",
-        description="Get history of a subject-predicate relationship over time",
+        description="Get history of a subject-predicate relationship",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max results (default 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -322,11 +422,9 @@ TOOLS = [
                                 ]
                         },
                         "predicate": {
-                                "description": "Relationship type",
                                 "type": "string"
                         },
                         "subject": {
-                                "description": "Subject entity",
                                 "type": "string"
                         }
                 },
@@ -338,32 +436,205 @@ TOOLS = [
         }
     ),
     Tool(
+        name="triplet_query_as_of",
+        description="Query triplets for a subject valid at a given world timestamp, excluding superseded entries",
+        inputSchema={
+                "properties": {
+                        "subject": {
+                                "description": "Subject node to query",
+                                "type": "string"
+                        },
+                        "world_ms": {
+                                "description": "World-time epoch ms (default: now)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "subject"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="triplet_supersede",
+        description="Mark one triplet as superseded by another (bi-temporal update)",
+        inputSchema={
+                "properties": {
+                        "at_ms": {
+                                "description": "Ingestion-time of supersession (default: now)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "new_id": {
+                                "description": "Replacing triplet ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "old_id": {
+                                "description": "Triplet ID being superseded",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "old_id",
+                        "new_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="graph_traverse",
+        description="BFS graph traversal from a start node over triplet edges",
+        inputSchema={
+                "properties": {
+                        "direction": {
+                                "description": "Edge direction (default outgoing)",
+                                "enum": [
+                                        "outgoing",
+                                        "incoming",
+                                        "both"
+                                ],
+                                "type": "string"
+                        },
+                        "edge_types": {
+                                "description": "Predicate filter (empty = all)",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "max_hops": {
+                                "description": "Max BFS depth (default 3)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_results": {
+                                "description": "Max nodes returned (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "start": {
+                                "description": "Starting node",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "start"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="graph_pagerank",
+        description="Personalized PageRank over the triplet graph",
+        inputSchema={
+                "properties": {
+                        "damping": {
+                                "description": "Damping factor (default 0.85)",
+                                "type": "number"
+                        },
+                        "edge_types": {
+                                "description": "Predicate filter (empty = all)",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "iterations": {
+                                "description": "PPR iterations (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "seeds": {
+                                "description": "Seed nodes",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "top_k": {
+                                "description": "Nodes to return (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "seeds"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="connect_temporal",
-        description="Create a triplet with temporal validity period",
+        description="Create triplet with temporal validity",
         inputSchema={
                 "properties": {
                         "context_date": {
-                                "description": "Session date for resolving relative dates (YYYY-MM-DD)",
                                 "type": "string"
                         },
                         "object": {
-                                "description": "Object entity",
                                 "type": "string"
                         },
                         "predicate": {
-                                "description": "Relationship type",
                                 "type": "string"
                         },
                         "subject": {
-                                "description": "Subject entity",
                                 "type": "string"
                         },
                         "valid_from": {
-                                "description": "When fact became true (YYYY-MM-DD or relative like 'yesterday')",
                                 "type": "string"
                         },
                         "valid_to": {
-                                "description": "When fact stopped being true (YYYY-MM-DD). Omit for still valid",
                                 "type": "string"
                         }
                 },
@@ -376,44 +647,12 @@ TOOLS = [
         }
     ),
     Tool(
-        name="soul_context",
-        description="Get current soul state and statistics",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="embed_symbols",
-        description="Fast embed symbol metadata (no LLM needed, ~100/sec). Use reset=true to clear all embeddings and re-embed with richer text.",
-        inputSchema={
-                "properties": {
-                        "batch_size": {
-                                "description": "Symbols per batch (default: 100)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "reset": {
-                                "description": "Clear all symbol embeddings before re-embedding (default: False)",
-                                "type": "boolean"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
         name="strengthen",
         description="Increase confidence of a memory",
         inputSchema={
                 "properties": {
                         "amount": {
-                                "description": "Amount to strengthen (default 0.1)",
+                                "description": "Amount (default 0.1)",
                                 "type": "number"
                         },
                         "id": {
@@ -433,11 +672,9 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "amount": {
-                                "description": "Amount to weaken (default 0.1)",
                                 "type": "number"
                         },
                         "id": {
-                                "description": "Node ID",
                                 "type": "string"
                         }
                 },
@@ -464,63 +701,91 @@ TOOLS = [
         }
     ),
     Tool(
-        name="distill_turn",
-        description="Run structured learning extraction on a single assistant turn (invokes chitta-mcp/extractors/stop_extractor.py). Enqueued by stop-hook; emits observe events with source=distillation.",
+        name="ack_memory",
+        description="Record a positive ack signal for a memory (raises its recall score)",
         inputSchema={
                 "properties": {
-                        "session_id": {
-                                "description": "Session UUID",
-                                "type": "string"
-                        },
-                        "turn_index": {
-                                "description": "Turn index of the assistant message to extract from",
-                                "anyOf": [
-                                        {"type": "integer"},
-                                        {"type": "string"}
-                                ]
-                        },
-                        "transcript_path": {
-                                "description": "Absolute path to the JSONL transcript",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Realm for emitted learnings (project name or brahman)",
+                        "id": {
+                                "description": "Node ID to ack",
                                 "type": "string"
                         }
                 },
                 "required": [
-                        "session_id",
-                        "turn_index",
-                        "transcript_path",
-                        "realm"
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="nack_memory",
+        description="Record a negative nack signal for a memory (lowers its recall score)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Node ID to nack",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
                 ],
                 "type": "object"
         }
     ),
     Tool(
         name="observe",
-        description="Store an observation/learning (used by hooks for [LEARN] extraction)",
+        description="Store an observation/learning (SSL v0.4)",
         inputSchema={
                 "properties": {
+                        "arousal": {
+                                "description": "Affect arousal: 0.0 to 1.0",
+                                "type": "number"
+                        },
                         "category": {
-                                "description": "Category: correction, preference, solution, decision, failure, wisdom, episode",
                                 "type": "string"
                         },
                         "confidence": {
-                                "description": "Optional confidence override (0.0-1.0). If not set, derived from category.",
                                 "type": "number"
                         },
                         "content": {
-                                "description": "Full content",
+                                "type": "string"
+                        },
+                        "derivation": {
+                                "description": "SSL v0.4 <=@ provenance: comma-separated source memory IDs this was abstracted from (required at G:1+)",
+                                "type": "string"
+                        },
+                        "flags": {
+                                "description": "Structural flags: ORIGIN,CORE,PIVOT,GENESIS,TURNING",
+                                "type": "string"
+                        },
+                        "granularity": {
+                                "description": "SSL v0.4 granularity tier: 0=atom,1=episode,2=claim,3=operator,4=boundary",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "refs": {
+                                "description": "Cross-references: comma-separated tag names or memory IDs",
+                                "type": "string"
+                        },
+                        "source_loc": {
+                                "description": "SSL v0.4 src: external source grounding, e.g. file:line or doc section",
                                 "type": "string"
                         },
                         "tags": {
-                                "description": "Comma-separated tags",
                                 "type": "string"
                         },
                         "title": {
-                                "description": "Title/summary",
                                 "type": "string"
+                        },
+                        "valence": {
+                                "description": "Affect valence: -1.0 to +1.0",
+                                "type": "number"
                         }
                 },
                 "required": [
@@ -532,22 +797,19 @@ TOOLS = [
     ),
     Tool(
         name="full_resonate",
-        description="Semantic search with full context (for hooks)",
+        description="Semantic search with full context",
         inputSchema={
                 "properties": {
                         "exclude_kinds": {
-                                "description": "Memory kinds to exclude from results",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "include_global": {
-                                "description": "Include global memories (default true)",
                                 "type": "boolean"
                         },
                         "k": {
-                                "description": "Max results",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -558,316 +820,21 @@ TOOLS = [
                                 ]
                         },
                         "partnership_only": {
-                                "description": "Exclude code intel (symbol, projectessence, modulestate, patternstate)",
                                 "type": "boolean"
                         },
                         "query": {
-                                "description": "Search query",
                                 "type": "string"
                         },
                         "realm": {
-                                "description": "Filter by realm (e.g., 'project:my-project')",
                                 "type": "string"
+                        },
+                        "separation_mode": {
+                                "type": "boolean"
                         }
                 },
                 "required": [
                         "query"
                 ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="learn_codebase",
-        description="Learn codebase incrementally - only re-indexes changed files",
-        inputSchema={
-                "properties": {
-                        "exclude": {
-                                "description": "Comma-separated directories to exclude",
-                                "type": "string"
-                        },
-                        "force": {
-                                "description": "Force full re-index (default false)",
-                                "type": "boolean"
-                        },
-                        "incremental": {
-                                "description": "Only process changed files (default true)",
-                                "type": "boolean"
-                        },
-                        "max_files": {
-                                "description": "Max files to process (default 500)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "path": {
-                                "description": "Directory path to analyze",
-                                "type": "string"
-                        },
-                        "project": {
-                                "description": "Project name (auto-detected if empty)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "path"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="find_symbol",
-        description="Search for symbols by name",
-        inputSchema={
-                "properties": {
-                        "kind": {
-                                "description": "Symbol kind filter (function, class, method)",
-                                "type": "string"
-                        },
-                        "name": {
-                                "description": "Symbol name to search",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "name"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="symbol_callers",
-        description="Find all symbols that call the given symbol (reverse call graph)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Symbol ID (alternative to name)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "kind": {
-                                "description": "Filter by symbol kind when using name",
-                                "type": "string"
-                        },
-                        "name": {
-                                "description": "Symbol name to find callers for",
-                                "type": "string"
-                        },
-                        "project": {
-                                "description": "Project name to disambiguate when multiple symbols share the same name",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="symbol_callees",
-        description="Find all symbols that the given symbol calls (forward call graph)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Symbol ID (alternative to name)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "kind": {
-                                "description": "Filter by symbol kind when using name",
-                                "type": "string"
-                        },
-                        "name": {
-                                "description": "Symbol name to find callees for",
-                                "type": "string"
-                        },
-                        "project": {
-                                "description": "Project name to disambiguate when multiple symbols share the same name",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="read_symbol",
-        description="Read the actual source code for a symbol by name or ID",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Symbol ID (alternative to name)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "kind": {
-                                "description": "Filter by symbol kind (function, class, method)",
-                                "type": "string"
-                        },
-                        "name": {
-                                "description": "Symbol name to read",
-                                "type": "string"
-                        },
-                        "project": {
-                                "description": "Project name to disambiguate when multiple symbols share the same name",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="read_function",
-        description="Read the source code of a function/method by name (shorthand for read_symbol with kind=function|method)",
-        inputSchema={
-                "properties": {
-                        "name": {
-                                "description": "Function name to read",
-                                "type": "string"
-                        },
-                        "project": {
-                                "description": "Project name to disambiguate",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "name"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="search_symbols",
-        description="Semantic search for code symbols by natural language query. Returns symbols ranked by embedding similarity.",
-        inputSchema={
-                "properties": {
-                        "kind": {
-                                "description": "Filter by symbol kind (class, function, method)",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max results (default 10)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "project": {
-                                "description": "Filter results to symbols from this project only",
-                                "type": "string"
-                        },
-                        "query": {
-                                "description": "Natural language query to find symbols",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="code_context",
-        description="Get code context summary for hooks",
-        inputSchema={
-                "properties": {
-                        "path": {
-                                "description": "Limit to files under this path",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="smart_context",
-        description="Build intelligent context combining memories, code symbols, and graph relationships. Two modes: fast (<80ms) for PreToolUse hooks, full (<200ms) for UserPromptSubmit hooks.",
-        inputSchema={
-                "properties": {
-                        "code": {
-                                "description": "Include code symbols (default: True)",
-                                "type": "boolean"
-                        },
-                        "limit": {
-                                "description": "Token limit (default: 300)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "memories": {
-                                "description": "Include semantic memories (default: True)",
-                                "type": "boolean"
-                        },
-                        "mode": {
-                                "description": "fast: <80ms (vector + BM25), full: <200ms (full_resonate + semantic)",
-                                "type": "string"
-                        },
-                        "neighbors": {
-                                "description": "Include triplet neighbors (default: True)",
-                                "type": "boolean"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "task": {
-                                "description": "Query to find context for",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "task"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="codebase_overview",
-        description="Get full indexed codebase structure: files, classes, functions, relationships",
-        inputSchema={
-                "properties": {
-                        "format": {
-                                "description": "Output format: tree, flat, or json (default: tree)",
-                                "type": "string"
-                        },
-                        "include_callsites": {
-                                "description": "Include callsite info (default: False)",
-                                "type": "boolean"
-                        },
-                        "project": {
-                                "description": "Project name to filter",
-                                "type": "string"
-                        }
-                },
                 "type": "object"
         }
     ),
@@ -877,23 +844,15 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "content": {
-                                "description": "Content to store",
                                 "type": "string"
                         },
                         "tags": {
-                                "description": "Comma-separated tags",
                                 "type": "string"
                         },
                         "title": {
-                                "description": "Short title",
                                 "type": "string"
                         },
                         "type": {
-                                "description": "Type: wisdom, belief, failure, aspiration, dream",
-                                "type": "string"
-                        },
-                        "write_policy": {
-                                "description": "off (default) = store immediately; merge_aware = LLM dedup check first",
                                 "type": "string"
                         }
                 },
@@ -910,7 +869,6 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Node ID",
                                 "type": "string"
                         }
                 },
@@ -921,12 +879,30 @@ TOOLS = [
         }
     ),
     Tool(
+        name="get_embeddings",
+        description="Batch-fetch raw embedding vectors for memory IDs. Returns JSON object mapping id→vector. Used for computing S-entropy (Gram matrix effective rank) over recall candidates.",
+        inputSchema={
+                "properties": {
+                        "ids": {
+                                "description": "Array of memory ID strings",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        }
+                },
+                "required": [
+                        "ids"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="expand_memory",
-        description="Expand a memory to its full hierarchical context: SSL memory → episode → full turns",
+        description="Expand a memory to full hierarchical context",
         inputSchema={
                 "properties": {
                         "depth": {
-                                "description": "1=memory only, 2=+episode, 3=+full turns (default: 3)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -937,7 +913,6 @@ TOOLS = [
                                 ]
                         },
                         "id": {
-                                "description": "Memory ID to expand",
                                 "type": "string"
                         }
                 },
@@ -953,11 +928,9 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "content": {
-                                "description": "New content",
                                 "type": "string"
                         },
                         "id": {
-                                "description": "Node ID",
                                 "type": "string"
                         }
                 },
@@ -974,15 +947,12 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "object": {
-                                "description": "Object filter",
                                 "type": "string"
                         },
                         "predicate": {
-                                "description": "Predicate filter",
                                 "type": "string"
                         },
                         "subject": {
-                                "description": "Subject filter",
                                 "type": "string"
                         }
                 },
@@ -995,15 +965,12 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "add": {
-                                "description": "Tag to add",
                                 "type": "string"
                         },
                         "id": {
-                                "description": "Node ID",
                                 "type": "string"
                         },
                         "remove": {
-                                "description": "Tag to remove",
                                 "type": "string"
                         }
                 },
@@ -1014,10 +981,2558 @@ TOOLS = [
         }
     ),
     Tool(
-        name="health_check",
-        description="Check daemon health and readiness",
+        name="set_affect",
+        description="Set affect dimensions (valence, arousal) on a memory",
+        inputSchema={
+                "properties": {
+                        "arousal": {
+                                "description": "Emotional arousal: 0.0 to 1.0",
+                                "type": "number"
+                        },
+                        "id": {
+                                "type": "string"
+                        },
+                        "valence": {
+                                "description": "Emotional valence: -1.0 to +1.0",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "id",
+                        "valence",
+                        "arousal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_by_status",
+        description="List memories filtered by lifecycle status (active/superseded/contradicted/archived)",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "default": 50,
+                                "description": "Max results",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "status": {
+                                "default": "superseded",
+                                "description": "Filter: active, superseded, contradicted, archived, or all",
+                                "type": "string"
+                        }
+                },
+                "required": [],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_memories_brief",
+        description="Fast memory index",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "type": "string"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "priority_tier": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_priority_tier",
+        description="Set memory priority tier",
+        inputSchema={
+                "properties": {
+                        "memory_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tier": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "memory_id",
+                        "tier"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_by_priority",
+        description="Budget-aware recall",
+        inputSchema={
+                "properties": {
+                        "budget_tokens": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "include_global": {
+                                "type": "boolean"
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_memory_type",
+        description="Set memory semantic type",
+        inputSchema={
+                "properties": {
+                        "memory_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "type": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "memory_id",
+                        "type"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_type_stats",
+        description="Get memory type statistics",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="forget_kind",
+        description="Bulk-delete all memories of a given kind (e.g. 'habit'). Optionally filter by realm.",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "description": "Memory kind to delete (e.g. habit, unknown)",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max to delete (default 5000)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Optional realm filter",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "kind"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="smart_recall",
+        description="Intelligent memory recall with hierarchical expansion",
+        inputSchema={
+                "properties": {
+                        "expand_top": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "gwt_mode": {
+                                "type": "boolean"
+                        },
+                        "include_global": {
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "separation_mode": {
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="hybrid_recall",
+        description="Combined vector + BM25 + graph recall",
+        inputSchema={
+                "properties": {
+                        "bm25_weight": {
+                                "type": "number"
+                        },
+                        "explain": {
+                                "description": "Include score decomposition per hit (default: False)",
+                                "type": "boolean"
+                        },
+                        "graph_weight": {
+                                "type": "number"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "recency_weight": {
+                                "type": "number"
+                        },
+                        "tag": {
+                                "type": "string"
+                        },
+                        "vector_weight": {
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_session",
+        description="Session-level recall: groups chunk evidence by source session using noisy-OR aggregation. Returns ranked sessions with best evidence.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max sessions to return (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Natural language query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Realm filter (optional)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_spreading",
+        description="Retrieve memories via entity graph spreading activation",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Query; entity seeds extracted automatically",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Realm filter (optional)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="structured_recall",
+        description="Three-lens recall: facts, context, and temporal agents merged for high-fidelity retrieval",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="route_stats",
+        description="Show route learner status and arm configuration for smart_recall",
         inputSchema={
                 "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="ask",
+        description="Natural language insight query: retrieves and synthesizes memories to answer a question about the user, session, or project",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "question": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "question"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="expand_query",
+        description="Expand query into typed variants",
+        inputSchema={
+                "properties": {
+                        "query": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="log_event",
+        description="Log a structured action event to the CEC tape and CDAWG (tool, entity, outcome: 0=success 1=fail 2=error 3=partial)",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "outcome": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        },
+                        "ts_ms": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_last_action",
+        description="Return last k occurrences of (tool, entity) from the CEC event tape",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "k": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_failure_pattern",
+        description="Return top-k CDAWG states with high failure rates (fail_ratio > 0.6, fail_count >= 3)",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_causal_antecedent",
+        description="PMI-ranked causal antecedents: what actions typically precede (tool, entity)?",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "k": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_hdcbind",
+        description="Heteroassociative HDC query: given known_role=known_val, infer query_role. Roles: tool, entity, outcome.",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "known_role": {
+                                "type": "string"
+                        },
+                        "known_val": {
+                                "type": "string"
+                        },
+                        "query_role": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "known_role",
+                        "known_val",
+                        "query_role"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="consolidation_pass",
+        description="Run Sequitur grammar consolidation: find frequent bigrams in EventTape and promote rules to the triplet KG (subject=rule:..., predicates: compresses/avg_outcome/support/tape_range).",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_counterfactual",
+        description="CDAWG sibling-edge counterfactual: what alternative tool/entity would have had a lower failure rate in this same context?",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "k": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "outcome": {
+                                "description": "0=success 1=fail 2=error 3=partial (default 1)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="refutation_stats",
+        description="Show Sequitur rules that are being falsified: rules whose antecedent appears but is NOT followed by the expected consequent. Returns live/refuted counts and top-k by refutation ratio.",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "description": "Max rules to show (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_motif_value",
+        description="Return top-k CDAWG motif states reachable from (tool, entity) ranked by Q-value: which action sequences have the highest expected success rate from this context?",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "k": {
+                                "description": "Max states to return (default 5)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="span_query",
+        description="Retrieve verbatim transcript atoms (file paths, URLs, file:line locators, bash commands, error signatures) captured across all sessions. No LLM/GPU: exact-substring recall over a deduplicated span index. Realm-scoped by default to prevent cross-project bleed. Use when you need an exact locator you saw before, not a paraphrase.",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "description": "Max atoms to return (default 6)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Substring or token to match against stored atoms",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Restrict to this realm (project); empty = unscoped",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="span_backfill",
+        description="Backfill the span lane over all transcripts under projects_dir (default ~/.claude/projects). Incremental + idempotent via per-file watermarks. Reports unique atoms, new atoms, redaction count.",
+        inputSchema={
+                "properties": {
+                        "projects_dir": {
+                                "description": "Transcript root (default ~/.claude/projects)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="span_backfill_memories",
+        description="Backfill the memory↔span edge: run the atom extractor over every live memory's text so distilled beliefs link to the verbatim paths/commands/ids they mention. Idempotent (per-memory content hash); superseded memories relink. Reports memories linked + new spans.",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="span_stats",
+        description="Report span lane size: unique atoms, on-disk bytes, total redactions.",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="executor_flush",
+        description="Promote shadow intervention policies that have passed the 20-event / lift>0.15 gate, demote policies whose source rule is refuted, and report active policy stats. Safe to call any time; idempotent.",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="list_policies",
+        description="List CEC intervention policies (shadow and active). Each entry shows rule source, kind (OpenTask/TurnInjection/GuardPolicy), shadow event count, lift, and fire count.",
+        inputSchema={
+                "properties": {
+                        "active_only": {
+                                "description": "If true, only return active (promoted) policies",
+                                "type": "boolean"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_true_counterfactual",
+        description="Return decision points where (tool, entity) was explicitly considered and rejected. Uses the DecisionTape (Phase 10), not CDAWG sibling inference. Requires prior log_event_ex or log_decision calls.",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "k": {
+                                "description": "Max results (default 5)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "outcome": {
+                                "description": "0=success 1=fail 2=error (default 0)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="hypothesis_probes",
+        description="Top-k Sequitur rules ranked by expected information gain (Wilson probe_value). Maximized at p_hat=0.5 — rules the system is most uncertain about. Run consolidation_pass first to populate.",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "description": "Max rules to return (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="log_event_ex",
+        description="Log a CEC event with regret-shaping telemetry (token_cost, latency_ms, retry_count). Updates Q-values with utility = outcome_reward - 0.001*token_cost - 0.00001*latency_ms - 0.1*retry_count.",
+        inputSchema={
+                "properties": {
+                        "entity": {
+                                "type": "string"
+                        },
+                        "latency_ms": {
+                                "description": "Wall-clock ms (0=unknown)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "outcome": {
+                                "description": "0=success 1=fail 2=error 3=partial",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "retry_count": {
+                                "description": "Retries before this outcome",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "token_cost": {
+                                "description": "Tokens consumed (0=unknown)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tool": {
+                                "type": "string"
+                        },
+                        "ts_ms": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "tool",
+                        "entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="log_decision",
+        description="Log a decision point to the DecisionTape: chosen action + alternatives considered and rejected. Enables recall_true_counterfactual.",
+        inputSchema={
+                "properties": {
+                        "chosen_entity": {
+                                "type": "string"
+                        },
+                        "chosen_outcome": {
+                                "description": "0=success 1=fail 2=error 3=partial",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "chosen_tool": {
+                                "type": "string"
+                        },
+                        "confidence_delta": {
+                                "description": "chosen_confidence - best_alternative_confidence",
+                                "type": "number"
+                        },
+                        "rejected_json": {
+                                "description": "JSON array of [sym_u64, rejection_reason_u8] pairs",
+                                "type": "string"
+                        },
+                        "ts_ms": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "chosen_tool",
+                        "chosen_entity"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="learn_codebase",
+        description="Learn codebase by extracting symbols. path can be a local directory or a remote git URL (https://github.com/..., git@github.com:...). Remote repos are shallow-cloned into a temp dir, indexed, then deleted.",
+        inputSchema={
+                "properties": {
+                        "branch": {
+                                "description": "Branch, tag, or commit to clone (remote only)",
+                                "type": "string"
+                        },
+                        "exclude": {
+                                "type": "string"
+                        },
+                        "force": {
+                                "type": "boolean"
+                        },
+                        "incremental": {
+                                "type": "boolean"
+                        },
+                        "max_files": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "path": {
+                                "description": "Local path or remote git URL",
+                                "type": "string"
+                        },
+                        "project": {
+                                "description": "Project name (defaults to repo/dir name)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "path"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="find_symbol",
+        description="Search for symbols by name",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "type": "string"
+                        },
+                        "name": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "name"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="symbol_callers",
+        description="Find all symbols that call the given symbol",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "kind": {
+                                "type": "string"
+                        },
+                        "name": {
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="symbol_callees",
+        description="Find all symbols that the given symbol calls",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "kind": {
+                                "type": "string"
+                        },
+                        "name": {
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="read_symbol",
+        description="Read actual source code for a symbol",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "kind": {
+                                "type": "string"
+                        },
+                        "name": {
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="read_function",
+        description="Read source of a function/method by name",
+        inputSchema={
+                "properties": {
+                        "name": {
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "name"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="search_symbols",
+        description="Semantic search for code symbols",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "type": "string"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "project": {
+                                "type": "string"
+                        },
+                        "query": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="code_context",
+        description="Get code context summary",
+        inputSchema={
+                "properties": {
+                        "path": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="smart_context",
+        description="Build intelligent context combining memories, code, and graph",
+        inputSchema={
+                "properties": {
+                        "code": {
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "memories": {
+                                "type": "boolean"
+                        },
+                        "mode": {
+                                "type": "string"
+                        },
+                        "neighbors": {
+                                "type": "boolean"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "task": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="codebase_overview",
+        description="Get full indexed codebase structure",
+        inputSchema={
+                "properties": {
+                        "format": {
+                                "type": "string"
+                        },
+                        "include_callsites": {
+                                "type": "boolean"
+                        },
+                        "project": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="embed_symbols",
+        description="Fast embed symbol metadata",
+        inputSchema={
+                "properties": {
+                        "batch_size": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reset": {
+                                "type": "boolean"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="distill_set_model",
+        description="Change distillation model",
+        inputSchema={
+                "properties": {
+                        "enabled": {
+                                "type": "boolean"
+                        },
+                        "model": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "model"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="metacognition_evaluate",
+        description="Self-evaluate learning effectiveness",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_note_gap",
+        description="Record a knowledge gap",
+        inputSchema={
+                "properties": {
+                        "context": {
+                                "type": "string"
+                        },
+                        "gap": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "gap"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_gaps",
+        description="List knowledge gaps",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_resolve",
+        description="Mark gap as resolved",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "learned": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="lookup",
+        description="Unified memory lookup. Classifies intent, fans out to keyword/semantic/triplet/temporal/code backends, fuses with weighted RRF. Use this as the default memory search.",
+        inputSchema={
+                "properties": {
+                        "explain": {
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "mode": {
+                                "enum": [
+                                        "auto",
+                                        "fast",
+                                        "deep"
+                                ],
+                                "type": "string"
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="compact_context",
+        description="Memory-aware context compaction. Scores conversation messages by recency, semantic relevance to query, and memory coverage (content already in memory is safer to drop). Returns a subset of messages fitting the target token budget.",
+        inputSchema={
+                "properties": {
+                        "distill_novel": {
+                                "description": "Reserved for future use",
+                                "type": "boolean"
+                        },
+                        "messages": {
+                                "description": "Conversation messages [{role,content}]",
+                                "items": {
+                                        "type": "object"
+                                },
+                                "type": "array"
+                        },
+                        "query": {
+                                "description": "Upcoming task hint for semantic scoring",
+                                "type": "string"
+                        },
+                        "target_ratio": {
+                                "description": "Fraction of tokens to KEEP (default 0.4)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "messages"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="trajectory_compact",
+        description="Attention-weighted turn selection from a transcript. Embeds each turn, scores by cosine similarity to the task description, applies MAD adaptive threshold, enforces token budget. Returns a lossless subset of the most task-relevant turns.",
+        inputSchema={
+                "properties": {
+                        "budget_tokens": {
+                                "description": "Target token budget (default 4000)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "include_system": {
+                                "description": "Include system turns (default false)",
+                                "type": "boolean"
+                        },
+                        "mad_k": {
+                                "description": "MAD threshold multiplier (default 1.5, lower=more turns)",
+                                "type": "number"
+                        },
+                        "path": {
+                                "description": "Direct path to JSONL transcript",
+                                "type": "string"
+                        },
+                        "role_filter": {
+                                "description": "Filter by role: user, assistant, or empty for all",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session ID (auto-finds transcript)",
+                                "type": "string"
+                        },
+                        "task": {
+                                "description": "What the downstream agent needs to accomplish",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_evidence_type",
+        description="Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)",
+        inputSchema={
+                "properties": {
+                        "evidence_type": {
+                                "description": "One of: observation, inference, hearsay, authoritative, prediction",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "evidence_type"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_evidence_type",
+        description="Retrieve the evidence type tag of a memory",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="labile_memories",
+        description="List memories recalled multiple times recently — candidates for reconsolidation (excludes freshly-written hook memories)",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_access": {
+                                "description": "Min recall count to qualify (default 2)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "window_hours": {
+                                "description": "Recency window in hours (default 48)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="reconsolidate",
+        description="Update content of a memory during its labile window (reconsolidation)",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "New/corrected content",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Memory ID to update",
+                                "type": "string"
+                        },
+                        "reason": {
+                                "description": "Optional reason for reconsolidation",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "content"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="5w_search",
+        description="Multi-dimensional semantic search across who/what/when/where/why axes",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "what": {
+                                "description": "What is happening/topic",
+                                "type": "string"
+                        },
+                        "when": {
+                                "description": "Temporal description",
+                                "type": "string"
+                        },
+                        "where": {
+                                "description": "Location or context",
+                                "type": "string"
+                        },
+                        "who": {
+                                "description": "Who is involved",
+                                "type": "string"
+                        },
+                        "why": {
+                                "description": "Motivation or reason",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_ucb1",
+        description="Recall with UCB1 exploration bonus — surfaces novel under-accessed memories alongside relevant ones",
+        inputSchema={
+                "properties": {
+                        "exploration": {
+                                "description": "Exploration weight sqrt(2)\u22481.414 (default)",
+                                "type": "number"
+                        },
+                        "fetch_k": {
+                                "description": "Candidate pool size before re-ranking (default 40)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="find_near_duplicates",
+        description="Find memory pairs with high semantic similarity (near-duplicates)",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max pairs to return (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "threshold": {
+                                "description": "Cosine similarity threshold (default 0.90)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="consolidate_similar",
+        description="Merge near-duplicate memories — keeps stronger, soft-deletes weaker",
+        inputSchema={
+                "properties": {
+                        "dry_run": {
+                                "description": "Preview without deleting (default true)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max pairs to merge (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "threshold": {
+                                "description": "Similarity threshold (default 0.92)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="cooccurrence_graph",
+        description="Show top co-activated memory associations for a given memory",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max edges to return (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="labile_memories_top",
+        description="List the most-accessed (most labile) memories — candidates for reconsolidation",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="probe_seed",
+        description="Store an exemplar text as a centroid for a behavioral class (sycophantic/hedging/shallow/direct). Bootstrap the probe with representative examples.",
+        inputSchema={
+                "properties": {
+                        "class": {
+                                "description": "Behavioral class: sycophantic | hedging | shallow | direct",
+                                "type": "string"
+                        },
+                        "note": {
+                                "description": "Optional annotation",
+                                "type": "string"
+                        },
+                        "text": {
+                                "description": "Exemplar text for this class",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "class",
+                        "text"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="behavioral_probe",
+        description="Score text against behavioral centroid clusters. Returns per-class similarity scores (sycophantic/hedging/shallow/direct) and overall quality estimate. Requires prior probe_seed calls.",
+        inputSchema={
+                "properties": {
+                        "text": {
+                                "description": "Text to probe (e.g. a Claude response)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "text"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="probe_calibrate",
+        description="Add a confirmed exemplar to a behavioral class to refine its centroid. Use when you have a clear example of the behavior.",
+        inputSchema={
+                "properties": {
+                        "class": {
+                                "description": "Behavioral class to update",
+                                "type": "string"
+                        },
+                        "text": {
+                                "description": "Confirmed exemplar text",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "class",
+                        "text"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="probe_status",
+        description="Show how many exemplars exist per behavioral class. Use to verify the probe is seeded before running behavioral_probe.",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="read_transcript",
+        description="Read JSONL transcript with pagination",
+        inputSchema={
+                "properties": {
+                        "keyword": {
+                                "type": "string"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_chars_per_turn": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "metadata_only": {
+                                "type": "boolean"
+                        },
+                        "path": {
+                                "type": "string"
+                        },
+                        "role_filter": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "start_turn": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_turns",
+        description="Get conversation turns for a session",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "start_index": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="create_episode",
+        description="Create dialogue episode for conversation tracking",
+        inputSchema={
+                "properties": {
+                        "end_turn": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "episode_type": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "start_turn": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "title": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "session_id",
+                        "title",
+                        "start_turn"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_send",
+        description="Send message to another session",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "type": "string"
+                        },
+                        "content_type": {
+                                "type": "string"
+                        },
+                        "priority": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "target": {
+                                "type": "string"
+                        },
+                        "target_type": {
+                                "type": "string"
+                        },
+                        "ttl": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "target",
+                        "content"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_inbox",
+        description="Check unread messages",
+        inputSchema={
+                "properties": {
+                        "auto_ack": {
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_priority": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_ack_all",
+        description="Acknowledge all messages",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_respond",
+        description="Reply to a message using the original sender/target from the event",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "Reply content",
+                                "type": "string"
+                        },
+                        "message_id": {
+                                "description": "Event ID of the message to reply to",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "description": "Override sender session_id (defaults to original target)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "message_id",
+                        "content"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_history",
+        description="Get message history",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="session_list",
+        description="List active sessions",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "type": "string"
+                        },
+                        "status": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="session_sync",
+        description="Sync session registry",
+        inputSchema={
+                "properties": {
+                        "projects_dir": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_status",
+        description="Get effective status of a memory: active, superseded, or contradicted — checks incoming supersedes triplets",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "type": "string"
+                        },
+                        "memory_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_provenance",
+        description="Show why a memory exists: source, evidence, superseded_by, supersedes relations",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to inspect",
+                                "type": "string"
+                        },
+                        "memory_id": {
+                                "description": "Memory ID (numeric)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="compact_wal",
+        description="Compact WAL: save full snapshot then delete covered segments",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="trim_realm_names",
+        description="Fix realm names with trailing whitespace/newlines",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="save_spectral_snapshot",
+        description="Save spectral stats snapshot for drift tracking",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="spectral_drift",
+        description="Compare current embedding geometry with last snapshot",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="queue_status",
+        description="Live work-queue depth (pending in-flight + unclaimed), processed/distilled/failed counters, pending embeddings, dead-letters",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="ledger_health",
+        description="Get ledger event counts by kind and queue health metrics",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="health_check",
+        description="Check daemon health",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="soul_context",
+        description="Get current soul state and statistics",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="resonance_stats",
+        description="Show ResonanceLearner Bayesian bandit stats",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="pending_embed_ids",
+        description="Return IDs of memories awaiting embedding (stuck embed queue)",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="rebuild_fts_index",
+        description="Rebuild FTS index for BM25 search",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="prune_episodes",
+        description="Prune old/excess episode memories. Deletes episodes older than max_age_days (strength<0.3) and caps total count at max_count.",
+        inputSchema={
+                "properties": {
+                        "max_age_days": {
+                                "description": "Delete episodes older than this (default 90)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_count": {
+                                "description": "Cap total episode count at this (default 10000)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="write_gate_stats",
+        description="Show write-gate admission stats: staged memory count and oldest staged memory age",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="symbol_event_log",
+        description="Query the symbol-keyed event log. Filter by symbol_name and/or file_path.",
+        inputSchema={
+                "properties": {
+                        "file_path": {
+                                "description": "Filter by file path",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max events to return (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "symbol_name": {
+                                "description": "Filter by symbol name",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="mark_memory_invalidated",
+        description="Mark a memory as invalidated by a commit hash or symbol-change ID.",
+        inputSchema={
+                "properties": {
+                        "memory_id": {
+                                "description": "Memory ID to mark",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reason": {
+                                "description": "Commit hash or change ID causing invalidation",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "memory_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="what_do_i_know_about",
+        description="Introspection: return claims + provenance + staleness + contradictions for a topic",
+        inputSchema={
+                "properties": {
+                        "confidence_min": {
+                                "description": "Minimum confidence threshold (default 0.0)",
+                                "type": "number"
+                        },
+                        "include_contradictions": {
+                                "description": "Include contradiction info (default true)",
+                                "type": "boolean"
+                        },
+                        "include_stale": {
+                                "description": "Include stale memories (default true)",
+                                "type": "boolean"
+                        },
+                        "k": {
+                                "description": "Max claims to return (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Realm filter",
+                                "type": "string"
+                        },
+                        "topic": {
+                                "description": "Topic or question to introspect",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "topic"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="cross_harness_conflicts",
+        description="Find memories where claude-code and codex harnesses disagree on the same topic",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max conflict pairs to return (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_disagreement_score": {
+                                "description": "Minimum 1-cosine_similarity threshold (default 0.3)",
+                                "type": "number"
+                        },
+                        "realm": {
+                                "description": "Realm filter (default: all)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="hygiene_stats",
+        description="Get memory hygiene statistics",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_list",
+        description="List all themes with statistics",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_get",
+        description="Get theme details",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_recall",
+        description="Two-stage theme-based retrieval",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_stats",
+        description="Get theme organization statistics",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "type": "string"
+                        }
+                },
                 "type": "object"
         }
     ),
@@ -1035,7 +3550,6 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID",
                                 "type": "string"
                         }
                 },
@@ -1051,11 +3565,9 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID",
                                 "type": "string"
                         },
                         "realm": {
-                                "description": "Primary realm name",
                                 "type": "string"
                         }
                 },
@@ -1068,15 +3580,13 @@ TOOLS = [
     ),
     Tool(
         name="realm_add",
-        description="Add memory to a shared realm (multi-realm membership)",
+        description="Add memory to a shared realm (stub)",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID",
                                 "type": "string"
                         },
                         "realm": {
-                                "description": "Realm to add to",
                                 "type": "string"
                         }
                 },
@@ -1089,15 +3599,13 @@ TOOLS = [
     ),
     Tool(
         name="realm_remove",
-        description="Remove memory from a shared realm",
+        description="Remove memory from a shared realm (stub)",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID",
                                 "type": "string"
                         },
                         "realm": {
-                                "description": "Realm to remove from",
                                 "type": "string"
                         }
                 },
@@ -1110,15 +3618,13 @@ TOOLS = [
     ),
     Tool(
         name="realm_visibility",
-        description="Set visibility level for a memory (0=Private, 1=Shared, 2=Global)",
+        description="Set visibility level (stub)",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID",
                                 "type": "string"
                         },
                         "visibility": {
-                                "description": "0=Private, 1=Shared, 2=Global",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -1138,7 +3644,7 @@ TOOLS = [
     ),
     Tool(
         name="realm_detect",
-        description="Detect current realm from environment, .cc-soul-realm file, or git repository",
+        description="Detect current realm from environment",
         inputSchema={
                 "properties": {},
                 "type": "object"
@@ -1146,74 +3652,61 @@ TOOLS = [
     ),
     Tool(
         name="ledger_save",
-        description="Save session checkpoint for continuity",
+        description="Save session checkpoint",
         inputSchema={
                 "properties": {
                         "active_files": {
-                                "description": "Array of file paths",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "blockers": {
-                                "description": "Array of blockers",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "coherence": {
-                                "description": "Coherence score 0-1",
                                 "type": "number"
                         },
                         "confidence": {
-                                "description": "Confidence score 0-1",
                                 "type": "number"
                         },
                         "decisions": {
-                                "description": "Array of key decisions",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "discoveries": {
-                                "description": "Array of discoveries",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "mood": {
-                                "description": "Current feeling: confident|uncertain|flowing|frustrated",
                                 "type": "string"
                         },
                         "next_steps": {
-                                "description": "Array of next steps",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "project": {
-                                "description": "Project scope",
                                 "type": "string"
                         },
                         "session_id": {
-                                "description": "Session identifier",
                                 "type": "string"
                         },
                         "snapshot": {
-                                "description": "Full checkpoint text for reconstruction",
                                 "type": "string"
                         },
                         "todos": {
-                                "description": "Array of {content, status} objects",
                                 "type": "array"
                         },
                         "transcript_path": {
-                                "description": "Path to JSONL transcript file for full context recovery",
                                 "type": "string"
                         }
                 },
@@ -1226,12 +3719,14 @@ TOOLS = [
         description="Load most recent checkpoint",
         inputSchema={
                 "properties": {
+                        "include_snapshot": {
+                                "description": "Include snapshot preview (truncated) in response",
+                                "type": "boolean"
+                        },
                         "project": {
-                                "description": "Project filter (optional)",
                                 "type": "string"
                         },
                         "session_id": {
-                                "description": "Session identifier (optional)",
                                 "type": "string"
                         }
                 },
@@ -1244,7 +3739,6 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max entries to return (default 10)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -1255,7 +3749,6 @@ TOOLS = [
                                 ]
                         },
                         "project": {
-                                "description": "Project filter (optional)",
                                 "type": "string"
                         }
                 },
@@ -1264,24 +3757,24 @@ TOOLS = [
     ),
     Tool(
         name="ledger_get",
-        description="Get specific checkpoint by ID",
+        description="Get checkpoint by key or session/project",
         inputSchema={
                 "properties": {
-                        "id": {
-                                "description": "Checkpoint ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
+                        "include_snapshot": {
+                                "description": "Include snapshot preview (truncated) in response",
+                                "type": "boolean"
+                        },
+                        "key": {
+                                "description": "Canonical checkpoint key (session:project)",
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
                         }
                 },
-                "required": [
-                        "id"
-                ],
                 "type": "object"
         }
     ),
@@ -1290,57 +3783,47 @@ TOOLS = [
         description="Delete checkpoint",
         inputSchema={
                 "properties": {
-                        "id": {
-                                "description": "Checkpoint ID to delete",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
+                        "key": {
+                                "description": "Canonical checkpoint key (session:project)",
+                                "type": "string"
+                        },
+                        "project": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
                         }
                 },
-                "required": [
-                        "id"
-                ],
                 "type": "object"
         }
     ),
     Tool(
         name="long_task_start",
-        description="Start a long-running task with goal and completion criteria",
+        description="Start a long-running task",
         inputSchema={
                 "properties": {
                         "goal": {
-                                "description": "What you're trying to achieve",
                                 "type": "string"
                         },
                         "hard_checks": {
-                                "description": "Deterministic completion criteria",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "realm": {
-                                "description": "Project scope (default: brahman)",
                                 "type": "string"
                         },
                         "soft_checks": {
-                                "description": "Semantic completion criteria",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "task_id": {
-                                "description": "Unique task identifier",
                                 "type": "string"
                         },
                         "work_items": {
-                                "description": "Initial subtasks",
                                 "items": {
                                         "type": "string"
                                 },
@@ -1360,7 +3843,6 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         }
                 },
@@ -1372,11 +3854,10 @@ TOOLS = [
     ),
     Tool(
         name="long_task_active",
-        description="Get the active long-running task for a realm",
+        description="Get active long-running task",
         inputSchema={
                 "properties": {
                         "realm": {
-                                "description": "Project scope (optional)",
                                 "type": "string"
                         }
                 },
@@ -1385,26 +3866,22 @@ TOOLS = [
     ),
     Tool(
         name="long_task_update",
-        description="Update a long-running task progress",
+        description="Update long-running task progress",
         inputSchema={
                 "properties": {
                         "blockers": {
-                                "description": "Current blockers",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "completed_summary": {
-                                "description": "What's been accomplished",
                                 "type": "string"
                         },
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         },
                         "work_items": {
-                                "description": "Updated subtasks",
                                 "items": {
                                         "type": "string"
                                 },
@@ -1419,15 +3896,13 @@ TOOLS = [
     ),
     Tool(
         name="long_task_complete",
-        description="Mark a long-running task as completed",
+        description="Mark task as completed",
         inputSchema={
                 "properties": {
                         "outcome": {
-                                "description": "Final outcome description",
                                 "type": "string"
                         },
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         }
                 },
@@ -1440,30 +3915,28 @@ TOOLS = [
     ),
     Tool(
         name="long_task_event",
-        description="Append an event to the task log (tool result, decision, observation)",
+        description="Append event to task log",
         inputSchema={
                 "properties": {
                         "kind": {
-                                "description": "Event type: tool_result, decision, observation, error, checkpoint",
                                 "type": "string"
                         },
                         "payload": {
-                                "description": "Event data (JSON)",
                                 "type": "string"
                         },
                         "related_entities": {
-                                "description": "Related files/functions",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "tags": {
-                                "description": "Tags for filtering (comma-separated string or JSON array)",
-                                "type": "string"
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
                         },
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         }
                 },
@@ -1476,40 +3949,34 @@ TOOLS = [
     ),
     Tool(
         name="checkpoint",
-        description="Save session state. Uses active long task if exists, otherwise standalone ledger.",
+        description="Save session state",
         inputSchema={
                 "properties": {
                         "active_files": {
-                                "description": "Files being worked on",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "discoveries": {
-                                "description": "Insights learned",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "mood": {
-                                "description": "confident|uncertain|flowing|frustrated",
                                 "type": "string"
                         },
                         "next_steps": {
-                                "description": "Next actions",
                                 "items": {
                                         "type": "string"
                                 },
                                 "type": "array"
                         },
                         "realm": {
-                                "description": "Project scope",
                                 "type": "string"
                         },
                         "summary": {
-                                "description": "What's been accomplished",
                                 "type": "string"
                         }
                 },
@@ -1518,11 +3985,10 @@ TOOLS = [
     ),
     Tool(
         name="long_task_snapshot",
-        description="Get synthesized task context for injection (what's done, pending, blockers, relevant memories)",
+        description="Get synthesized task context",
         inputSchema={
                 "properties": {
                         "max_tokens": {
-                                "description": "Max output tokens (default: 2000)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -1533,11 +3999,9 @@ TOOLS = [
                                 ]
                         },
                         "mode": {
-                                "description": "Output mode: inject (compact) or debug (verbose)",
                                 "type": "string"
                         },
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         }
                 },
@@ -1549,11 +4013,10 @@ TOOLS = [
     ),
     Tool(
         name="long_task_evaluate",
-        description="Evaluate task completion: run hard checks, return decision (complete/continue/blocked)",
+        description="Evaluate task completion",
         inputSchema={
                 "properties": {
                         "task_id": {
-                                "description": "Task identifier",
                                 "type": "string"
                         }
                 },
@@ -1564,44 +4027,72 @@ TOOLS = [
         }
     ),
     Tool(
-        name="metacognition_evaluate",
-        description="Self-evaluate learning effectiveness. Returns metrics and recommendations.",
+        name="skill_upload",
+        description="Upload a new skill version",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "type": "string"
+                        },
+                        "skill_id": {
+                                "type": "string"
+                        },
+                        "tags": {
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "uploaded_by": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "skill_id",
+                        "content"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="skill_read",
+        description="Read a skill version (0=latest)",
+        inputSchema={
+                "properties": {
+                        "skill_id": {
+                                "type": "string"
+                        },
+                        "version": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "skill_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="skill_list",
+        description="List all skills",
         inputSchema={
                 "properties": {},
                 "type": "object"
         }
     ),
     Tool(
-        name="curiosity_note_gap",
-        description="Record a knowledge gap - something I don't know or couldn't answer",
-        inputSchema={
-                "properties": {
-                        "context": {
-                                "description": "When/why this came up",
-                                "type": "string"
-                        },
-                        "gap": {
-                                "description": "What I don't know",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Project scope",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "gap"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="curiosity_gaps",
-        description="List current knowledge gaps awaiting exploration",
+        name="skill_search",
+        description="Search skills by query",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max gaps (default: 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -1611,593 +4102,98 @@ TOOLS = [
                                         }
                                 ]
                         },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="curiosity_resolve",
-        description="Mark a gap as explored/resolved",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Gap memory ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "learned": {
-                                "description": "What was learned",
+                        "query": {
                                 "type": "string"
                         }
                 },
                 "required": [
-                        "id"
+                        "query"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="anticipation_observe",
-        description="Record a context→action pattern. Called when an action is taken in response to a context.",
+        name="skill_deprecate",
+        description="Deprecate a skill",
         inputSchema={
                 "properties": {
-                        "action": {
-                                "description": "What was done in response",
-                                "type": "string"
-                        },
-                        "context": {
-                                "description": "What triggered the action (situation/state)",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Project scope (default: brahman)",
+                        "skill_id": {
                                 "type": "string"
                         }
                 },
                 "required": [
-                        "context",
-                        "action"
+                        "skill_id"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="anticipation_predict",
-        description="Given a context, predict likely actions based on learned patterns.",
+        name="agent_upsert",
+        description="Register or update an agent",
         inputSchema={
                 "properties": {
-                        "context": {
-                                "description": "Current situation/context",
+                        "agent_id": {
                                 "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max predictions (default: 5)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "min_confidence": {
-                                "description": "Minimum pattern confidence (default: 0.3)",
-                                "type": "number"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "context"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="anticipation_success",
-        description="Mark a predicted action as successful - the prediction was correct and helpful.",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Pattern ID to mark successful",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="anticipation_list",
-        description="List learned anticipation patterns, ordered by frequency.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max patterns (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "sort_by": {
-                                "description": "Sort by: frequency, confidence, created_at (default: frequency)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="habit_observe",
-        description="Record a trigger→response pattern. Each observation strengthens the habit.",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Project scope (default: brahman)",
-                                "type": "string"
-                        },
-                        "response": {
-                                "description": "What should happen when triggered",
-                                "type": "string"
-                        },
-                        "trigger": {
-                                "description": "What triggers the habit",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "trigger",
-                        "response"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="habit_match",
-        description="Find habits that match the given context.",
-        inputSchema={
-                "properties": {
-                        "context": {
-                                "description": "Current context to match against",
-                                "type": "string"
-                        },
-                        "min_strength": {
-                                "description": "Minimum habit strength 0-1 (default: 0.3)",
-                                "type": "number"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "context"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="habit_strengthen",
-        description="Manually strengthen a habit.",
-        inputSchema={
-                "properties": {
-                        "amount": {
-                                "description": "Amount to strengthen (default: 0.1)",
-                                "type": "number"
-                        },
-                        "id": {
-                                "description": "Habit ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="habit_weaken",
-        description="Weaken a habit (negative feedback).",
-        inputSchema={
-                "properties": {
-                        "amount": {
-                                "description": "Amount to weaken (default: 0.05)",
-                                "type": "number"
-                        },
-                        "id": {
-                                "description": "Habit ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="habit_list",
-        description="List formed habits, ordered by strength.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max habits (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "min_strength": {
-                                "description": "Minimum strength (default: 0)",
-                                "type": "number"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "sort_by": {
-                                "description": "Sort by: strength, frequency, created_at (default: strength)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="profile_get",
-        description="Get user profile - expertise, communication style, work patterns, preferences.",
-        inputSchema={
-                "properties": {
-                        "user_id": {
-                                "description": "User ID (default: 'default')",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="profile_update",
-        description="Update a specific profile field (expertise_json, style_json, patterns_json, preferences_json).",
-        inputSchema={
-                "properties": {
-                        "field": {
-                                "description": "Field to update: expertise_json, style_json, patterns_json, preferences_json",
-                                "type": "string"
-                        },
-                        "user_id": {
-                                "description": "User ID (default: 'default')",
-                                "type": "string"
-                        },
-                        "value": {
-                                "description": "JSON value for the field",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "field",
-                        "value"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="profile_observe",
-        description="Record an observation about the user (expertise, style, pattern, preference).",
-        inputSchema={
-                "properties": {
-                        "observation_type": {
-                                "description": "Type: expertise, style, pattern, preference",
-                                "type": "string"
-                        },
-                        "user_id": {
-                                "description": "User ID (default: 'default')",
-                                "type": "string"
-                        },
-                        "value": {
-                                "description": "For expertise: 'domain:level'. For others: JSON object",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "observation_type",
-                        "value"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="goal_set",
-        description="Define a new long-term goal with optional milestones and deadline.",
-        inputSchema={
-                "properties": {
-                        "deadline": {
-                                "description": "Unix timestamp deadline (optional)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
                         },
                         "description": {
-                                "description": "Detailed description",
                                 "type": "string"
                         },
-                        "milestones": {
-                                "description": "JSON array: [{\"name\":\"v1\",\"done\":false}, ...]",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Project scope (default: brahman)",
-                                "type": "string"
-                        },
-                        "title": {
-                                "description": "Short goal name (e.g., 'Ship v4.0')",
+                        "display_name": {
                                 "type": "string"
                         }
                 },
                 "required": [
-                        "title"
+                        "agent_id"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="goal_get",
-        description="Get details of a specific goal by ID.",
+        name="agent_get",
+        description="Get agent record",
         inputSchema={
                 "properties": {
-                        "id": {
-                                "description": "Goal ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
+                        "agent_id": {
+                                "type": "string"
                         }
                 },
                 "required": [
-                        "id"
+                        "agent_id"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="goal_list",
-        description="List goals, optionally filtered by status and realm.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max results (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "sort_by": {
-                                "description": "Sort by: progress, created_at, updated_at (default: updated_at)",
-                                "type": "string"
-                        },
-                        "status": {
-                                "description": "Filter: active, paused, completed, abandoned (default: active)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="goal_progress",
-        description="Update goal progress (0-1) and optionally mark a milestone complete.",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Goal ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "milestone": {
-                                "description": "Milestone name to mark complete (optional)",
-                                "type": "string"
-                        },
-                        "progress": {
-                                "description": "Progress 0-1 (e.g., 0.5 = 50%)",
-                                "type": "number"
-                        }
-                },
-                "required": [
-                        "id",
-                        "progress"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="goal_complete",
-        description="Mark a goal as completed with an outcome summary.",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Goal ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "outcome": {
-                                "description": "Summary of what was achieved",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "id",
-                        "outcome"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="calibration_record",
-        description="Record a prediction outcome (success/failure) for a domain to track accuracy.",
-        inputSchema={
-                "properties": {
-                        "domain": {
-                                "description": "Domain (e.g., 'code', 'architecture', 'debugging')",
-                                "type": "string"
-                        },
-                        "success": {
-                                "description": "Was the prediction correct?",
-                                "type": "boolean"
-                        }
-                },
-                "required": [
-                        "domain",
-                        "success"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="calibration_score",
-        description="Get accuracy score for a domain or all domains.",
-        inputSchema={
-                "properties": {
-                        "domain": {
-                                "description": "Specific domain (optional - omit for all)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="hygiene_stats",
-        description="Get memory hygiene statistics - confidence distribution, growth rate, stale memories.",
-        inputSchema={
-                "type": "object",
-                "properties": {}
-        }
-    ),
-    Tool(
-        name="rebuild_fts_index",
-        description="Rebuild FTS index for BM25 keyword search on memory. Call this if keyword searches return no results.",
+        name="agent_list",
+        description="List all agents",
         inputSchema={
                 "properties": {},
                 "type": "object"
         }
     ),
     Tool(
-        name="theme_list",
-        description="List all themes with statistics",
+        name="agent_disable",
+        description="Disable an agent",
         inputSchema={
                 "properties": {
-                        "limit": {
-                                "description": "Max themes to return (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
+                        "agent_id": {
                                 "type": "string"
                         }
                 },
+                "required": [
+                        "agent_id"
+                ],
                 "type": "object"
         }
     ),
     Tool(
-        name="theme_get",
-        description="Get theme details including representatives",
+        name="why_active",
+        description="Explain why a memory is active: status, epistemic source, confirmations, contradictions",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Theme ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
+                                "description": "Memory ID to inspect",
+                                "type": "string"
                         }
                 },
                 "required": [
@@ -2207,12 +4203,28 @@ TOOLS = [
         }
     ),
     Tool(
-        name="theme_recall",
-        description="Two-stage theme-based retrieval (xMemory): diverse representatives then adaptive expansion",
+        name="what_superseded",
+        description="Show the full supersession chain for a memory",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to trace",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="show_conflicts",
+        description="Semantic search + show contradiction pairs for matching memories",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max results (default: 10)",
+                                "description": "Max memories to scan (default 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2238,38 +4250,32 @@ TOOLS = [
         }
     ),
     Tool(
-        name="theme_stats",
-        description="Get theme organization statistics",
+        name="detect_contradictions",
+        description="Detect contradictions for a stored memory against realm peers",
         inputSchema={
                 "properties": {
+                        "memory_id": {
+                                "description": "Memory ID to check",
+                                "type": "string"
+                        },
                         "realm": {
-                                "description": "Filter by realm",
+                                "description": "Realm to scan (default global)",
                                 "type": "string"
                         }
                 },
+                "required": [
+                        "memory_id"
+                ],
                 "type": "object"
         }
     ),
     Tool(
-        name="theme_maintain",
-        description="Force theme maintenance cycle: split oversized, merge similar, reassign memories",
+        name="scan_contradictions",
+        description="Background scan: find contradiction candidates across all memories in a realm",
         inputSchema={
                 "properties": {
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="theme_assign_orphans",
-        description="Assign orphan memories (not in any theme) to themes in batches",
-        inputSchema={
-                "properties": {
-                        "batch_size": {
-                                "description": "Memories per batch (default: 100)",
+                        "limit": {
+                                "description": "Max candidates to return (default 50)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2280,7 +4286,7 @@ TOOLS = [
                                 ]
                         },
                         "realm": {
-                                "description": "Filter by realm",
+                                "description": "Realm to scan",
                                 "type": "string"
                         }
                 },
@@ -2288,20 +4294,1573 @@ TOOLS = [
         }
     ),
     Tool(
-        name="learn_outcome",
-        description="Record whether a previously surfaced memory helped or hurt. Adjusts confidence based on outcome.",
+        name="resolve_contradiction",
+        description="Resolve a contradiction: declare winner supersedes loser, store CORRECTION memory",
+        inputSchema={
+                "properties": {
+                        "loser_id": {
+                                "description": "Memory ID to demote",
+                                "type": "string"
+                        },
+                        "reason": {
+                                "description": "Explanation for the resolution",
+                                "type": "string"
+                        },
+                        "winner_id": {
+                                "description": "Memory ID that is correct",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "winner_id",
+                        "loser_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="approve_memory",
+        description="Approve a Proposed memory, promoting it to Active",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to approve",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="reject_memory",
+        description="Reject a Proposed memory, archiving it",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to reject",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="promote_memory",
+        description="Promote a memory one tier: Proposed→Observed→Verified→Active",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="conflict_inspector",
+        description="Semantic search + show status and contradiction partners for each hit",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max memories to scan (default 10)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="disable_source",
+        description="Add a source to the deny-list via triplet",
+        inputSchema={
+                "properties": {
+                        "source": {
+                                "description": "Source identifier to deny",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "source"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_observe",
+        description="Record context->action pattern",
+        inputSchema={
+                "properties": {
+                        "action": {
+                                "type": "string"
+                        },
+                        "context": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "context",
+                        "action"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_predict",
+        description="Predict likely actions",
         inputSchema={
                 "properties": {
                         "context": {
-                                "description": "What you were trying to do when this memory was surfaced",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_confidence": {
+                                "type": "number"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "context"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_success",
+        description="Mark prediction as successful",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_list",
+        description="List learned anticipation patterns",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "sort_by": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_filter",
+        description="Get predictions passing annoyance gate",
+        inputSchema={
+                "properties": {
+                        "max": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_observe",
+        description="Record trigger->response pattern",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "type": "string"
+                        },
+                        "response": {
+                                "type": "string"
+                        },
+                        "trigger": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "trigger",
+                        "response"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_match",
+        description="Find matching habits",
+        inputSchema={
+                "properties": {
+                        "context": {
+                                "type": "string"
+                        },
+                        "min_strength": {
+                                "type": "number"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "context"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_strengthen",
+        description="Strengthen a habit",
+        inputSchema={
+                "properties": {
+                        "amount": {
+                                "type": "number"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_weaken",
+        description="Weaken a habit",
+        inputSchema={
+                "properties": {
+                        "amount": {
+                                "type": "number"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_list",
+        description="List formed habits",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_strength": {
+                                "type": "number"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "sort_by": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="profile_get",
+        description="Get user profile",
+        inputSchema={
+                "properties": {
+                        "user_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="profile_update",
+        description="Update profile field",
+        inputSchema={
+                "properties": {
+                        "field": {
+                                "type": "string"
+                        },
+                        "user_id": {
+                                "type": "string"
+                        },
+                        "value": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "field",
+                        "value"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="profile_observe",
+        description="Record user observation",
+        inputSchema={
+                "properties": {
+                        "observation_type": {
+                                "type": "string"
+                        },
+                        "user_id": {
+                                "type": "string"
+                        },
+                        "value": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "observation_type",
+                        "value"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_set",
+        description="Define a long-term goal",
+        inputSchema={
+                "properties": {
+                        "deadline": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "description": {
+                                "type": "string"
+                        },
+                        "milestones": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "title": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "title"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_get",
+        description="Get goal by ID",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_list",
+        description="List goals",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "sort_by": {
+                                "type": "string"
+                        },
+                        "status": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_progress",
+        description="Update goal progress",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "milestone": {
+                                "type": "string"
+                        },
+                        "progress": {
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "id",
+                        "progress"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_complete",
+        description="Mark goal completed",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "outcome": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "outcome"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="calibration_record",
+        description="Record prediction outcome",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "type": "string"
+                        },
+                        "success": {
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "domain",
+                        "success"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="calibration_score",
+        description="Get accuracy score",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_status",
+        description="Get work mode and segment summary",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_log",
+        description="Append event to session log",
+        inputSchema={
+                "properties": {
+                        "files_mentioned": {
+                                "type": "string"
+                        },
+                        "kind": {
+                                "type": "string"
+                        },
+                        "payload": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "success": {
+                                "type": "boolean"
+                        },
+                        "summary": {
+                                "type": "string"
+                        },
+                        "tool_name": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "kind",
+                        "summary"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_history",
+        description="Get work mode segment history",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_start",
+        description="Create and start an autonomous agent",
+        inputSchema={
+                "properties": {
+                        "brain_model": {
+                                "type": "string"
+                        },
+                        "brain_provider": {
+                                "type": "string"
+                        },
+                        "goal": {
+                                "type": "string"
+                        },
+                        "goal_dsl": {
+                                "type": "object"
+                        },
+                        "interval_seconds": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_turns": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_pause",
+        description="Pause a sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_resume",
+        description="Resume a paused sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_stop",
+        description="Stop a sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reason": {
+                                "type": "string"
+                        },
+                        "success": {
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_status",
+        description="Get sadhana status",
+        inputSchema={
+                "properties": {
+                        "history_limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_list",
+        description="List sadhanas",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "state": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_model",
+        description="Change brain model",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "model": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "model"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_goal",
+        description="Change sadhana goal",
+        inputSchema={
+                "properties": {
+                        "goal": {
+                                "type": "string"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_interval",
+        description="Change tick interval",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "interval": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "interval"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_max_turns",
+        description="Set max turns per cycle",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_turns": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "max_turns"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_checkpoint",
+        description="Report mid-cycle checkpoint",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "status": {
+                                "enum": [
+                                        "progressed",
+                                        "achieved",
+                                        "blocked"
+                                ],
+                                "type": "string"
+                        },
+                        "summary": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "status",
+                        "summary"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_start",
+        description="Start an autonomous dream",
+        inputSchema={
+                "properties": {
+                        "brain_model": {
+                                "description": "Model name, e.g. gemma4:26b or sonnet",
+                                "type": "string"
+                        },
+                        "brain_provider": {
+                                "description": "Brain provider: claude or local",
+                                "type": "string"
+                        },
+                        "publish_path": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "topic": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "topic"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_wander",
+        description="Auto-select topic and dream",
+        inputSchema={
+                "properties": {
+                        "publish_path": {
+                                "type": "string"
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_cancel",
+        description="Cancel a dream",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_force_woke",
+        description="Force stuck dream to woke",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_list",
+        description="List recent dreams",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="dream_status",
+        description="Get dream details",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="think_wander",
+        description="Trigger internal memory synthesis",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="impl_start",
+        description="Start self-improvement implementation sadhana",
+        inputSchema={
+                "properties": {
+                        "interval_seconds": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "max_turns": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        },
+                        "repo": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_history",
+        description="View memory version history",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_revert",
+        description="Revert memory to previous version",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reason": {
+                                "type": "string"
+                        },
+                        "version": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "version"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="pin_memory",
+        description="Pin memory to keep hot",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reason": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="unpin_memory",
+        description="Unpin a memory",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_pinned",
+        description="List pinned memories",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_lock",
+        description="Acquire memory lock",
+        inputSchema={
+                "properties": {
+                        "duration": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "holder_id": {
+                                "type": "string"
+                        },
+                        "holder_type": {
+                                "type": "string"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "holder_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_unlock",
+        description="Release memory lock",
+        inputSchema={
+                "properties": {
+                        "holder_id": {
+                                "type": "string"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id",
+                        "holder_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_lock_status",
+        description="Check lock status",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="propose_change",
+        description="Propose change to memory",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "type": "string"
+                        },
+                        "id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "proposed_by": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "content",
+                        "proposed_by"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_merge_queue",
+        description="List pending merge proposals",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "status": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="resolve_merge",
+        description="Resolve merge proposal",
+        inputSchema={
+                "properties": {
+                        "merge_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "resolution": {
+                                "type": "string"
+                        },
+                        "status": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "merge_id",
+                        "status"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_timeline",
+        description="Show files modified in time range",
+        inputSchema={
+                "properties": {
+                        "cross_session": {
+                                "type": "boolean"
+                        },
+                        "file_pattern": {
+                                "type": "string"
+                        },
+                        "limit": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "path": {
+                                "type": "string"
+                        },
+                        "query": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_at_time",
+        description="Get file content at time (stub)",
+        inputSchema={
+                "properties": {
+                        "file_path": {
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "show_diff": {
+                                "type": "boolean"
+                        },
+                        "time": {
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "file_path"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_restore",
+        description="Restore file version (stub)",
+        inputSchema={
+                "properties": {
+                        "file_path": {
+                                "type": "string"
+                        },
+                        "preview": {
+                                "type": "boolean"
+                        },
+                        "version_id": {
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "file_path"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="learn_outcome",
+        description="Record memory usage outcome",
+        inputSchema={
+                "properties": {
+                        "context": {
                                 "type": "string"
                         },
                         "memory_id": {
-                                "description": "Memory ID or UUID that was surfaced",
                                 "type": "string"
                         },
                         "outcome": {
-                                "description": "Did it help?",
                                 "enum": [
                                         "positive",
                                         "negative",
@@ -2319,11 +5878,10 @@ TOOLS = [
     ),
     Tool(
         name="log_exposure",
-        description="Log that memories were exposed to Claude via hooks (SUS metrics)",
+        description="Log memory exposure (SUS)",
         inputSchema={
                 "properties": {
                         "hook_type": {
-                                "description": "session_start or user_prompt",
                                 "type": "string"
                         },
                         "memory_ids": {
@@ -2383,11 +5941,10 @@ TOOLS = [
     ),
     Tool(
         name="get_sus_metrics",
-        description="Get Soul Utility Score (SUS) metrics: R(relevance), P(precision), D(durability) and composite score",
+        description="Get Soul Utility Score metrics",
         inputSchema={
                 "properties": {
                         "days": {
-                                "description": "Lookback window in days (default: 7)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2403,11 +5960,10 @@ TOOLS = [
     ),
     Tool(
         name="episode_cluster_status",
-        description="Find clusters of similar episodes that could be distilled into wisdom.",
+        description="Find similar episode clusters",
         inputSchema={
                 "properties": {
                         "min_occurrences": {
-                                "description": "Minimum episodes in cluster (default: 3)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2418,7 +5974,6 @@ TOOLS = [
                                 ]
                         },
                         "similarity_threshold": {
-                                "description": "Minimum similarity for cluster (default: 0.85)",
                                 "type": "number"
                         }
                 },
@@ -2427,11 +5982,10 @@ TOOLS = [
     ),
     Tool(
         name="insight_promote",
-        description="Promote a memory to global visibility so it applies across all projects.",
+        description="Promote memory to global",
         inputSchema={
                 "properties": {
                         "id": {
-                                "description": "Memory ID to promote",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2442,7 +5996,6 @@ TOOLS = [
                                 ]
                         },
                         "reason": {
-                                "description": "Why this insight is cross-project",
                                 "type": "string"
                         }
                 },
@@ -2454,11 +6007,10 @@ TOOLS = [
     ),
     Tool(
         name="insight_global",
-        description="List all global insights that apply across projects.",
+        description="List global insights",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max results (default: 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2469,7 +6021,6 @@ TOOLS = [
                                 ]
                         },
                         "tag": {
-                                "description": "Filter by tag (optional)",
                                 "type": "string"
                         }
                 },
@@ -2478,15 +6029,13 @@ TOOLS = [
     ),
     Tool(
         name="list_by_aspect",
-        description="List memories filtered by semantic aspect. Aspects group related node kinds (e.g., 'preferences' returns preference memories, 'wisdom' returns wisdom+insight).",
+        description="List memories by semantic aspect",
         inputSchema={
                 "properties": {
                         "aspect": {
-                                "description": "Semantic aspect: preferences, corrections, insights, failures, decisions, approaches, milestones, goals, habits, beliefs, wisdom, code, gaps",
                                 "type": "string"
                         },
                         "limit": {
-                                "description": "Max results (default: 30)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -2497,7 +6046,6 @@ TOOLS = [
                                 ]
                         },
                         "min_confidence": {
-                                "description": "Minimum confidence threshold (default: 0.1)",
                                 "type": "number"
                         }
                 },
@@ -2509,631 +6057,21 @@ TOOLS = [
     ),
     Tool(
         name="list_aspects",
-        description="List all available semantic aspects and the node kinds they include.",
+        description="List available semantic aspects",
         inputSchema={
-                "type": "object",
-                "properties": {}
-        }
-    ),
-    Tool(
-        name="list_memories_brief",
-        description="Fast memory index: returns id, kind, priority, date, and one-liner (first 80 chars). Use as fast path before expensive retrieval - scan what exists, then fetch full content for relevant entries.",
-        inputSchema={
-                "properties": {
-                        "kind": {
-                                "description": "Filter by memory kind",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max entries (default: 200)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "priority_tier": {
-                                "description": "Filter by tier: 0=background, 1=notable, 2=critical",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="set_priority_tier",
-        description="Set memory priority tier. Tiers: 0=background (🟢), 1=notable (🟡), 2=critical (🔴). Critical memories always load first in budget-aware recall.",
-        inputSchema={
-                "properties": {
-                        "memory_id": {
-                                "description": "Memory ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "tier": {
-                                "description": "Priority tier: 0=background, 1=notable, 2=critical",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "memory_id",
-                        "tier"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="recall_by_priority",
-        description="Budget-aware recall: fills critical (🔴) first, then notable (🟡), then background (🟢). Respects token budget. Use when context window is limited.",
-        inputSchema={
-                "properties": {
-                        "budget_tokens": {
-                                "description": "Token budget (default: 4000)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "include_global": {
-                                "description": "Include global memories (default: True)",
-                                "type": "boolean"
-                        },
-                        "query": {
-                                "description": "Search query for semantic filtering",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="set_memory_type",
-        description="Set the semantic type (kind) of a memory. Types: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode.",
-        inputSchema={
-                "properties": {
-                        "memory_id": {
-                                "description": "Memory ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "type": {
-                                "description": "Memory type: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "memory_id",
-                        "type"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="memory_type_stats",
-        description="Get statistics on memory types: counts by kind and priority tier.",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="smart_recall",
-        description="Intelligent memory recall with hierarchical expansion. Classifies query intent, routes to optimal retrieval, and auto-expands top results to full conversation context. Single entry point for finding the right memory.",
-        inputSchema={
-                "properties": {
-                        "expand_top": {
-                                "description": "Auto-expand top N results to full context: SSL\u2192episode\u2192turns (default: 2, 0=disable)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "include_global": {
-                                "description": "Include global memories (default: True)",
-                                "type": "boolean"
-                        },
-                        "limit": {
-                                "description": "Max results (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "query": {
-                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Filter by realm (empty = all realms)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="narrative_status",
-        description="Get current work mode, confidence, and segment summary for the session",
-        inputSchema={
-                "properties": {
-                        "session_id": {
-                                "description": "Session ID (default: current)",
-                                "type": "string"
-                        }
-                },
-                "required": [],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="narrative_log",
-        description="Manually append an event to the session event log",
-        inputSchema={
-                "properties": {
-                        "files_mentioned": {
-                                "description": "JSON array of file paths",
-                                "type": "string"
-                        },
-                        "kind": {
-                                "description": "Event kind: user_message, assistant_message, tool_use, tool_result, error, file_edit, search, build, test, commit, mode_change",
-                                "type": "string"
-                        },
-                        "payload": {
-                                "description": "JSON payload with event details",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        },
-                        "success": {
-                                "description": "Whether the action succeeded",
-                                "type": "boolean"
-                        },
-                        "summary": {
-                                "description": "Brief description of the event",
-                                "type": "string"
-                        },
-                        "tool_name": {
-                                "description": "Tool name (for tool events)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "kind",
-                        "summary"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="narrative_history",
-        description="Get history of work mode segments for a session",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max segments to return (default 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        }
-                },
-                "required": [],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="anticipation_filter",
-        description="Get anticipation candidates that pass the annoyance gate",
-        inputSchema={
-                "properties": {
-                        "max": {
-                                "description": "Max predictions to return (default 2)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        }
-                },
-                "required": [],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="msg_send",
-        description="Send a message to another session, a realm, or all sessions",
-        inputSchema={
-                "properties": {
-                        "content": {
-                                "description": "Message content",
-                                "type": "string"
-                        },
-                        "content_type": {
-                                "description": "text|json|ssl (default: text)",
-                                "type": "string"
-                        },
-                        "priority": {
-                                "description": "0=info, 1=normal, 2=important, 3=urgent",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Sender session ID (default: from env)",
-                                "type": "string"
-                        },
-                        "target": {
-                                "description": "Target: session_id, realm name (e.g., project:cc-soul), or '*' for global",
-                                "type": "string"
-                        },
-                        "target_type": {
-                                "description": "direct|realm|global (auto-detected if omitted)",
-                                "type": "string"
-                        },
-                        "ttl": {
-                                "description": "TTL in seconds (default: 3600, 0 = no expiry)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "target",
-                        "content"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="msg_inbox",
-        description="Check unread cross-session messages",
-        inputSchema={
-                "properties": {
-                        "auto_ack": {
-                                "description": "Auto-acknowledge returned messages (default: False)",
-                                "type": "boolean"
-                        },
-                        "limit": {
-                                "description": "Max messages (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "min_priority": {
-                                "description": "Minimum priority level (default: 0)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Session ID (default: from env)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="msg_ack_all",
-        description="Acknowledge all unread messages",
-        inputSchema={
-                "properties": {
-                        "session_id": {
-                                "description": "Session ID (default: from env)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="msg_history",
-        description="Get message history for the session",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max messages (default: 30)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Session ID (default: from env)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="session_list",
-        description="List active sessions",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Filter by realm (empty = all)",
-                                "type": "string"
-                        },
-                        "status": {
-                                "description": "Filter by status: active|idle|dead (default: active)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="session_sync",
-        description="Sync session registry with running Claude processes and transcript files. Discovers new sessions, updates existing, and marks dead sessions.",
-        inputSchema={
-                "properties": {
-                        "projects_dir": {
-                                "description": "Claude projects directory (default: ~/.claude/projects)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="read_transcript",
-        description="Read JSONL transcript file directly with pagination. Use for exploring conversations without loading into memory. Returns metadata and paginated turns.",
-        inputSchema={
-                "properties": {
-                        "keyword": {
-                                "description": "Filter turns containing this keyword",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max turns to return (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "max_chars_per_turn": {
-                                "description": "Truncate turn content (default: 500, 0=full)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "metadata_only": {
-                                "description": "Return only file metadata (turn count, size) without content",
-                                "type": "boolean"
-                        },
-                        "path": {
-                                "description": "Path to JSONL transcript file",
-                                "type": "string"
-                        },
-                        "role_filter": {
-                                "description": "Filter by role: user, assistant, or empty for all",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Session ID (auto-finds transcript if path not provided)",
-                                "type": "string"
-                        },
-                        "start_turn": {
-                                "description": "Starting turn index (default: 0)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="get_turns",
-        description="Get conversation turns for a session. Returns lossless history of all user and assistant messages.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max turns to return (default: 50)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "session_id": {
-                                "description": "Session ID (default: current session)",
-                                "type": "string"
-                        },
-                        "start_index": {
-                                "description": "Starting turn index (default: 0)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="create_episode",
-        description="Create a dialogue episode for tracking conversation segments. Links to turn ranges for hierarchical retrieval.",
-        inputSchema={
-                "properties": {
-                        "end_turn": {
-                                "description": "Ending turn index (optional, 0 = ongoing)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "episode_type": {
-                                "description": "Type: distillation, task, discussion",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Realm (default: brahman)",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        },
-                        "start_turn": {
-                                "description": "Starting turn index",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "title": {
-                                "description": "Episode title/topic",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id",
-                        "title",
-                        "start_turn"
-                ],
+                "properties": {},
                 "type": "object"
         }
     ),
     Tool(
         name="query_claims",
-        description="Query semantic claims (subject-predicate-object facts). Use for retrieving learned facts and detecting contradictions.",
+        description="Query semantic claims",
         inputSchema={
                 "properties": {
                         "active_only": {
-                                "description": "Only return non-superseded claims (default: True)",
                                 "type": "boolean"
                         },
                         "limit": {
-                                "description": "Max claims to return (default: 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3144,15 +6082,12 @@ TOOLS = [
                                 ]
                         },
                         "predicate": {
-                                "description": "Filter by predicate (e.g., 'prefers', 'was_corrected_on')",
                                 "type": "string"
                         },
                         "scope": {
-                                "description": "Filter by scope: task, session, repo, project, user, global",
                                 "type": "string"
                         },
                         "subject": {
-                                "description": "Filter by subject (e.g., 'user', 'assistant', entity name)",
                                 "type": "string"
                         }
                 },
@@ -3161,11 +6096,10 @@ TOOLS = [
     ),
     Tool(
         name="get_policies",
-        description="Get active policy memories (preferences, corrections, constraints). Policies have promotion states: ephemeral → candidate → stable_soft → stable_hard.",
+        description="Get active policies",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max policies to return (default: 30)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3176,122 +6110,21 @@ TOOLS = [
                                 ]
                         },
                         "scope": {
-                                "description": "Filter by scope: session, repo, project, user, global",
                                 "type": "string"
                         },
                         "type": {
-                                "description": "Filter by policy type: preference, correction, constraint",
                                 "type": "string"
                         }
                 },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="hybrid_recall",
-        description="State-of-the-art memory retrieval combining vector similarity, BM25 keyword matching, and graph spreading with RRF fusion.",
-        inputSchema={
-                "properties": {
-                        "bm25_weight": {
-                                "description": "Weight for BM25 keyword match (default: 0.3)",
-                                "type": "number"
-                        },
-                        "graph_weight": {
-                                "description": "Weight for graph spreading (default: 0.2)",
-                                "type": "number"
-                        },
-                        "limit": {
-                                "description": "Max results (default: 10)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "query": {
-                                "description": "Search query text",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "recency_weight": {
-                                "description": "Weight for recency bonus (default: 0.1)",
-                                "type": "number"
-                        },
-                        "tag": {
-                                "description": "Filter by tag",
-                                "type": "string"
-                        },
-                        "vector_weight": {
-                                "description": "Weight for vector similarity (default: 0.4)",
-                                "type": "number"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="expand_query",
-        description="Expand a query into typed variants (lex for BM25, vec for vector search, hyde as hypothetical memory excerpt) for improved hybrid retrieval",
-        inputSchema={
-                "properties": {
-                        "query": {
-                                "description": "Query to expand",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="smart_recall",
-        description="Intent-aware memory retrieval. Classifies query type (temporal, entity, relational) and routes to optimal retrieval path. Returns structured results with date candidates for temporal queries.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max results (default: 10)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "query": {
-                                "description": "Natural language query",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
                 "type": "object"
         }
     ),
     Tool(
         name="get_entities",
-        description="Get tracked entities (user, assistant, projects, concepts) with salience scores.",
+        description="Get tracked entities",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max entities to return (default: 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3302,7 +6135,6 @@ TOOLS = [
                                 ]
                         },
                         "type": {
-                                "description": "Filter by entity type: person, project, concept, tool, file",
                                 "type": "string"
                         }
                 },
@@ -3311,15 +6143,13 @@ TOOLS = [
     ),
     Tool(
         name="get_relationship_events",
-        description="Get relationship events (corrections, praise, frustration, discoveries) for understanding user-assistant interaction patterns.",
+        description="Get relationship events",
         inputSchema={
                 "properties": {
                         "event_type": {
-                                "description": "Filter by type: correction, praise, frustration, discovery",
                                 "type": "string"
                         },
                         "limit": {
-                                "description": "Max events to return (default: 20)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3330,7 +6160,6 @@ TOOLS = [
                                 ]
                         },
                         "session_id": {
-                                "description": "Filter by session",
                                 "type": "string"
                         }
                 },
@@ -3338,24 +6167,12 @@ TOOLS = [
         }
     ),
     Tool(
-        name="sadhana_start",
-        description="Create and start a new autonomous agent (sadhana) that works toward a goal using full Claude Code sessions with tool access. Each cycle runs a complete agent with bash, file, and chitta memory tools. Default interval: 300s.",
+        name="assert_fact",
+        description="Assert a constraint fact (subject-predicate-object) with provenance and scope. Auto-detects conflicts and creates rival branches.",
         inputSchema={
                 "properties": {
-                        "brain_model": {
-                                "description": "Model to use: sonnet, opus, haiku, gpt-4o (default: sonnet)",
-                                "type": "string"
-                        },
-                        "brain_provider": {
-                                "description": "LLM provider: claude or local (default: local)",
-                                "type": "string"
-                        },
-                        "goal": {
-                                "description": "The goal for the agent to achieve",
-                                "type": "string"
-                        },
-                        "interval_seconds": {
-                                "description": "Seconds between sense-think-act cycles (default: 60)",
+                        "branch_id": {
+                                "description": "Branch to assert into (0=trunk)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3364,102 +6181,356 @@ TOOLS = [
                                                 "type": "string"
                                         }
                                 ]
+                        },
+                        "confidence": {
+                                "description": "Confidence 0-1 (default 0.8)",
+                                "type": "number"
+                        },
+                        "confidence_basis": {
+                                "description": "Basis: stated, observed, derived, corrected",
+                                "type": "string"
+                        },
+                        "object": {
+                                "description": "Value (e.g. 'Rust', 'vim', 'Copenhagen')",
+                                "type": "string"
+                        },
+                        "predicate": {
+                                "description": "Relation (e.g. 'prefers', 'uses', 'located-in')",
+                                "type": "string"
+                        },
+                        "provenance_source": {
+                                "description": "Source: user, tool, distillation, inference",
+                                "type": "string"
+                        },
+                        "scope": {
+                                "description": "Scope: global, realm name, or session (default: global)",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Entity (e.g. 'user', 'project-X')",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "subject",
+                        "predicate",
+                        "object"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="retract_fact",
+        description="Soft-retract a constraint fact (preserves history)",
+        inputSchema={
+                "properties": {
+                        "fact_id": {
+                                "description": "Fact ID to retract",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "fact_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_unify",
+        description="Pattern-match query against constraint store (unification with wildcards)",
+        inputSchema={
+                "properties": {
+                        "object": {
+                                "description": "Object filter",
+                                "type": "string"
+                        },
+                        "predicate": {
+                                "description": "Predicate filter",
+                                "type": "string"
+                        },
+                        "scope": {
+                                "description": "Scope filter",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Subject filter (omit for wildcard)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_chain",
+        description="Follow predicate chain: A→B→C through constraint facts",
+        inputSchema={
+                "properties": {
+                        "predicates": {
+                                "description": "Ordered list of predicates to follow",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "subject": {
+                                "description": "Starting entity",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "subject",
+                        "predicates"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="explain_fact",
+        description="Explain a fact: provenance chain + supporting/conflicting facts",
+        inputSchema={
+                "properties": {
+                        "fact_id": {
+                                "description": "Fact ID to explain",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "fact_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="branch_create",
+        description="Fork a rival branch for conflicting interpretations",
+        inputSchema={
+                "properties": {
+                        "parent_id": {
+                                "description": "Parent branch ID (0=trunk)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "scope": {
+                                "description": "Branch scope (default: global)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="branch_resolve",
+        description="Resolve a branch conflict: winner stays, loser abandoned",
+        inputSchema={
+                "properties": {
+                        "loser_id": {
+                                "description": "Branch ID to abandon",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "winner_id": {
+                                "description": "Branch ID that wins",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "winner_id",
+                        "loser_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="trigger_add",
+        description="Create a trigger automaton (prospective memory). Arms on creation, fires when conditions met or tension exceeds threshold.",
+        inputSchema={
+                "properties": {
+                        "action": {
+                                "description": "Action on fire (Notify, InjectMemory, EmitEvent, RememberFact)",
+                                "type": "object"
+                        },
+                        "condition": {
+                                "description": "Trigger condition (TimeAfter, ConstraintMatch, EventMatch, AllOf, AnyOf)",
+                                "type": "object"
+                        },
+                        "deadline_ms": {
+                                "description": "Deadline timestamp ms (0=no deadline)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "gain": {
+                                "description": "Emotional importance 0-1 (default 0.5)",
+                                "type": "number"
+                        },
+                        "name": {
+                                "description": "Human-readable trigger name",
+                                "type": "string"
                         },
                         "realm": {
-                                "description": "Realm for isolation (default: brahman)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "goal"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sadhana_pause",
-        description="Pause a running sadhana",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID to pause",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sadhana_resume",
-        description="Resume a paused sadhana",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID to resume",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sadhana_stop",
-        description="Stop a sadhana (mark as done or failed)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID to stop",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "reason": {
-                                "description": "Reason for stopping",
+                                "description": "Realm scope (default: global)",
                                 "type": "string"
                         },
-                        "success": {
-                                "description": "Whether the goal was achieved (default: True)",
-                                "type": "boolean"
+                        "tension_threshold": {
+                                "description": "Tension level to auto-fire (default 0.8)",
+                                "type": "number"
                         }
                 },
                 "required": [
-                        "id"
+                        "name",
+                        "condition",
+                        "action"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="sadhana_status",
-        description="Get status of a sadhana including history",
+        name="trigger_list",
+        description="List all triggers with their status",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="trigger_fire",
+        description="Manually fire a trigger",
         inputSchema={
                 "properties": {
-                        "history_limit": {
-                                "description": "Max history events to return (default: 20)",
+                        "trigger_id": {
+                                "description": "Trigger ID to fire",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "trigger_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="trigger_dismiss",
+        description="Expire/dismiss a trigger without firing",
+        inputSchema={
+                "properties": {
+                        "trigger_id": {
+                                "description": "Trigger ID to dismiss",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "trigger_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="predict_needed",
+        description="Get predicted next-needed memories from the Markov chain access predictor",
+        inputSchema={
+                "properties": {
+                        "k": {
+                                "description": "Number of predictions (default 8)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="record_surprise",
+        description="Record a prediction error event — what was expected vs what actually happened",
+        inputSchema={
+                "properties": {
+                        "action": {
+                                "description": "What action was taken",
+                                "type": "string"
+                        },
+                        "actual": {
+                                "description": "What actually happened (required)",
+                                "type": "string"
+                        },
+                        "context_sketch": {
+                                "description": "What was happening when the surprise occurred",
+                                "type": "string"
+                        },
+                        "domain": {
+                                "description": "Domain: recall, tool, user_correction, constraint (default general)",
+                                "type": "string"
+                        },
+                        "expected": {
+                                "description": "What was predicted/expected (optional)",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Realm filter (default global)",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session ID (optional)",
+                                "type": "string"
+                        },
+                        "source_memory_id": {
+                                "description": "Related memory ID (optional)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3469,8 +6540,47 @@ TOOLS = [
                                         }
                                 ]
                         },
-                        "id": {
-                                "description": "Sadhana ID",
+                        "surprise_magnitude": {
+                                "description": "How surprising [0-1] (default 0.5)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "actual"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_surprises",
+        description="Query recorded surprise/prediction-error events with filters",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Filter by domain",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_magnitude": {
+                                "description": "Minimum surprise magnitude",
+                                "type": "number"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "since_ms": {
+                                "description": "Only events after this timestamp (ms)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3481,19 +6591,16 @@ TOOLS = [
                                 ]
                         }
                 },
-                "required": [
-                        "id"
-                ],
                 "type": "object"
         }
     ),
     Tool(
-        name="sadhana_list",
-        description="List all sadhanas with optional filters",
+        name="get_blind_spots",
+        description="Identify recurring surprise patterns — domains/actions where predictions consistently fail",
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max results (default: 50)",
+                                "description": "Max blind spots (default 10)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3506,449 +6613,69 @@ TOOLS = [
                         "realm": {
                                 "description": "Filter by realm",
                                 "type": "string"
-                        },
-                        "state": {
-                                "description": "Filter by state: pending, running, paused, done, failed",
-                                "type": "string"
                         }
                 },
                 "type": "object"
         }
     ),
     Tool(
-        name="sadhana_set_model",
-        description="Change the brain model for a running sadhana",
+        name="surprise_stats",
+        description="Summary statistics for surprise memory: counts, avg magnitude, domain breakdown",
         inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "model": {
-                                "description": "New model: opus, sonnet, haiku, etc.",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "id",
-                        "model"
-                ],
-                "type": "object"
+                "type": "object",
+                "properties": {}
         }
     ),
     Tool(
-        name="sadhana_set_goal",
-        description="Change the goal/prompt for a sadhana",
+        name="register_debt",
+        description="Register an epistemic uncertainty — competing hypotheses that need resolution",
         inputSchema={
                 "properties": {
-                        "goal": {
-                                "description": "New goal/prompt for the sadhana",
+                        "competing_hypotheses": {
+                                "description": "Competing explanations",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "discriminating_test": {
+                                "description": "How to distinguish between hypotheses",
                                 "type": "string"
                         },
-                        "id": {
-                                "description": "Sadhana ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id",
-                        "goal"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sadhana_set_interval",
-        description="Change the tick interval (in seconds) for a sadhana",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "interval": {
-                                "description": "New interval in seconds",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id",
-                        "interval"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sadhana_checkpoint",
-        description="Report a mid-cycle checkpoint from within an agentic sadhana. Call this from inside a running sadhana cycle to log progress and optionally signal completion. Use status='achieved' to stop the sadhana, 'blocked' to pause it, 'progressed' to continue normally.",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Sadhana ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "status": {
-                                "description": "Cycle status",
-                                "enum": [
-                                        "progressed",
-                                        "achieved",
-                                        "blocked"
-                                ],
+                        "domain": {
+                                "description": "Domain (default general)",
                                 "type": "string"
                         },
-                        "summary": {
-                                "description": "What was done this cycle",
+                        "fragility_score": {
+                                "description": "How fragile this belief is [0-1] (default 0.5)",
+                                "type": "number"
+                        },
+                        "pattern": {
+                                "description": "The uncertain pattern/belief (required)",
                                 "type": "string"
-                        }
-                },
-                "required": [
-                        "id",
-                        "status",
-                        "summary"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="memory_history",
-        description="View version history of a memory (git-like audit trail)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Memory ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "limit": {
-                                "description": "Max versions to return (default: 20)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="memory_revert",
-        description="Revert memory to a previous version",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Memory ID",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "reason": {
-                                "description": "Reason for reverting",
-                                "type": "string"
-                        },
-                        "version": {
-                                "description": "Version number to revert to",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id",
-                        "version"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="pin_memory",
-        description="Pin a memory to keep it 'hot' in context (agent decides importance)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Memory ID to pin",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "reason": {
-                                "description": "Why this memory should stay hot",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="unpin_memory",
-        description="Unpin a memory (allow it to fade naturally)",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Memory ID to unpin",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="list_pinned",
-        description="List all pinned memories (agent-managed context)",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max results (default: 50)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
                         },
                         "realm": {
-                                "description": "Filter by realm (optional)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="memory_lock",
-        description="Acquire a lock on a memory for exclusive access (concurrent sadhana coordination)",
-        inputSchema={
-                "properties": {
-                        "duration": {
-                                "description": "Lock duration in seconds (default: 300)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "holder_id": {
-                                "description": "ID of the session/sadhana acquiring the lock",
+                                "description": "Realm (default global)",
                                 "type": "string"
                         },
-                        "holder_type": {
-                                "description": "Type: session, sadhana, skill (default: session)",
+                        "session_id": {
+                                "description": "Session ID (optional)",
                                 "type": "string"
-                        },
-                        "id": {
-                                "description": "Memory ID to lock",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
                         }
                 },
                 "required": [
-                        "id",
-                        "holder_id"
+                        "pattern"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="memory_unlock",
-        description="Release a lock on a memory",
+        name="resolve_debt",
+        description="Mark an epistemic debt as resolved with a resolution",
         inputSchema={
                 "properties": {
-                        "holder_id": {
-                                "description": "ID of the holder releasing the lock",
-                                "type": "string"
-                        },
-                        "id": {
-                                "description": "Memory ID to unlock",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id",
-                        "holder_id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="memory_lock_status",
-        description="Check if a memory is locked and by whom",
-        inputSchema={
-                "properties": {
-                        "id": {
-                                "description": "Memory ID to check",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        }
-                },
-                "required": [
-                        "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="propose_change",
-        description="Propose a change to a memory (queued if locked, for later merge)",
-        inputSchema={
-                "properties": {
-                        "content": {
-                                "description": "Proposed new content",
-                                "type": "string"
-                        },
-                        "id": {
-                                "description": "Memory ID to change",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "proposed_by": {
-                                "description": "ID of the proposer",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "id",
-                        "content",
-                        "proposed_by"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="list_merge_queue",
-        description="List pending merge proposals for conflict resolution",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max results (default: 50)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "status": {
-                                "description": "Filter by status: pending, applied, rejected, conflict",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="resolve_merge",
-        description="Resolve a pending merge proposal (apply, reject, or mark conflict)",
-        inputSchema={
-                "properties": {
-                        "merge_id": {
-                                "description": "Merge proposal ID",
+                        "debt_id": {
+                                "description": "Debt ID to resolve",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3959,36 +6686,1440 @@ TOOLS = [
                                 ]
                         },
                         "resolution": {
-                                "description": "Resolution notes",
-                                "type": "string"
-                        },
-                        "status": {
-                                "description": "New status: applied, rejected, conflict",
+                                "description": "How the uncertainty was resolved",
                                 "type": "string"
                         }
                 },
                 "required": [
-                        "merge_id",
+                        "debt_id",
+                        "resolution"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="defer_debt",
+        description="Defer an epistemic debt for later investigation",
+        inputSchema={
+                "properties": {
+                        "debt_id": {
+                                "description": "Debt ID to defer",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "debt_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_debts",
+        description="Query epistemic debts with filters",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Filter by domain",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "min_fragility": {
+                                "description": "Minimum fragility score",
+                                "type": "number"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "Filter: open, resolved, deferred",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_fragile_decisions",
+        description="List open epistemic debts sorted by fragility — decisions most likely to be wrong",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 20)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "threshold": {
+                                "description": "Minimum fragility threshold (default 0.5)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="debt_stats",
+        description="Summary statistics for epistemic debt: counts by status, avg fragility",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="record_feedback",
+        description="Record whether a recall source was useful — updates learned source weights",
+        inputSchema={
+                "properties": {
+                        "query_domain": {
+                                "description": "Domain of the query (default general)",
+                                "type": "string"
+                        },
+                        "source": {
+                                "description": "Source: semantic, keyword, temporal, artifact, association (required)",
+                                "type": "string"
+                        },
+                        "was_useful": {
+                                "description": "Whether the source's results were useful (default true)",
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "source"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_source_weights",
+        description="View learned recall source weights — how much each source is trusted per domain",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Filter by domain (omit for all)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="update_source_weight",
+        description="Manually override a recall source weight",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Domain (default general)",
+                                "type": "string"
+                        },
+                        "source": {
+                                "description": "Source name (required)",
+                                "type": "string"
+                        },
+                        "weight": {
+                                "description": "New weight [0-2] (default 1.0)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "source"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="integration_stats",
+        description="Per-source success rates and learned weights across all domains",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="surprise_learning_stats",
+        description="Rolling surprise credit stats — tracked memories, gates passed, strength adjustments",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="upsert_wisdom_candidate",
+        description="Create or update a wisdom candidate from clustered surprise patterns",
+        inputSchema={
+                "properties": {
+                        "action": {
+                                "description": "Action or behavior pattern",
+                                "type": "string"
+                        },
+                        "cluster_key": {
+                                "description": "Unique key for this pattern cluster (domain+action+sig)",
+                                "type": "string"
+                        },
+                        "cross_session_count": {
+                                "description": "Number of distinct sessions with evidence",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "debt_ids": {
+                                "description": "Resolved debt IDs linked to this candidate",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "domain": {
+                                "description": "Knowledge domain",
+                                "type": "string"
+                        },
+                        "episode_ids": {
+                                "description": "Surprise event IDs supporting this candidate",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "mean_surprise": {
+                                "description": "Average surprise magnitude across episodes",
+                                "type": "number"
+                        },
+                        "promotion_score": {
+                                "description": "Computed promotion readiness score 0-1",
+                                "type": "number"
+                        },
+                        "summary": {
+                                "description": "Human-readable summary of the wisdom",
+                                "type": "string"
+                        },
+                        "support_count": {
+                                "description": "Number of supporting episodes",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "cluster_key"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="update_wisdom_lifecycle",
+        description="Advance a wisdom candidate through lifecycle stages: candidate→provisional→trusted→demoted",
+        inputSchema={
+                "properties": {
+                        "candidate_id": {
+                                "description": "Wisdom candidate ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "new_state": {
+                                "description": "0=candidate, 1=provisional, 2=trusted, 3=demoted",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "candidate_id",
+                        "new_state"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_wisdom_candidates",
+        description="Query wisdom candidates by lifecycle stage and/or domain",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Filter by domain",
+                                "type": "string"
+                        },
+                        "lifecycle": {
+                                "description": "Filter by lifecycle: 0=candidate, 1=provisional, 2=trusted, 3=demoted",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="wisdom_promotion_stats",
+        description="Overview of wisdom promotion pipeline — total candidates by lifecycle stage",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="attach_debt_evidence",
+        description="Attach supporting evidence to an epistemic debt — memory IDs + confidence",
+        inputSchema={
+                "properties": {
+                        "confidence": {
+                                "description": "Evidence confidence 0-1 (default 0.5)",
+                                "type": "number"
+                        },
+                        "debt_id": {
+                                "description": "Epistemic debt ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "memory_ids": {
+                                "description": "Memory IDs that serve as evidence",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "note": {
+                                "description": "Optional note about the evidence",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "debt_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="update_scorer_model",
+        description="Apply learned weight deltas to the scoring model from outcome calibration",
+        inputSchema={
+                "properties": {
+                        "mean_loss": {
+                                "description": "EWMA loss from calibration",
+                                "type": "number"
+                        },
+                        "model_version": {
+                                "description": "Monotonic version number",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "outcome_count": {
+                                "description": "Total outcomes used for calibration",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "weights": {
+                                "description": "Factor name \u2192 {delta, min_delta, max_delta} learned adjustments",
+                                "type": "object"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="learned_scorer_stats",
+        description="Current learned scoring model — version, factor count, loss, outcome count",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="effective_scorer_weights",
+        description="Show effective scoring weights — baseline + learned deltas for all factors",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="start_intervention",
+        description="Begin tracking an agent intervention — records intent, action, preconditions and expected observables before execution",
+        inputSchema={
+                "properties": {
+                        "action_ref": {
+                                "description": "Reference to the action (tool name, file path, command)",
+                                "type": "string"
+                        },
+                        "action_type": {
+                                "description": "0=ToolCall 1=MultiStepPlan 2=Delegation 3=Edit 4=Command",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "agent_id": {
+                                "description": "Agent performing the action",
+                                "type": "string"
+                        },
+                        "domain": {
+                                "description": "Domain area (e.g. git, filesystem, testing, compiler)",
+                                "type": "string"
+                        },
+                        "expected_observables": {
+                                "description": "What success looks like",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "intent": {
+                                "description": "What the agent intends to achieve",
+                                "type": "string"
+                        },
+                        "preconditions": {
+                                "description": "Known preconditions",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "realm": {
+                                "description": "Realm: coding, research, planning (default: coding)",
+                                "type": "string"
+                        },
+                        "reversal_cost": {
+                                "description": "0=None 1=Low 2=Medium 3=High",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "session_id": {
+                                "description": "Current session ID",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Optional task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "intent",
+                        "action_ref"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="add_observation",
+        description="Record an observation during an open intervention (stdout, test result, file diff, etc.)",
+        inputSchema={
+                "properties": {
+                        "confidence": {
+                                "description": "Confidence in this observation (0.0-1.0)",
+                                "type": "number"
+                        },
+                        "evidence_refs": {
+                                "description": "Memory IDs that constitute evidence",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "intervention_id": {
+                                "description": "Intervention ID from start_intervention",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "kind": {
+                                "description": "0=Stdout 1=Stderr 2=FileDiff 3=TestResult 4=EnvState 5=UserFeedback",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "summary": {
+                                "description": "Human-readable observation summary",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "intervention_id",
+                        "summary"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="close_intervention",
+        description="Close an intervention with its final outcome status",
+        inputSchema={
+                "properties": {
+                        "intervention_id": {
+                                "description": "Intervention ID to close",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "status": {
+                                "description": "0=Open 1=Succeeded 2=Failed 3=Partial 4=Aborted",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "intervention_id",
                         "status"
                 ],
                 "type": "object"
         }
     ),
     Tool(
-        name="file_timeline",
-        description="Show files modified in a time range or session (Time Machine). Use cross_session=true for history across all sessions.",
+        name="record_attribution",
+        description="Attribute a closed intervention to a causal class — routes feedback to the appropriate learning subsystem",
         inputSchema={
                 "properties": {
-                        "cross_session": {
-                                "description": "Search across all sessions (auto-indexes unindexed sessions, default: False)",
+                        "confidence_delta": {
+                                "description": "Magnitude of the learning signal (0.0-1.0)",
+                                "type": "number"
+                        },
+                        "debt_ids": {
+                                "description": "Linked epistemic debt IDs",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "intervention_id": {
+                                "description": "Intervention ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "note": {
+                                "description": "Optional human-readable note",
+                                "type": "string"
+                        },
+                        "primary_class": {
+                                "description": "0=MemoryRecallError 1=SourceTrustError 2=ProcedureError 3=ToolExecutionError 4=EnvironmentShift 5=HiddenPrecondition 6=AmbiguousState 7=GoalSpecError 8=UserOverride 9=ExternalNondeterminism",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "secondary_class": {
+                                "description": "Optional secondary attribution class (same enum)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "skill_memory_ids": {
+                                "description": "Skill memory IDs that were applied",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "source_memory_ids": {
+                                "description": "Memory IDs that contributed to this outcome",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "surprise_id": {
+                                "description": "Linked surprise event ID if available",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "intervention_id",
+                        "primary_class"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_interventions",
+        description="Query the intervention ledger with optional filters",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Filter by session ID",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "Filter by status (0-4)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_intervention",
+        description="Get a single intervention record by ID",
+        inputSchema={
+                "properties": {
+                        "intervention_id": {
+                                "description": "Intervention ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "intervention_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="intervention_stats",
+        description="Show intervention ledger statistics — total, open, succeeded, failed, aborted counts",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="list_open_interventions",
+        description="List all currently open (in-progress) interventions",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="register_task",
+        description="Register a task contract — records goal, constraints, acceptance criteria, priority, and optional deadline for an ongoing agent task",
+        inputSchema={
+                "properties": {
+                        "acceptance_criteria": {
+                                "description": "Criteria for task completion",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "constraints": {
+                                "description": "Constraints that must be respected",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "deadline_ms": {
+                                "description": "Optional deadline as Unix ms timestamp",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "goal": {
+                                "description": "Task goal description",
+                                "type": "string"
+                        },
+                        "parent_task_id": {
+                                "description": "Parent task ID for subtasks",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "priority": {
+                                "description": "Priority 1-10 (default 5)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Realm: coding, research, planning (default: coding)",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session this task belongs to",
+                                "type": "string"
+                        },
+                        "tags": {
+                                "description": "Optional tags",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        }
+                },
+                "required": [
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="update_task",
+        description="Update task status (Active=0, Blocked=1, Completed=2, Failed=3, Abandoned=4), optionally attach an intervention ID or add a tag",
+        inputSchema={
+                "properties": {
+                        "add_intervention_id": {
+                                "description": "Attach intervention to task",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "add_tag": {
+                                "description": "Add a tag to the task",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "0=Active 1=Blocked 2=Completed 3=Failed 4=Abandoned",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "status"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="add_delegation",
+        description="Record a delegation edge — tracks which agent handed off to which, with optional handoff note",
+        inputSchema={
+                "properties": {
+                        "from_agent": {
+                                "description": "Delegating agent name",
+                                "type": "string"
+                        },
+                        "handoff_note": {
+                                "description": "Optional context passed at handoff",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "to_agent": {
+                                "description": "Receiving agent name",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "from_agent",
+                        "to_agent"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="link_evidence",
+        description="Link a memory to a task as evidence — records which agent produced it and evidence kind",
+        inputSchema={
+                "properties": {
+                        "evidence_kind": {
+                                "description": "0=Observation 1=Artifact 2=Result 3=Analysis 4=UserFeedback",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "memory_id": {
+                                "description": "Memory ID to link",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "produced_by": {
+                                "description": "Agent that produced this evidence",
+                                "type": "string"
+                        },
+                        "relevance": {
+                                "description": "Relevance score 0-1 (default 1.0)",
+                                "type": "number"
+                        },
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "memory_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="add_probe",
+        description="Add a pending probe — an open question that must be answered to unblock or complete a task",
+        inputSchema={
+                "properties": {
+                        "expected_answerer": {
+                                "description": "Agent or role expected to answer",
+                                "type": "string"
+                        },
+                        "priority": {
+                                "description": "Priority 1-10 (default 5)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "question": {
+                                "description": "Open question to be answered",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "question"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="resolve_probe",
+        description="Resolve a pending probe — mark as Answered (1) or Dismissed (2) and optionally record the answer",
+        inputSchema={
+                "properties": {
+                        "answer": {
+                                "description": "Optional answer text",
+                                "type": "string"
+                        },
+                        "probe_id": {
+                                "description": "Probe ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "status": {
+                                "description": "1=Answered 2=Dismissed",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "probe_id",
+                        "status"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_criterion",
+        description="Upsert a completion criterion for a task — creates if new, updates if existing criterion text matches",
+        inputSchema={
+                "properties": {
+                        "criterion": {
+                                "description": "Criterion description",
+                                "type": "string"
+                        },
+                        "evidence_note": {
+                                "description": "Optional evidence supporting the criterion check",
+                                "type": "string"
+                        },
+                        "is_met": {
+                                "description": "Whether criterion is met (default false)",
                                 "type": "boolean"
                         },
-                        "file_pattern": {
-                                "description": "Glob pattern to filter files (e.g., '*.cpp', 'src/*')",
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "criterion"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_task",
+        description="Get full task view — contract, delegations, evidence links, pending probes, and completion criteria",
+        inputSchema={
+                "properties": {
+                        "task_id": {
+                                "description": "Task ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "task_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_tasks",
+        description="Query task contracts — filter by realm, session, status, or tag",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Filter by session ID",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "Filter by status (0-4)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "tag": {
+                                "description": "Filter by tag",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="agent_protocol_stats",
+        description="Show agent protocol memory statistics — total tasks, delegations, evidence links, probes, criteria counts",
+        inputSchema={
+                "type": "object",
+                "properties": {}
+        }
+    ),
+    Tool(
+        name="enroll_wisdom_lineage",
+        description="Enroll a Trusted wisdom candidate into the Wisdom Homeostasis layer — creates a living WisdomLineage record that tracks belief integrity over time",
+        inputSchema={
+                "properties": {
+                        "ancestor_lineage_id": {
+                                "description": "Parent lineage ID if this is a fork/split",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "claim": {
+                                "description": "The claim this wisdom encodes",
+                                "type": "string"
+                        },
+                        "derivation_relation": {
+                                "description": "Relation to ancestor: supersedes|branches_from|narrows|splits_from",
+                                "type": "string"
+                        },
+                        "envelope": {
+                                "description": "Applicability envelope: {domain, action_types, preconditions, source_families}",
+                                "type": "object"
+                        },
+                        "seed_debt_ids": {
+                                "description": "Epistemic debt IDs",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "seed_episode_ids": {
+                                "description": "Episode IDs that seeded this wisdom",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "seed_intervention_ids": {
+                                "description": "Intervention IDs",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "seed_surprise_ids": {
+                                "description": "Surprise event IDs",
+                                "items": {
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
+                                },
+                                "type": "array"
+                        },
+                        "wisdom_candidate_id": {
+                                "description": "ID of the WisdomCandidate to enroll",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "wisdom_candidate_id",
+                        "claim",
+                        "envelope"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="transition_wisdom_lineage",
+        description="Manually transition a wisdom lineage state (Trusted/Watch/Inflamed/Demoted). Normally automatic — use for overrides.",
+        inputSchema={
+                "properties": {
+                        "lineage_id": {
+                                "description": "Lineage ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "new_state": {
+                                "description": "0=Trusted 1=Watch 2=Inflamed 3=Demoted",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "reason": {
+                                "description": "Why this transition is happening",
+                                "type": "string"
+                        },
+                        "rederive_task_id": {
+                                "description": "Task contract ID if opening re-derivation",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        }
+                },
+                "required": [
+                        "lineage_id",
+                        "new_state"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="close_rederive",
+        description="Close a re-derivation contract for an Inflamed wisdom lineage. Actions: reaffirm (0), narrow (1), split (2), demote (3).",
+        inputSchema={
+                "properties": {
+                        "action": {
+                                "description": "0=reaffirm 1=narrow 2=split 3=demote",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "fork_claim": {
+                                "description": "Claim for the forked lineage (action=split)",
+                                "type": "string"
+                        },
+                        "fork_lineage_id": {
+                                "description": "Pre-enrolled fork lineage ID (action=split)",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "lineage_id": {
+                                "description": "Lineage ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "new_envelope": {
+                                "description": "Narrowed applicability envelope (for action=narrow/split)",
+                                "type": "object"
+                        }
+                },
+                "required": [
+                        "lineage_id",
+                        "action"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_wisdom_lineages",
+        description="List wisdom lineages filtered by state and/or domain",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Filter by domain",
                                 "type": "string"
                         },
                         "limit": {
-                                "description": "Max results (default: 20)",
+                                "description": "Max results (default 50)",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -3998,12 +8129,8 @@ TOOLS = [
                                         }
                                 ]
                         },
-                        "query": {
-                                "description": "Natural language time query like 'at 22:33', 'yesterday', 'last hour'",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Specific session to query",
+                        "state": {
+                                "description": "Filter: trusted|watch|inflamed|demoted",
                                 "type": "string"
                         }
                 },
@@ -4011,48 +8138,12 @@ TOOLS = [
         }
     ),
     Tool(
-        name="file_at_time",
-        description="Get file content as it was at a specific time (Time Machine)",
+        name="get_wisdom_lineage",
+        description="Get full details of a wisdom lineage by ID, including challenger evidence and state history",
         inputSchema={
                 "properties": {
-                        "file_path": {
-                                "description": "File path to retrieve",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Specific session to search in",
-                                "type": "string"
-                        },
-                        "show_diff": {
-                                "description": "Show diff against current version (default: False)",
-                                "type": "boolean"
-                        },
-                        "time": {
-                                "description": "Timestamp or natural language (e.g., '2024-02-13T22:33:00', '5 minutes ago')",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "file_path"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="file_restore",
-        description="Restore file to a previous version (Time Machine)",
-        inputSchema={
-                "properties": {
-                        "file_path": {
-                                "description": "File path to restore",
-                                "type": "string"
-                        },
-                        "preview": {
-                                "description": "Preview only, don't actually restore (default: True)",
-                                "type": "boolean"
-                        },
-                        "version_id": {
-                                "description": "Version ID from file_timeline",
+                        "lineage_id": {
+                                "description": "Lineage ID",
                                 "anyOf": [
                                         {
                                                 "type": "integer"
@@ -4064,50 +8155,34 @@ TOOLS = [
                         }
                 },
                 "required": [
-                        "file_path"
+                        "lineage_id"
                 ],
                 "type": "object"
         }
     ),
-    # ── Contradiction detection ───────────────────────────────────────────────
     Tool(
-        name="detect_contradictions",
-        description="Detect contradictions for a stored memory against other memories in its realm. "
-                    "Returns candidates with score >= 0.65 scored on subject/predicate overlap and polarity conflict.",
+        name="wisdom_lineage_stats",
+        description="Show wisdom homeostasis statistics — counts by state, mean staleness, support/contradiction mass totals",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "memory_id": {"type": "string", "description": "ID of the memory to check"},
-                "realm":     {"type": "string", "description": "Realm to scan (defaults to memory's own realm)"},
-            },
-            "required": ["memory_id"],
-        },
+                "type": "object",
+                "properties": {}
+        }
     ),
     Tool(
-        name="scan_contradictions",
-        description="Background scan: find all contradiction candidates across all memories in a realm. "
-                    "Useful for auditing; groups by claim-key and scores polarity conflicts.",
+        name="tick_lineage_staleness",
+        description="Manually trigger a staleness tick — grows staleness mass on lineages with no recent support. Normally called by the subconscious cycle.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "realm": {"type": "string", "description": "Realm to scan"},
-                "limit": {"type": "integer", "description": "Max candidates to return (default 50)"},
-            },
-        },
+                "type": "object",
+                "properties": {}
+        }
     ),
     Tool(
-        name="resolve_contradiction",
-        description="Resolve a contradiction: declare one memory the winner, demote the loser, "
-                    "add supersedes triplet, and store a CORRECTION memory.",
+        name="lineage_expiry_check",
+        description="List Inflamed lineages whose re-derivation TTL has expired — these should be demoted or re-derived urgently",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "winner_id": {"type": "string", "description": "ID of the correct memory"},
-                "loser_id":  {"type": "string", "description": "ID of the memory to supersede"},
-                "reason":    {"type": "string", "description": "Explanation for the resolution"},
-            },
-            "required": ["winner_id", "loser_id"],
-        },
+                "type": "object",
+                "properties": {}
+        }
     ),
 ]
 

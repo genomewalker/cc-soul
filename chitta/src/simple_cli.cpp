@@ -727,6 +727,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     sadhana_manager = std::make_unique<SadhanaManager>(field_store);
     handler.set_sadhana_manager(sadhana_manager.get());
     handler.set_queue_stats(&queue_count, &queue_fail_count, failed_queue_path);
+    handler.set_queue_live(&queue_distill_count, &queue_proc.batch_remaining(), queue_path);
     sadhana_manager->set_stream_fn([&server](int fd, std::string line) {
         server.queue_response(fd, std::move(line));
     });

@@ -869,6 +869,7 @@ ToolResult FieldRpcHandler::tool_realm_detect() {
 
 ToolResult FieldRpcHandler::tool_queue_status(const json&) {
     size_t processed = queue_count_ ? queue_count_->load() : 0;
+    size_t distilled = queue_distill_count_ ? queue_distill_count_->load() : 0;
     size_t failed    = queue_fail_count_ ? queue_fail_count_->load() : 0;
     size_t in_file   = 0;
     if (!failed_queue_path_.empty()) {
@@ -876,14 +877,32 @@ ToolResult FieldRpcHandler::tool_queue_status(const json&) {
         std::string ln;
         while (std::getline(f, ln)) if (!ln.empty()) in_file++;
     }
+    // Live depth: in-flight claimed batch (RAM counter) + unclaimed queue file lines.
+    // The .processing file is NOT counted — its unprocessed tail IS batch_remaining.
+    size_t in_flight = queue_batch_remaining_ ? queue_batch_remaining_->load() : 0;
+    size_t unclaimed = 0;
+    if (!queue_path_.empty()) {
+        std::ifstream f(queue_path_);
+        std::string ln;
+        while (std::getline(f, ln)) if (!ln.empty()) unclaimed++;
+    }
+    size_t pending_embeds = field_store_ ? field_store_->raw_pending_count() : 0;
     json s;
-    s["processed"]        = processed;
-    s["failed"]           = failed;
-    s["dead_letter_count"] = in_file;
-    s["dead_letter_path"] = failed_queue_path_;
+    s["pending"]            = in_flight + unclaimed;
+    s["pending_in_flight"]  = in_flight;
+    s["pending_unclaimed"]  = unclaimed;
+    s["processed"]          = processed;
+    s["distill_processed"]  = distilled;
+    s["failed"]             = failed;
+    s["pending_embeddings"] = pending_embeds;
+    s["dead_letter_count"]  = in_file;
+    s["dead_letter_path"]   = failed_queue_path_;
     std::ostringstream ss;
-    ss << "Queue: " << processed << " processed, " << failed << " failed";
-    if (in_file > 0) ss << " (" << in_file << " in dead-letter)";
+    ss << "Queue: " << (in_flight + unclaimed) << " pending (" << in_flight
+       << " in-flight, " << unclaimed << " unclaimed), " << processed
+       << " processed, " << distilled << " distilled, " << failed << " failed; "
+       << pending_embeds << " embeddings pending";
+    if (in_file > 0) ss << "; " << in_file << " dead-letters";
     return ToolResult::ok(ss.str(), s);
 }
 
