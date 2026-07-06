@@ -2,6 +2,8 @@
 #include <chitta/rpc/field_handler.hpp>
 #include <chitta/rpc/sandbox.hpp>
 #include <chitta/vak.hpp>
+#include <chitta/code_intel.hpp>
+#include <filesystem>
 #include <iostream>
 #include <chrono>
 
@@ -30,43 +32,49 @@ QueueProcessor::QueueProcessor(FieldStore& field_store,
     , queue_count_(queue_count)
     , queue_distill_count_(queue_distill_count)
     , queue_fail_count_(queue_fail_count)
+    , slow_path_(queue_path + ".slow")
 {}
 
-void QueueProcessor::start() {
-    // Recover from crash: if a .processing file exists, re-queue only the
-    // UNPROCESSED suffix. The batch loop checkpoints its progress to a .ckpt
-    // sidecar after each field_store_.sync(), so every line before the
-    // watermark is durably applied — re-appending it would duplicate data.
-    // No/unreadable .ckpt → watermark 0 → full re-queue (old behavior).
-    std::string processing_path = queue_path_ + ".processing";
-    if (std::ifstream(processing_path).good()) {
-        std::string ckpt_path = processing_path + ".ckpt";
-        size_t skip = 0;
-        {
-            std::ifstream ck(ckpt_path);
-            if (ck.good()) ck >> skip;  // stays 0 on parse failure
-        }
-        // Append the unprocessed suffix to any existing queue file. Count
-        // non-empty lines only — the batch loop's watermark indexes the same
-        // filtered sequence.
-        size_t requeued = 0;
-        {
-            std::ifstream src(processing_path);
-            std::ofstream dst(queue_path_, std::ios::app);
-            std::string line;
-            size_t idx = 0;
-            while (std::getline(src, line)) {
-                if (line.empty()) continue;
-                if (idx++ >= skip) { dst << line << "\n"; ++requeued; }
-            }
-        }
-        std::remove(processing_path.c_str());
-        std::remove(ckpt_path.c_str());
-        std::cerr << "[queue] crash recovery: re-queued " << requeued
-                  << " items from " << processing_path
-                  << " (skipped " << skip << " already processed)\n";
+// Crash recovery for one queue file: if its .processing sidecar exists,
+// re-queue only the UNPROCESSED suffix. The batch loops checkpoint their
+// progress to a .ckpt sidecar after each field_store_.sync(), so every line
+// before the watermark is durably applied — re-appending it would duplicate
+// data. No/unreadable .ckpt → watermark 0 → full re-queue (old behavior).
+void QueueProcessor::recover_processing(const std::string& queue_file) {
+    std::string processing_path = queue_file + ".processing";
+    if (!std::ifstream(processing_path).good()) return;
+    std::string ckpt_path = processing_path + ".ckpt";
+    size_t skip = 0;
+    {
+        std::ifstream ck(ckpt_path);
+        if (ck.good()) ck >> skip;  // stays 0 on parse failure
     }
+    // Append the unprocessed suffix to any existing queue file. Count
+    // non-empty lines only — the batch loop's watermark indexes the same
+    // filtered sequence.
+    size_t requeued = 0;
+    {
+        std::ifstream src(processing_path);
+        std::ofstream dst(queue_file, std::ios::app);
+        std::string line;
+        size_t idx = 0;
+        while (std::getline(src, line)) {
+            if (line.empty()) continue;
+            if (idx++ >= skip) { dst << line << "\n"; ++requeued; }
+        }
+    }
+    std::remove(processing_path.c_str());
+    std::remove(ckpt_path.c_str());
+    std::cerr << "[queue] crash recovery: re-queued " << requeued
+              << " items from " << processing_path
+              << " (skipped " << skip << " already processed)\n";
+}
+
+void QueueProcessor::start() {
+    recover_processing(queue_path_);
+    recover_processing(slow_path_);
     thread_ = std::thread([this]() { run(); });
+    slow_thread_ = std::thread([this]() { run_slow(); });
 }
 
 // Persist the batch watermark: number of items of the current .processing
@@ -83,6 +91,7 @@ void QueueProcessor::write_checkpoint(const std::string& ckpt_path, size_t proce
 
 void QueueProcessor::stop() {
     if (thread_.joinable()) thread_.join();
+    if (slow_thread_.joinable()) slow_thread_.join();
 }
 
 float QueueProcessor::category_to_confidence(const std::string& category) {
@@ -147,10 +156,6 @@ void QueueProcessor::write_failed_item(const std::string& line, const std::excep
 }
 
 void QueueProcessor::run() {
-    // In-process transcript registry: session_id -> {transcript_path, realm, last_line}
-    // Updated by transcript_register/transcript_progress ops; queried by distill_trigger.
-    std::unordered_map<std::string, json> transcript_reg;
-
     // Span-lane flush cadence: live-path ingest links in RAM only; persist here,
     // off the memory-write hot path (also flushed on daemon close via cf_close).
     auto last_span_flush = std::chrono::steady_clock::now();
@@ -191,9 +196,56 @@ void QueueProcessor::run() {
         constexpr size_t kCkptInterval = 200;
         size_t processed = 0;
 
+        // Ledger-coalesce: intermediate ledger_save events for the same
+        // session:project are dead writes — ledger_load reads only the latest
+        // (get_latest_event). Keep the LAST occurrence per key in this batch,
+        // skip the rest (~21% of queue traffic).
+        std::vector<bool> coalesce_skip(lines.size(), false);
+        {
+            std::unordered_map<std::string, size_t> last_idx;
+            std::vector<std::pair<std::string, size_t>> saves;
+            for (size_t li = 0; li < lines.size(); ++li) {
+                if (lines[li].find("\"ledger_save\"") == std::string::npos) continue;
+                auto j = json::parse(lines[li], nullptr, false);
+                if (j.is_discarded() || j.value("tool", "") != "ledger_save") continue;
+                auto a = j.value("args", json::object());
+                std::string sid = a.value("session_id", "");
+                if (sid.empty()) continue;
+                std::string key = sid + ":" + a.value("project", "default");
+                saves.emplace_back(key, li);
+                last_idx[key] = li;
+            }
+            size_t coalesced = 0;
+            for (const auto& [key, li] : saves)
+                if (last_idx[key] != li) { coalesce_skip[li] = true; ++coalesced; }
+            if (coalesced > 0)
+                std::cerr << "[queue] ledger-coalesce: skipped " << coalesced
+                          << " superseded ledger_save items\n";
+        }
+
+        // distill_trigger items are re-routed to the slow lane so a 10-90s LLM
+        // item can never head-of-line-block µs writes. Buffered here and only
+        // appended to the slow queue AFTER field_store_.sync() — guarantees the
+        // transcript_register event a distill resolves against is durable
+        // before the slow lane can claim the item.
+        std::vector<std::string> pending_slow;
+        auto flush_slow = [&]() {
+            if (pending_slow.empty()) return;
+            std::lock_guard<std::mutex> g(slow_mu_);
+            for (const auto& sl : pending_slow)
+                sandbox::append_line_atomic(slow_path_, sl);
+            pending_slow.clear();
+        };
+
         // Process each queued request — all writes go to chitta-field
-        for (const auto& line : lines) {
+        for (size_t li = 0; li < lines.size(); ++li) {
+            const auto& line = lines[li];
             if (!daemon_running) break;
+            if (coalesce_skip[li]) {
+                batch_remaining_--;
+                ++processed;
+                continue;  // superseded ledger_save; nothing to sync
+            }
 
             try {
                 auto j = json::parse(line);
@@ -214,6 +266,26 @@ void QueueProcessor::run() {
                     std::string cc = args.value("content", "");
                     if (!cc.empty())
                         correction_emb = embed_text(ct.empty() ? cc : ct + "\n" + cc);
+                }
+
+                // Precompute symbol extraction + embeddings for extract_symbols
+                // BEFORE the lock — tree-sitter parsing and per-symbol embed
+                // forward passes touch no shared state (same rationale as
+                // correction_emb above).
+                std::vector<ExtractedSymbol> file_syms;
+                std::vector<std::vector<float>> file_sym_embs;
+                if (tool == "extract_symbols") {
+                    std::string p = args.value("path", "");
+                    if (!p.empty() && std::filesystem::exists(p)) {
+                        CodeIntel intel;
+                        file_syms = intel.extract_file(p);
+                        file_sym_embs.reserve(file_syms.size());
+                        for (const auto& sym : file_syms) {
+                            std::string text = sym.kind + " " + sym.name;
+                            if (!sym.signature.empty()) text += " " + sym.signature;
+                            file_sym_embs.push_back(embed_text(text));
+                        }
+                    }
                 }
 
                 // FieldStore is always ready (synchronous init).
@@ -441,7 +513,6 @@ void QueueProcessor::run() {
                     std::string path = args.value("transcript_path", "");
                     if (!path.empty()) {
                         std::cerr << "[queue] transcript_register: session=" << session_id << " path=" << path << "\n";
-                        transcript_reg[session_id] = args;
                         field_store_.emit_event("transcript", "register",
                                                 session_id, args.dump());
                         // Span lane: pick up this transcript's verbatim atoms
@@ -542,64 +613,33 @@ void QueueProcessor::run() {
                                                 session_id, args.dump());
                         queue_count_++;
                     }
-                } else if (tool == "distill_trigger") {
-                    if (!distill_config_.enabled) {
-                        if (verbose_mode)
-                            std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
-                    } else {
-                        std::string session_id = args.value("session_id", "");
-                        if (!session_id.empty()) {
-                            // Look up transcript path from in-process registry first,
-                            // then fall back to FieldStore event log.
-                            std::string transcript_path;
-                            std::string realm = "brahman";
-                            auto it = transcript_reg.find(session_id);
-                            if (it != transcript_reg.end()) {
-                                transcript_path = it->second.value("transcript_path", "");
-                                realm = it->second.value("realm", "brahman");
-                            } else {
-                                auto reg = field_store_.get_latest_event("transcript", "register", session_id);
-                                if (reg) {
-                                    try {
-                                        auto r = json::parse(*reg);
-                                        transcript_path = r.value("transcript_path", "");
-                                        realm = r.value("realm", "brahman");
-                                    } catch (...) {}
-                                }
-                            }
-                            if (!transcript_path.empty()) {
-                                std::cerr << "[queue] distill_trigger: path=" << transcript_path << " realm=" << realm << "\n";
-                                // Span lane: catch up on new transcript bytes before
-                                // distilling (incremental; no-op when unchanged).
-                                field_store_.span_ingest(transcript_path);
-                                TranscriptState ts;
-                                ts.session_id = session_id;
-                                ts.transcript_path = transcript_path;
-                                ts.realm = realm;
-                                ts.last_processed_line = 0;
-                                // Check progress from in-process registry
-                                if (it != transcript_reg.end()) {
-                                    ts.last_processed_line = it->second.value("last_line", (int64_t)0);
-                                } else {
-                                    auto progress = field_store_.get_latest_event("transcript", "progress", session_id);
-                                    if (progress) {
-                                        try {
-                                            auto p = json::parse(*progress);
-                                            ts.last_processed_line = p.value("last_line", (int64_t)0);
-                                        } catch (...) {}
-                                    }
-                                }
-                                if (run_distillation(field_store_, yantra_, ts, distill_config_, &handler_, true)) {
-                                    queue_distill_count_++;
-                                    std::cerr << "[queue] distill_trigger: success (total=" << queue_distill_count_.load() << ")\n";
-                                } else {
-                                    std::cerr << "[queue] distill_trigger: run_distillation returned false\n";
-                                }
-                            } else {
-                                std::cerr << "[queue] distill_trigger: no transcript registered for " << session_id << "\n";
-                            }
+                } else if (tool == "extract_symbols") {
+                    // Freshness loop: post-edit hooks queue changed files here.
+                    // Invalidate the file's old symbols, then insert the fresh
+                    // extraction (parsed + embedded before the lock). A deleted
+                    // file still gets its stale entries cleared.
+                    std::string p = args.value("path", "");
+                    if (!p.empty()) {
+                        field_store_.remove_symbols_by_file(p);
+                        for (size_t i = 0; i < file_syms.size(); ++i) {
+                            const auto& sym = file_syms[i];
+                            field_store_.upsert_symbol(
+                                sym.kind, sym.name,
+                                sym.signature.empty() ? sym.name : sym.signature,
+                                sym.file_path,
+                                static_cast<uint32_t>(sym.line_start),
+                                static_cast<uint32_t>(sym.line_end),
+                                0,
+                                i < file_sym_embs.size() ? file_sym_embs[i]
+                                                         : std::vector<float>{});
                         }
+                        queue_count_++;
                     }
+                } else if (tool == "distill_trigger") {
+                    // Re-route to the slow lane (buffered; appended after the
+                    // next sync so the transcript_register it depends on is
+                    // durable first). run_slow() executes it.
+                    pending_slow.push_back(line);
                 }
             } catch (const std::exception& e) {
                 // Always log — never silently drop a learning event
@@ -611,6 +651,7 @@ void QueueProcessor::run() {
             ++processed;
             if (processed % kCkptInterval == 0) {
                 field_store_.sync();
+                flush_slow();  // after sync: transcript events durable, safe to expose distills
                 write_checkpoint(ckpt_path, processed);
             }
         }
@@ -618,6 +659,7 @@ void QueueProcessor::run() {
         // Durable fdatasync of this batch's WAL appends, OFF the rpc_mutex (put_memory only
         // flush_buf()s under the lock now). One fsync per queue batch, not per item.
         field_store_.sync();
+        flush_slow();
 
         if (processed < lines.size()) {
             // Graceful shutdown mid-batch: leave .processing + final watermark
@@ -636,6 +678,113 @@ void QueueProcessor::run() {
         if (verbose_mode) {
             std::cerr << "[queue] Processed " << lines.size() << " items, total=" << queue_count_ << "\n";
         }
+    }
+}
+
+// Execute one distill_trigger. Resolves the transcript via the durable event
+// log only (the fast lane's sync-before-append ordering guarantees the
+// register event is visible). run_distillation acquires the rpc lock itself
+// for its brief writes — this thread never holds it across the LLM call.
+void QueueProcessor::process_distill(const json& args) {
+    if (!distill_config_.enabled) {
+        if (verbose_mode)
+            std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
+        return;
+    }
+    std::string session_id = args.value("session_id", "");
+    if (session_id.empty()) return;
+
+    std::string transcript_path;
+    std::string realm = "brahman";
+    auto reg = field_store_.get_latest_event("transcript", "register", session_id);
+    if (reg) {
+        try {
+            auto r = json::parse(*reg);
+            transcript_path = r.value("transcript_path", "");
+            realm = r.value("realm", "brahman");
+        } catch (...) {}
+    }
+    if (transcript_path.empty()) {
+        std::cerr << "[queue] distill_trigger: no transcript registered for " << session_id << "\n";
+        return;
+    }
+    std::cerr << "[queue] distill_trigger: path=" << transcript_path << " realm=" << realm << "\n";
+    // Span lane: catch up on new transcript bytes before distilling
+    // (incremental; no-op when unchanged).
+    field_store_.span_ingest(transcript_path);
+    TranscriptState ts;
+    ts.session_id = session_id;
+    ts.transcript_path = transcript_path;
+    ts.realm = realm;
+    ts.last_processed_line = 0;
+    auto progress = field_store_.get_latest_event("transcript", "progress", session_id);
+    if (progress) {
+        try {
+            auto p = json::parse(*progress);
+            ts.last_processed_line = p.value("last_line", (int64_t)0);
+        } catch (...) {}
+    }
+    if (run_distillation(field_store_, yantra_, ts, distill_config_, &handler_, true)) {
+        queue_distill_count_++;
+        std::cerr << "[queue] distill_trigger: success (total=" << queue_distill_count_.load() << ")\n";
+    } else {
+        std::cerr << "[queue] distill_trigger: run_distillation returned false\n";
+    }
+}
+
+// Slow lane: drains the distill queue (each item is a 10-90s LLM call).
+// Mirrors the fast lane's claim/checkpoint/recover protocol but checkpoints
+// after EVERY item — losing a watermark here costs a whole re-distill.
+// Shares no mutable state with the fast lane; the only coupling is the
+// slow queue file (fast appends, this claims) and FieldStore's own locking.
+void QueueProcessor::run_slow() {
+    while (daemon_running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        std::string processing_path = slow_path_ + ".processing";
+        {
+            std::lock_guard<std::mutex> g(slow_mu_);
+            if (std::rename(slow_path_.c_str(), processing_path.c_str()) != 0) continue;
+        }
+
+        std::vector<std::string> lines;
+        {
+            std::ifstream in(processing_path);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty()) lines.push_back(line);
+            }
+        }
+        if (lines.empty()) {
+            std::remove(processing_path.c_str());
+            continue;
+        }
+
+        std::string ckpt_path = processing_path + ".ckpt";
+        size_t processed = 0;
+        for (const auto& line : lines) {
+            if (!daemon_running) break;
+            try {
+                auto j = json::parse(line);
+                if (j.value("tool", "") == "distill_trigger")
+                    process_distill(j.value("args", json::object()));
+            } catch (const std::exception& e) {
+                std::cerr << "[queue] slow-lane FAILED: " << e.what() << "\n";
+                write_failed_item(line, e);
+            }
+            ++processed;
+            field_store_.sync();
+            write_checkpoint(ckpt_path, processed);
+        }
+
+        if (processed < lines.size()) {
+            write_checkpoint(ckpt_path, processed);
+            std::cerr << "[queue] slow-lane shutdown mid-batch: " << processed
+                      << "/" << lines.size() << " done, remainder recovered on restart\n";
+            break;
+        }
+        std::remove(processing_path.c_str());
+        std::remove(ckpt_path.c_str());
     }
 }
 

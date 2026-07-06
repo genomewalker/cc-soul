@@ -346,7 +346,34 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"find_symbol", "Search for symbols by name",
      {{"name", "Symbol name to search", true, nullptr},
-      {"kind", "Symbol kind filter (function, class, method)", false, nullptr}}},
+      {"kind", "Symbol kind filter (function, class, method)", false, nullptr},
+      {"path", "Only symbols whose file path contains this substring (repo/dir scoping)", false, nullptr},
+      {"lang", "Language filter by extension (cpp, c, python, rust, js, go, java, ruby)", false, nullptr},
+      {"limit", "Max results", false, "20"}}},
+
+    {"dedupe_symbols", "GC the symbol index: stale-line duplicates, excluded paths, dead files",
+     {{"dry_run", "Count only, remove nothing (default true)", false, "true"},
+      {"check_fs", "Treat symbols whose file no longer exists as dead", false, "true"},
+      {"exclude", "Comma-separated path substrings to purge", false, "plugins/cache,_deps,node_modules,__pycache__,.venv"}}},
+
+    {"search_symbols", "Semantic search for code symbols",
+     {{"query", "Search query", true, nullptr},
+      {"kind", "Symbol kind filter", false, nullptr},
+      {"limit", "Max results", false, "10"},
+      {"project", "Project name to disambiguate", false, nullptr}}},
+
+    {"code_context", "Get code context summary",
+     {{"path", "File path", false, nullptr}}},
+
+    {"smart_context", "Build intelligent context combining memories, code, and graph",
+     {{"task", "Task description", true, nullptr},
+      {"mode", "Context mode", false, nullptr},
+      {"limit", "Max results", false, nullptr},
+      {"realm", "Realm filter", false, nullptr}}},
+
+    {"codebase_overview", "Get full indexed codebase structure",
+     {{"project", "Project name", false, nullptr},
+      {"format", "Output format", false, nullptr}}},
 
     {"symbol_callers", "Find all symbols that call the given symbol (reverse call graph)",
      {{"name", "Symbol name to find callers for", false, nullptr},

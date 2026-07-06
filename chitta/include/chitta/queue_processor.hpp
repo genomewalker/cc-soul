@@ -48,7 +48,8 @@ public:
     const std::string& queue_path() const { return queue_path_; }
 
 private:
-    void run();
+    void run();       // fast lane: everything except distill_trigger
+    void run_slow();  // slow lane: distill_trigger only (10-90s LLM items)
 
     // Helper methods (were lambdas in simple_cli.cpp)
     static float category_to_confidence(const std::string& category);
@@ -56,6 +57,10 @@ private:
     static std::string category_to_kind(const std::string& cat);
     void write_failed_item(const std::string& line, const std::exception& e);
     static void write_checkpoint(const std::string& ckpt_path, size_t processed);
+    // Crash recovery for one queue file: re-queue the unprocessed suffix of
+    // its .processing sidecar (watermark-aware). Shared by both lanes.
+    static void recover_processing(const std::string& queue_file);
+    void process_distill(const nlohmann::json& args);
 
     FieldStore& field_store_;
     VakYantra* yantra_;
@@ -67,8 +72,15 @@ private:
     std::atomic<size_t>& queue_distill_count_;
     std::atomic<size_t>& queue_fail_count_;
     std::atomic<size_t> batch_remaining_{0};
+    std::string slow_path_;   // distill_trigger re-route target (fast lane appends)
+    // Serializes fast-lane appends vs slow-lane claim-rename of slow_path_.
+    // Without it an append racing the rename lands on the already-read inode
+    // and is silently dropped when .processing is removed. Leaf lock: never
+    // held across FieldStore calls or the rpc mutex.
+    std::mutex slow_mu_;
 
     std::thread thread_;
+    std::thread slow_thread_;
 };
 
 } // namespace chitta
