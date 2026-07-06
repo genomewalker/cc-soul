@@ -530,6 +530,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
            << static_cast<int>(max_rel * 100) << "%); results may be tangential]\n";
     ss << "Found " << hits.size() << " results";
     if (!realm.empty()) ss << " in realm '" << realm << "'";
+    // Surface the calibrated confidence always, not only when weak: downstream
+    // C2 self-monitoring (prompt-core.sh) bins this into KNOWN/THIN/UNKNOWN.
+    if (!hits.empty()) ss << " (maxrel " << static_cast<int>(max_rel * 100) << "%)";
     ss << ":\n";
     for (auto& r : results_json) {
         int pct = display_pct(r);

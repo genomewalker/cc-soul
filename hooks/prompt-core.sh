@@ -246,11 +246,16 @@ else
     _sem_out=$(<"$_ld/sem"); _hyb_out=$(<"$_ld/hyb"); _kw_out=$(<"$_ld/kw"); _corr_out=$(<"$_ld/corr")
     rm -rf "$_ld"
 
+    # C2 signal: the hybrid-lane header carries the daemon's Platt-calibrated
+    # max_relevance — the "feeling of knowing" scalar the C2 tag is calibrated on
+    # (grade-recall.py --c2: gold-hit@3 monotonic KNOWN>THIN>UNKNOWN). Free: no extra call.
+    _c2_pct=$(printf '%s\n' "$_hyb_out" | grep -oP '^Found .*\(maxrel \K[0-9]+(?=%\))' | head -1)
+
     # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
-    # Extract text field and reformat as [hyb][50%] [type] text
+    # Extract text field and reformat as [kw][50%] [type] text
     _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -vE '^(realm:|results\[)' | \
-              sed 's/^ [0-9]*,[0-9]*,[^,]*,[^,]*,[^,]*,"\(.*\)",\([a-z]*\)$/[hyb][50%] [\2] \1/' | \
-              grep '^\[hyb\]' | grep -v '\[thought\]' || true)
+              sed 's/^ [0-9]*,[0-9]*,[^,]*,[^,]*,[^,]*,"\(.*\)",\([a-z]*\)$/[kw][50%] [\2] \1/' | \
+              grep '^\[kw\]' | grep -v '\[thought\]' || true)
 
     # Merge: prefix hybrid lines with [hyb] marker so filter can use lower threshold.
     # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
@@ -272,37 +277,51 @@ if [[ -z "$memories" ]] && [[ "$REALM" != "brahman" ]]; then
     _fallback=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid \
                 --limit 5 2>/dev/null || true)
     if [[ -n "$_fallback" && "$_fallback" != *"No memories"* ]]; then
-        memories=$(printf '%s\n' "$_fallback" | grep -v '\[thought\]')
+        memories=$(printf '%s\n' "$_fallback" | grep -v '\[thought\]' | sed 's/^\[/[xr][/')
     fi
 fi
 
 # Filter and format results
+# Workspace inspector: every candidate carries an admission reason (its recall
+# lane), and every rejection is counted by cause. Rendered as per-item [lane]
+# tags + one [admit] summary line — the explicit, inspectable admission policy
+# (the J-space paper's open problem: "what decides what enters the workspace").
 OUTPUT=""
 COUNT=0
+_adm_sem=0; _adm_hyb=0; _adm_kw=0; _adm_corr=0; _adm_xr=0
+_drop_conf=0; _drop_dup=0; _drop_meta=0; _drop_cap=0
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     # Match both formats: "[79%]..." (full_resonate) and "#123 [kind] [79%]..." (smart_recall)
     [[ ! "$line" =~ \[[0-9]+%\] ]] && continue
 
+    # Admission reason = recall lane (marker prefixed at merge time; sem is unmarked)
+    reason="sem"
+    case "$line" in
+        \[hyb\]*)  reason="hyb";  line="${line#\[hyb\]}" ;;
+        \[kw\]*)   reason="kw";   line="${line#\[kw\]}" ;;
+        \[corr\]*) reason="corr"; line="${line#\[corr\]}" ;;
+        \[xr\]*)   reason="xr";   line="${line#\[xr\]}" ;;
+    esac
+
     # Extract confidence from anywhere in line
     conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
     [[ -z "$conf" ]] && continue
 
-    # Hybrid-lane results use BM25 keyword matching — allow lower confidence threshold
-    # (they surface literal tokens: filenames, IDs, paths that semantic misses)
-    if [[ "$line" == \[hyb\]* ]]; then
-        [[ "$conf" -lt 1 ]] && continue
-        line="${line#\[hyb\]}"  # strip marker before output
+    # BM25-backed lanes (hyb/kw) surface literal tokens (filenames, IDs, paths)
+    # that semantic misses — allow lower confidence threshold
+    if [[ "$reason" == "hyb" || "$reason" == "kw" ]]; then
+        [[ "$conf" -lt 1 ]] && { ((++_drop_conf)); continue; }
     else
-        [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && continue
+        [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && { ((++_drop_conf)); continue; }
     fi
 
     # Skip episode thinking-blocks — internal reasoning traces, never useful as injected context
-    [[ "$line" =~ \[episode\].*\[thinking.block: ]] && continue
+    [[ "$line" =~ \[episode\].*\[thinking.block: ]] && { ((++_drop_meta)); continue; }
 
     # Skip [thought] synthesis memories — soul:meta artifacts, not domain knowledge.
     # Soul cycles that need [thought] memories query soul:meta explicitly.
-    [[ "$line" =~ \[thought\] ]] && continue
+    [[ "$line" =~ \[thought\] ]] && { ((++_drop_meta)); continue; }
 
     # Code symbol filtering is now done server-side via --partnership-only flag
 
@@ -312,19 +331,62 @@ while IFS= read -r line; do
     _INJECTED_FILE="${MIND_PATH}/.injected_hashes_${SESSION_ID}"
     _line_hash=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
     if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -f "$_INJECTED_FILE" ]]; then
-        grep -qF "$_line_hash" "$_INJECTED_FILE" 2>/dev/null && continue
+        grep -qF "$_line_hash" "$_INJECTED_FILE" 2>/dev/null && { ((++_drop_dup)); continue; }
     fi
 
-    # Truncate and add
-    OUTPUT="$OUTPUT${line:0:150}
+    # Workspace capacity: count overflow instead of silently breaking
+    [[ $COUNT -ge 3 ]] && { ((++_drop_cap)); continue; }
+
+    # Truncate and add, tagged with admission reason
+    OUTPUT="$OUTPUT[$reason]${line:0:150}
 "
     ((++COUNT))
+    case "$reason" in
+        sem)  ((++_adm_sem)) ;;
+        hyb)  ((++_adm_hyb)) ;;
+        kw)   ((++_adm_kw)) ;;
+        corr) ((++_adm_corr)) ;;
+        xr)   ((++_adm_xr)) ;;
+    esac
     # Record injected hash so this memory is suppressed on future turns
     if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -n "${MIND_PATH:-}" ]]; then
         printf '%s\n' "$_line_hash" >> "$_INJECTED_FILE" 2>/dev/null || true
     fi
-    [[ $COUNT -ge 3 ]] && break
 done <<< "$memories"
+
+# [admit] summary: admitted per lane + rejected per cause. Only lanes/causes
+# with nonzero counts are shown to keep the line minimal.
+ADMIT_LINE=""
+if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap)) -gt 0 ]]; then
+    _in=""
+    [[ $_adm_sem  -gt 0 ]] && _in="$_in sem:$_adm_sem"
+    [[ $_adm_hyb  -gt 0 ]] && _in="$_in hyb:$_adm_hyb"
+    [[ $_adm_kw   -gt 0 ]] && _in="$_in kw:$_adm_kw"
+    [[ $_adm_corr -gt 0 ]] && _in="$_in corr:$_adm_corr"
+    [[ $_adm_xr   -gt 0 ]] && _in="$_in xr:$_adm_xr"
+    _out=""
+    [[ $_drop_conf -gt 0 ]] && _out="$_out conf:$_drop_conf"
+    [[ $_drop_dup  -gt 0 ]] && _out="$_out dup:$_drop_dup"
+    [[ $_drop_meta -gt 0 ]] && _out="$_out meta:$_drop_meta"
+    [[ $_drop_cap  -gt 0 ]] && _out="$_out cap:$_drop_cap"
+    ADMIT_LINE="[admit]${_in:- none} | drop${_out:- none}"
+fi
+
+# C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
+# max_relevance. Thresholds calibrated on GOLDEN_SET v6 + out-of-domain probes
+# (grade-recall.py --c2): gold-hit@3 KNOWN .89 > THIN .43 > UNKNOWN .00.
+# THIN/UNKNOWN are behavioral instructions, not labels: they tell the reading
+# agent not to overtrust the memories above.
+C2_LINE=""
+if [[ -n "${_c2_pct:-}" ]]; then
+    if [[ "$_c2_pct" -ge 86 ]]; then
+        C2_LINE="[c2:KNOWN $_c2_pct%]"
+    elif [[ "$_c2_pct" -ge 81 ]]; then
+        C2_LINE="[c2:THIN $_c2_pct%] recall is weak here — verify before trusting; recall() more if this matters"
+    else
+        C2_LINE="[c2:UNKNOWN $_c2_pct%] boundary of known memory — items above may be tangential; do not assume, ask or recall explicitly"
+    fi
+fi
 
 # ===========================================
 # SUS: Log memory exposures for utility scoring (fire-and-forget)
@@ -759,7 +821,7 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
             # Format messages based on priority:
             # priority 3 = [MSG:URGENT:sender], priority 2 = [MSG:important:sender], else = [msg:sender]
             CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.messages[] |
-                (.sender_session_id | if . == "" or . == null then "unknown" else .[0:8] end) as $sender |
+                (.sender_session_id | if . == "" or . == null then "unknown" else . end) as $sender |
                 (.sender_realm      | if . == "" or . == null then "" else "@\(.)" end) as $realm |
                 (.sender_host       | if . == "" or . == null then "" else "/\(.)" end) as $host |
                 (.memory_id | tostring) as $mid |
@@ -833,6 +895,10 @@ if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
     fi
     _append "[soul]"$'\n'
     _append "$OUTPUT"
+    # OUTPUT may lose its trailing newline through sqz compress — guarantee a
+    # break before the [admit] summary so it renders on its own line.
+    [[ -n "$ADMIT_LINE" ]] && _append $'\n'"${ADMIT_LINE}"$'\n'
+    [[ -n "$C2_LINE" ]] && _append "${C2_LINE}"$'\n'
 fi
 
 # 4. Narrative status (one-liner, cheap)
