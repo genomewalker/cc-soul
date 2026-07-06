@@ -271,16 +271,23 @@ def handle_advanced(arguments: dict) -> str:
         # Inject session_id for messaging tools if not already provided
         if tool in MSG_TOOLS and not tool_args.get("session_id"):
             sid = get_current_session_id(use_cache=False)
-            if sid:
-                tool_args = dict(tool_args)
-                tool_args["session_id"] = sid
-                # msg_send uses sender_session_id instead of session_id
-                if tool == "msg_send" and not tool_args.get("sender_session_id"):
-                    tool_args["sender_session_id"] = sid
-                    if not tool_args.get("sender_realm"):
-                        realm = get_current_realm()
-                        if realm:
-                            tool_args["sender_realm"] = realm
+            if not sid:
+                # Fail closed: never let this fall through to the daemon's own
+                # get_session_id() (reads chittad's env, not the caller's) — that
+                # silently stores/reads messages under session_id="".
+                return (
+                    "Error: could not determine this session's ID for messaging. "
+                    "Pass session_id explicitly, or call session_register first."
+                )
+            tool_args = dict(tool_args)
+            tool_args["session_id"] = sid
+            # msg_send uses sender_session_id instead of session_id
+            if tool == "msg_send" and not tool_args.get("sender_session_id"):
+                tool_args["sender_session_id"] = sid
+                if not tool_args.get("sender_realm"):
+                    realm = get_current_realm()
+                    if realm:
+                        tool_args["sender_realm"] = realm
 
         # Call the hidden tool via daemon
         result = daemon_call(tool, tool_args)
@@ -2328,15 +2335,22 @@ async def call_tool(name: str, arguments: dict):
     # Force fresh PPID lookup (use_cache=False) for messaging to handle session resume
     if name in MSG_TOOLS and not arguments.get("session_id"):
         sid = get_current_session_id(use_cache=False)
-        if sid:
-            arguments["session_id"] = sid
-            # msg_send uses sender_session_id instead of session_id
-            if name == "msg_send" and not arguments.get("sender_session_id"):
-                arguments["sender_session_id"] = sid
-                if not arguments.get("sender_realm"):
-                    realm = get_current_realm()
-                    if realm:
-                        arguments["sender_realm"] = realm
+        if not sid:
+            # Fail closed: never let this fall through to the daemon's own
+            # get_session_id() (reads chittad's env, not the caller's) — that
+            # silently stores/reads messages under session_id="".
+            return (
+                "Error: could not determine this session's ID for messaging. "
+                "Pass session_id explicitly, or call session_register first."
+            )
+        arguments["session_id"] = sid
+        # msg_send uses sender_session_id instead of session_id
+        if name == "msg_send" and not arguments.get("sender_session_id"):
+            arguments["sender_session_id"] = sid
+            if not arguments.get("sender_realm"):
+                realm = get_current_realm()
+                if realm:
+                    arguments["sender_realm"] = realm
 
     # Auto-inject session_id for transcript_search if not provided
     # Pass session_id="*" to explicitly search all transcripts
