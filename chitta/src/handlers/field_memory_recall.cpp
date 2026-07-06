@@ -272,6 +272,13 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
 
     // Fetch more than needed so tag filtering has candidates to work with
     size_t fetch_limit = tag.empty() ? limit : limit * 8;
+    // Lanes fetch deeper than the response limit so the rescore stage (drift +
+    // term-overlap) picks from a wider pool — golds at union-rank 21-40 were
+    // unreachable when lanes capped at 20 and truncation ran before rescoring
+    // (GOLDEN_SET v6: 4/30 misses attributed to exactly this). Capped at 160
+    // to bound HNSW/BM25 cost per lane.
+    size_t lane_depth = std::min(std::max((size_t)20, 2 * limit), (size_t)160);
+    size_t pool_limit = std::max(fetch_limit, lane_depth);
 
     // Multi-lane RRF: original query (2×, weighted) + SSL-shaped variants + BM25
     // Works directly on FieldRecallHit to preserve Hebbian/temporal scoring metadata.
@@ -304,14 +311,14 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             for (const auto& f : forms) {
                 auto emb = (f == query) ? base_emb : embed_query(f);
                 if (emb.empty()) continue;
-                rrf_lane(window_gate(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm)));
+                rrf_lane(window_gate(field_store_->recall(emb, lane_depth, realm)));
             }
         }
         // BM25 lane
-        rrf_lane(window_gate(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20), realm)));
+        rrf_lane(window_gate(field_store_->recall_keyword(query, lane_depth, realm)));
         // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
         if (!params.value("disable_hdc", false)) {
-            rrf_lane(window_gate(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm)));
+            rrf_lane(window_gate(field_store_->recall_hdc(query, lane_depth, realm)));
         }
 
         // Collect sorted by RRF score, keep original hit metadata
@@ -325,8 +332,10 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         float max_rrf = ranked.empty() ? 1.0f : ranked[0].first;
         if (max_rrf < 1e-6f) max_rrf = 1.0f;
 
+        // Keep the full rescore pool here; final truncation to `limit` happens
+        // AFTER drift + term-overlap rescoring so deep-pool golds can climb.
         for (auto& [score, id] : ranked) {
-            if (hits.size() >= fetch_limit) break;
+            if (hits.size() >= pool_limit) break;
             auto& h = best_hit[id];
             if (!h.content.empty()) {
                 h.score = score / max_rrf;
@@ -338,16 +347,23 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         // Never call embed_query() here — that's inside rpc_mutex_ and blocks readers.
         if (params.contains("_preembedding")) {
             auto emb = params["_preembedding"].get<std::vector<float>>();
-            hits = window_gate(field_store_->recall(emb, fetch_limit, realm));
+            hits = window_gate(field_store_->recall(emb, pool_limit, realm));
         } else {
-            hits = window_gate(field_store_->recall_keyword(query, fetch_limit));
+            hits = window_gate(field_store_->recall_keyword(query, pool_limit));
         }
     }
 
-    // Filter orphaned HNSW entries (deleted payloads with lingering vectors)
+    // Filter orphaned HNSW entries (deleted payloads with lingering vectors) and
+    // quarantine [gap] memories: they're epistemic-gap markers for the dream
+    // engine (which reads them via direct recall_keyword("[gap]") calls in
+    // field_misc_sadhana.cpp, bypassing this tool), and they literally embed
+    // past queries — so they trivially outrank real answers for any query
+    // resembling a previously-graded gap (measured +0.049 nDCG@20 when removed).
     hits.erase(
         std::remove_if(hits.begin(), hits.end(),
-            [](const FieldRecallHit& h) { return h.content.empty(); }),
+            [](const FieldRecallHit& h) {
+                return h.content.empty() || h.content.rfind("[gap]", 0) == 0;
+            }),
         hits.end());
 
     // Windowed starvation backfill: the gate can leave the shallow (≤20-wide)
@@ -361,6 +377,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                                                           win_from, win_to)) {
             if (hits.size() >= limit) break;
             if (h.content.empty() || have.count(h.memory_id)) continue;
+            if (h.content.rfind("[gap]", 0) == 0) continue;  // gap quarantine (see above)
             hits.push_back(std::move(h));
         }
     }
@@ -413,17 +430,8 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                     hits.push_back(std::move(h));
                 }
             }
-
-            if (hits.size() > limit) hits.resize(limit);
+            // No early resize: the final post-rescore truncation caps to `limit`.
         }
-    }
-
-    // Hebbian co-occurrence: strengthen associations between co-retrieved memories
-    if (hits.size() >= 2) {
-        std::vector<uint64_t> ids;
-        ids.reserve(hits.size());
-        for (const auto& h : hits) ids.push_back(h.memory_id);
-        field_store_->record_co_retrieval(ids);
     }
 
     // Drift scoring: anti-perseveration penalty + curiosity boost
@@ -487,6 +495,20 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                           return a.score > b.score;
                       });
         }
+    }
+
+    // Final truncation to the response limit — deliberately after both rescore
+    // passes so a deep-pool candidate the rescorers rank highly makes the cut.
+    if (hits.size() > limit) hits.resize(limit);
+
+    // Hebbian co-occurrence: strengthen associations between co-retrieved
+    // memories. After truncation on purpose — only memories actually returned
+    // to the caller should co-strengthen, not the whole rescore pool.
+    if (hits.size() >= 2) {
+        std::vector<uint64_t> ids;
+        ids.reserve(hits.size());
+        for (const auto& h : hits) ids.push_back(h.memory_id);
+        field_store_->record_co_retrieval(ids);
     }
 
     bool explain = params.value("explain", false);
