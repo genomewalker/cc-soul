@@ -887,10 +887,30 @@ ToolResult FieldRpcHandler::tool_queue_status(const json&) {
         while (std::getline(f, ln)) if (!ln.empty()) unclaimed++;
     }
     size_t pending_embeds = field_store_ ? field_store_->raw_pending_count() : 0;
+    // Slow lane (distill_trigger re-routes): unclaimed + unprocessed suffix of
+    // its claimed batch (file-based — .ckpt watermark marks the done prefix).
+    size_t slow_pending = 0;
+    if (!queue_path_.empty()) {
+        auto count_lines = [](const std::string& p) {
+            size_t n = 0; std::ifstream f(p); std::string ln;
+            while (std::getline(f, ln)) if (!ln.empty()) n++;
+            return n;
+        };
+        std::string slow = queue_path_ + ".slow";
+        slow_pending = count_lines(slow);
+        size_t claimed = count_lines(slow + ".processing");
+        if (claimed > 0) {
+            size_t done = 0;
+            std::ifstream ck(slow + ".processing.ckpt");
+            if (ck.good()) ck >> done;
+            slow_pending += (claimed > done) ? claimed - done : 0;
+        }
+    }
     json s;
     s["pending"]            = in_flight + unclaimed;
     s["pending_in_flight"]  = in_flight;
     s["pending_unclaimed"]  = unclaimed;
+    s["pending_distill"]    = slow_pending;
     s["processed"]          = processed;
     s["distill_processed"]  = distilled;
     s["failed"]             = failed;
@@ -899,7 +919,8 @@ ToolResult FieldRpcHandler::tool_queue_status(const json&) {
     s["dead_letter_path"]   = failed_queue_path_;
     std::ostringstream ss;
     ss << "Queue: " << (in_flight + unclaimed) << " pending (" << in_flight
-       << " in-flight, " << unclaimed << " unclaimed), " << processed
+       << " in-flight, " << unclaimed << " unclaimed), " << slow_pending
+       << " distills queued, " << processed
        << " processed, " << distilled << " distilled, " << failed << " failed; "
        << pending_embeds << " embeddings pending";
     if (in_file > 0) ss << "; " << in_file << " dead-letters";
