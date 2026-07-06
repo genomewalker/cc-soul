@@ -2011,7 +2011,7 @@ TOOLS = [
     ),
     Tool(
         name="find_symbol",
-        description="Search for symbols by name",
+        description="Search for symbols by name. Scope with path (substring the file path must contain, e.g. a repo dir) and lang (cpp|c|python|rust|js|go|java|ruby).",
         inputSchema={
                 "properties": {
                         "kind": {
@@ -2019,6 +2019,15 @@ TOOLS = [
                         },
                         "name": {
                                 "type": "string"
+                        },
+                        "path": {
+                                "type": "string"
+                        },
+                        "lang": {
+                                "type": "string"
+                        },
+                        "limit": {
+                                "type": "integer"
                         }
                 },
                 "required": [
