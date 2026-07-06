@@ -82,6 +82,30 @@ _sigmoid = lambda x: 1.0 / (1.0 + math.exp(-x))
 ABSTAIN_SCORE_THRESHOLD = 0.6   # epistemic: sigmoid(cross-encoder) below threshold → undetermined
 ABSTAIN_BAND_EPS = 0.05         # posterior-band: gold/non-gold score gap < ε → rank is noise
 
+# C2 self-monitoring ("feeling of knowing") — monotone binning of the daemon's
+# Platt-calibrated max_relevance (field_memory_recall.cpp: sigma(3.27*cos-0.85)),
+# a production hybrid-lane scalar: no cross-encoder, no torch, endpoint-free.
+# Calibrated on GOLDEN_SET v6 + C2_PROBES (2026-07): gold-hit@3 by bin
+# KNOWN 8/9 (.89) > THIN 9/21 (.43) > UNKNOWN 0/6 (.00); hit@10 9/9 > 10/21 > 0/6.
+C2_KNOWN_MAXREL = 0.86
+C2_THIN_MAXREL = 0.81  # all 6 out-of-domain probes < 0.81; all 30 answerable >= 0.814
+
+# Out-of-domain probes: no gold exists by construction — must land in UNKNOWN.
+C2_PROBES = [
+    "recipe for sourdough bread starter",
+    "quarterly marketing budget forecast Q3",
+    "javascript react useEffect dependency array",
+    "wine pairing for grilled salmon",
+    "olympic figure skating scoring rules",
+    "kubernetes ingress nginx annotation timeout",
+]
+
+
+def c2_tag(max_relevance: float, n_results: int) -> str:
+    if n_results == 0 or max_relevance < C2_THIN_MAXREL:
+        return "UNKNOWN"
+    return "KNOWN" if max_relevance >= C2_KNOWN_MAXREL else "THIN"
+
 def _load_reranker():
     global _reranker
     if _reranker is not None:
@@ -298,7 +322,8 @@ BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
 GRADE_REALM = "project:cc-soul"
 
 
-def _recall_raw(query: str, limit: int, strategy: str = "") -> list[dict]:
+def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
+    """Full recall response — keeps top-level fields (max_relevance, abstain)."""
     env = dict(os.environ, SQZ_NO_DEDUP="1")
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
            "--realm", GRADE_REALM, "--json"]
@@ -306,9 +331,13 @@ def _recall_raw(query: str, limit: int, strategy: str = "") -> list[dict]:
         cmd += ["--strategy", strategy]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
-        return json.loads(out.stdout).get("results", [])
+        return json.loads(out.stdout)
     except Exception:
-        return []
+        return {}
+
+
+def _recall_raw(query: str, limit: int, strategy: str = "") -> list[dict]:
+    return _recall_full(query, limit, strategy).get("results", [])
 
 
 RRF_STRATEGIES = ("hybrid", "bm25", "field")  # multi-strategy fusion sources
@@ -438,6 +467,53 @@ def _rank_multihop(query: str, limit: int) -> tuple[list[dict], list[float] | No
     return _rerank_pool(query, merged_pool, limit)
 
 
+_FWD_BONUS = 1.0 / (_RRF_K + 1)  # forward-bet neighbor gets one top-rank RRF vote
+_FWD_SEEDS = 3                    # trajectory anchor = top-N already-admitted items
+
+
+def _rank_fwd(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
+    """Forward-looking admission (J-lens principle): admit an item because the
+    current trajectory will NEED it, not only because it matches the query now.
+
+    Unlike multihop's entropy gate (reactive: expand only when recall is diffuse),
+    this ALWAYS pulls the triplet-graph neighborhood of the top-admitted seeds and
+    gives any pool member in that neighborhood a forward-bet RRF bonus — the
+    "look up everything about the entity before you know which fact you need"
+    dynamic (Nanda's Michael Jordan example). Endpoint-free: re-weights the same
+    fetched pool, no reranker, no new query path. Measurable with no cross-encoder.
+    """
+    fetch = limit * _RERANK_FETCH_MUL
+    primary = _recall_raw(query, fetch, "hybrid")
+    if len(primary) <= 1:
+        return primary[:limit], None
+
+    # Base RRF score from the primary ranking (rank-based, reranker-independent).
+    rrf: dict[str, float] = {}
+    pool: dict[str, dict] = {}
+    for rank, h in enumerate(primary):
+        hid = str(h["id"])
+        pool[hid] = h
+        rrf[hid] = rrf.get(hid, 0.0) + 1.0 / (_RRF_K + rank + 1)
+
+    # Trajectory prior: neighborhood of the top-admitted seeds. The point of
+    # forward-looking admission is to pull in items the query-match MISSED but the
+    # trajectory will need (Jordan -> {basketball, Chicago}), so neighbors NOT
+    # already in the pool are fetched and injected as forward-bet candidates.
+    seeds = [str(h["id"]) for h in primary[:_FWD_SEEDS]]
+    neighbors = _graph_hop(seeds, max_hops=2, max_nodes=40)
+    for hid in neighbors:
+        if hid in pool:
+            rrf[hid] = rrf.get(hid, 0.0) + _FWD_BONUS  # already retrieved: boost
+        else:
+            mem = _fetch_memory(hid)                    # missed by query: inject
+            if mem and mem.get("text"):
+                pool[hid] = mem
+                rrf[hid] = _FWD_BONUS
+
+    ordered = [pool[hid] for hid in sorted(rrf, key=lambda x: -rrf[x])]
+    return _rerank_pool(query, ordered, limit)
+
+
 def _rank(query: str, limit: int, strategy: str = "") -> tuple[list[dict], list[float] | None]:
     """Fetch + rerank. strategy='rrf' runs multi-strategy RRF; 'multihop' adds entropy-gated graph hop.
     Returns (hits, sigmoid_normed_scores) or (hits, None) if no reranker."""
@@ -445,6 +521,8 @@ def _rank(query: str, limit: int, strategy: str = "") -> tuple[list[dict], list[
         return _rank_rrf(query, limit)
     if strategy == "multihop":
         return _rank_multihop(query, limit)
+    if strategy == "fwd":
+        return _rank_fwd(query, limit)
     reranker = _load_reranker()
     fetch = limit * _RERANK_FETCH_MUL if reranker else limit
     results = _recall_raw(query, fetch, strategy)
@@ -492,6 +570,11 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     ids = gold_ids.get(item["desc"], [])
     sig = item["gold_signature"].lower()
     results, scores = _rank(item["query"], limit, strategy)
+
+    # C2 is defined on the production hybrid lane regardless of graded strategy
+    c2_full = _recall_full(item["query"], 10, "hybrid")
+    c2_maxrel = c2_full.get("max_relevance", 0.0)
+    c2 = c2_tag(c2_maxrel, len(c2_full.get("results", [])))
     result_ids = [r["id"] for r in results]
     result_texts = [r.get("text", "").lower() for r in results]
 
@@ -540,6 +623,8 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "band_abstain": band_abstain,
         "abstain": epistemic_abstain or band_abstain,
         "gold_max_score": gold_max_score,
+        "c2": c2,
+        "c2_maxrel": c2_maxrel,
         "g_entropy": g_entropy(scores) if scores else 0.0,
         "s_entropy": s_entropy_from_embeddings(result_ids) if result_ids else (0.0 if _HAS_NUMPY else None),
     }
@@ -554,6 +639,9 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-reranker", action="store_true", help="skip cross-encoder re-ranking")
     ap.add_argument("--strategy", default="hybrid", help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank). Default hybrid = what prompt-core.sh production recall uses; measured strict superset of pure-semantic on the golden set (pass -1 abstain +2, 0 regressions).")
+    ap.add_argument("--c2", action="store_true",
+                    help="C2 calibration report: bin queries by KNOWN/THIN/UNKNOWN, "
+                         "verify gold-hit-rate is monotonic; exit 1 if miscalibrated")
     a = ap.parse_args()
     if a.no_reranker:
         global _reranker
@@ -578,6 +666,40 @@ def main():
     gold_ids = stored.get("ids", {})
 
     records = [grade_one(it, gold_ids, a.limit, a.strategy) for it in GOLDEN_SET]
+
+    if a.c2:
+        # Calibration = honesty check: the tag must PREDICT gold presence.
+        bins = {"KNOWN": [], "THIN": [], "UNKNOWN": []}
+        for r in records:
+            bins[r["c2"]].append(r)
+        print(f"{BOLD}C2 calibration (KNOWN>={C2_KNOWN_MAXREL} THIN>={C2_THIN_MAXREL} on max_relevance){RESET}")
+        rates = []
+        for tag in ("KNOWN", "THIN", "UNKNOWN"):
+            b = bins[tag]
+            h3 = sum(1 for r in b if any(p < 3 for p in r["gold_positions"]))
+            h10 = sum(1 for r in b if any(p < 10 for p in r["gold_positions"]))
+            rate = h3 / len(b) if b else None
+            rates.append(rate)
+            n = len(b)
+            print(f"  {tag:8} n={n:2d}  hit@3={h3}/{n} ({(h3/n if n else 0):.2f})  hit@10={h10}/{n}")
+            for r in b:
+                mark = GREEN + "+" + RESET if any(p < 3 for p in r["gold_positions"]) else RED + "-" + RESET
+                print(f"    {mark} maxrel={r['c2_maxrel']:.3f} {r['desc'][:40]}")
+        probe_tags = []
+        for q in C2_PROBES:
+            full = _recall_full(q, 10, "hybrid")
+            tag = c2_tag(full.get("max_relevance", 0.0), len(full.get("results", [])))
+            probe_tags.append(tag)
+            color = GREEN if tag == "UNKNOWN" else RED
+            print(f"  probe {color}{tag:8}{RESET} maxrel={full.get('max_relevance', 0.0):.3f} {q[:44]!r}")
+        present = [r for r in rates if r is not None]
+        monotonic = all(a_ >= b_ for a_, b_ in zip(present, present[1:]))
+        probes_ok = all(t != "KNOWN" for t in probe_tags)
+        ok = monotonic and probes_ok
+        verdict = GREEN + "CALIBRATED" + RESET if ok else RED + "MISCALIBRATED" + RESET
+        print(f"\n{BOLD}{verdict}{RESET} monotonic={monotonic} probes_not_known={probes_ok}")
+        sys.exit(0 if ok else 1)
+
     mean_ndcg = sum(r["ndcg"] for r in records) / len(records) if records else 0.0
     active = [r for r in records if not r["abstain"]]
     mean_ndcg_active = sum(r["ndcg"] for r in active) / len(active) if active else 0.0
