@@ -162,7 +162,8 @@ inline bool probe_endpoint(const std::string& base_url) {
 // Discover GPU endpoint using the full chain from gpu_serve.py
 // Returns base URL (e.g., "http://node:11434") or empty string
 inline std::string discover_gpu_endpoint(const std::string& model = "gemma4:26b",
-                                          LogFn log_fn = nullptr) {
+                                          LogFn log_fn = nullptr,
+                                          bool allow_start = true) {
     auto log = [&](const std::string& msg) {
         if (log_fn) log_fn(msg);
     };
@@ -224,6 +225,9 @@ inline std::string discover_gpu_endpoint(const std::string& model = "gemma4:26b"
     }
 
     // 4. Last resort: invoke chitta-gpu start
+    // Skipped when allow_start=false (fail-fast probes: a health check must
+    // never spend 120s spinning up a GPU job).
+    if (!allow_start) return "";
     log("[llm] No endpoint found, trying chitta-gpu start " + model + "...");
     std::string gpu_out = fork_exec_capture(
         {"chitta-gpu", "start", model}, 120);

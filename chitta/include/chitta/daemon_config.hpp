@@ -40,6 +40,7 @@ struct DistillConfig {
     int cooldown_seconds = 180;
     size_t max_context_chars = 0;  // 0 = no limit (full transcript)
     int max_tokens = 8192;         // LLM output token limit
+    std::string endpoint;          // pre-probed LLM endpoint; empty = discover per distill
 };
 
 struct EnrichConfig {

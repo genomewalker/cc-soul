@@ -3,6 +3,7 @@
 #include <chitta/rpc/sandbox.hpp>
 #include <chitta/vak.hpp>
 #include <chitta/code_intel.hpp>
+#include <chitta/llm_http.hpp>
 #include <filesystem>
 #include <iostream>
 #include <chrono>
@@ -685,7 +686,7 @@ void QueueProcessor::run() {
 // log only (the fast lane's sync-before-append ordering guarantees the
 // register event is visible). run_distillation acquires the rpc lock itself
 // for its brief writes — this thread never holds it across the LLM call.
-void QueueProcessor::process_distill(const json& args) {
+void QueueProcessor::process_distill(const json& args, const std::string& endpoint) {
     if (!distill_config_.enabled) {
         if (verbose_mode)
             std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
@@ -724,7 +725,9 @@ void QueueProcessor::process_distill(const json& args) {
             ts.last_processed_line = p.value("last_line", (int64_t)0);
         } catch (...) {}
     }
-    if (run_distillation(field_store_, yantra_, ts, distill_config_, &handler_, true)) {
+    DistillConfig cfg = distill_config_;
+    cfg.endpoint = endpoint;  // pre-probed; skips per-distill discovery
+    if (run_distillation(field_store_, yantra_, ts, cfg, &handler_, true)) {
         queue_distill_count_++;
         std::cerr << "[queue] distill_trigger: success (total=" << queue_distill_count_.load() << ")\n";
     } else {
@@ -738,6 +741,9 @@ void QueueProcessor::process_distill(const json& args) {
 // Shares no mutable state with the fast lane; the only coupling is the
 // slow queue file (fast appends, this claims) and FieldStore's own locking.
 void QueueProcessor::run_slow() {
+    // Cached LLM endpoint, re-verified with one cheap curl before each distill.
+    // Full re-discovery only on a probe miss; never `chitta-gpu start` from here.
+    std::string endpoint;
     while (daemon_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
@@ -762,12 +768,21 @@ void QueueProcessor::run_slow() {
 
         std::string ckpt_path = processing_path + ".ckpt";
         size_t processed = 0;
+        bool endpoint_down = false;
         for (const auto& line : lines) {
             if (!daemon_running) break;
             try {
                 auto j = json::parse(line);
-                if (j.value("tool", "") == "distill_trigger")
-                    process_distill(j.value("args", json::object()));
+                if (j.value("tool", "") == "distill_trigger") {
+                    // Fail-fast probe: verify the endpoint before run_distillation
+                    // burns its 180s timeout (or worse, discovery's 120s
+                    // chitta-gpu start) on a dead ollama.
+                    if (endpoint.empty() || !probe_endpoint(endpoint))
+                        endpoint = discover_gpu_endpoint(distill_config_.model,
+                                                         nullptr, /*allow_start=*/false);
+                    if (endpoint.empty()) { endpoint_down = true; break; }
+                    process_distill(j.value("args", json::object()), endpoint);
+                }
             } catch (const std::exception& e) {
                 std::cerr << "[queue] slow-lane FAILED: " << e.what() << "\n";
                 write_failed_item(line, e);
@@ -775,6 +790,24 @@ void QueueProcessor::run_slow() {
             ++processed;
             field_store_.sync();
             write_checkpoint(ckpt_path, processed);
+        }
+
+        if (endpoint_down) {
+            // Defer, don't dead-letter: put the unprocessed remainder back on
+            // the slow queue for the next cycle, then back off so we don't
+            // hammer squeue while the endpoint is down.
+            size_t deferred = 0;
+            {
+                std::lock_guard<std::mutex> g(slow_mu_);
+                for (size_t i = processed; i < lines.size(); ++i, ++deferred)
+                    sandbox::append_line_atomic(slow_path_, lines[i]);
+            }
+            std::remove(processing_path.c_str());
+            std::remove(ckpt_path.c_str());
+            std::cerr << "[queue] distill endpoint down, " << deferred << " deferred\n";
+            for (int i = 0; i < 120 && daemon_running; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            continue;
         }
 
         if (processed < lines.size()) {

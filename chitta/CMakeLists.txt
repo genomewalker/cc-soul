@@ -457,6 +457,9 @@ if(CHITTA_BUILD_TESTS)
     add_executable(thread_pool_test src/thread_pool_test.cpp)
     target_link_libraries(thread_pool_test PRIVATE chitta)
     add_test(NAME thread_pool_test COMMAND thread_pool_test)
+    add_executable(llm_probe_test src/llm_probe_test.cpp)
+    target_link_libraries(llm_probe_test PRIVATE chitta)
+    add_test(NAME llm_probe_test COMMAND llm_probe_test)
 endif()
 
 # RPATH configuration for runtime library discovery

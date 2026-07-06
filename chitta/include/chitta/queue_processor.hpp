@@ -60,7 +60,7 @@ private:
     // Crash recovery for one queue file: re-queue the unprocessed suffix of
     // its .processing sidecar (watermark-aware). Shared by both lanes.
     static void recover_processing(const std::string& queue_file);
-    void process_distill(const nlohmann::json& args);
+    void process_distill(const nlohmann::json& args, const std::string& endpoint);
 
     FieldStore& field_store_;
     VakYantra* yantra_;
