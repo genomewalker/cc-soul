@@ -119,8 +119,17 @@ void QueueProcessor::run() {
     // Updated by transcript_register/transcript_progress ops; queried by distill_trigger.
     std::unordered_map<std::string, json> transcript_reg;
 
+    // Span-lane flush cadence: live-path ingest links in RAM only; persist here,
+    // off the memory-write hot path (also flushed on daemon close via cf_close).
+    auto last_span_flush = std::chrono::steady_clock::now();
+
     while (daemon_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (std::chrono::steady_clock::now() - last_span_flush >= std::chrono::seconds(30)) {
+            last_span_flush = std::chrono::steady_clock::now();
+            field_store_.span_flush();
+        }
 
         // Atomically claim queue file via rename (prevents data loss from concurrent writes)
         std::string processing_path = queue_path_ + ".processing";
@@ -394,6 +403,9 @@ void QueueProcessor::run() {
                         transcript_reg[session_id] = args;
                         field_store_.emit_event("transcript", "register",
                                                 session_id, args.dump());
+                        // Span lane: pick up this transcript's verbatim atoms
+                        // immediately (incremental via per-file byte watermark).
+                        field_store_.span_ingest(path);
                         queue_count_++;
                     }
                 } else if (tool == "ledger_save") {
@@ -430,14 +442,25 @@ void QueueProcessor::run() {
                     std::string trigger = args.value("trigger", "");
                     std::string response = args.value("response", "");
                     if (!trigger.empty() && !response.empty()) {
-                        field_store_.emit_event("narrative", "habit",
-                                                trigger, args.dump());
-                        queue_count_++;
+                        // habit_observe fires on ~every tool call and its analytics
+                        // event is write-only + unbounded (organ/analytics.rs Vec, no
+                        // cap), so sample to bound RAM/WAL growth. The RPC-side
+                        // tool_habit_observe still records every observation as a
+                        // triplet; this event is redundant telemetry.
+                        // ceiling: 1/HABIT_SAMPLE lossy; upgrade: cap analytics_registry
+                        // or add an aggregating reader, then drop the sampling.
+                        static std::atomic<uint64_t> habit_seq{0};
+                        constexpr uint64_t HABIT_SAMPLE = 20;
+                        if (habit_seq.fetch_add(1, std::memory_order_relaxed) % HABIT_SAMPLE == 0) {
+                            field_store_.emit_event("analytics", "habit",
+                                                    trigger, args.dump());
+                            queue_count_++;
+                        }
                     }
                 } else if (tool == "anticipation_success") {
                     int64_t id = args.value("id", (int64_t)0);
                     if (id > 0) {
-                        field_store_.emit_event("narrative", "anticipation_success",
+                        field_store_.emit_event("analytics", "anticipation_success",
                                                 std::to_string(id), "{}");
                         queue_count_++;
                     }
@@ -505,6 +528,9 @@ void QueueProcessor::run() {
                             }
                             if (!transcript_path.empty()) {
                                 std::cerr << "[queue] distill_trigger: path=" << transcript_path << " realm=" << realm << "\n";
+                                // Span lane: catch up on new transcript bytes before
+                                // distilling (incremental; no-op when unchanged).
+                                field_store_.span_ingest(transcript_path);
                                 TranscriptState ts;
                                 ts.session_id = session_id;
                                 ts.transcript_path = transcript_path;
