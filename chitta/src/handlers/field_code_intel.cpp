@@ -81,13 +81,35 @@ ToolResult FieldRpcHandler::tool_embed_symbols(const json& params) {
     });
 }
 
-ToolResult FieldRpcHandler::tool_dedupe_symbols(const json&) {
-    // No direct dedupe in FieldStore — report current count
-    size_t count = field_store_->symbol_count();
-    return ToolResult::ok(
-        "Symbol deduplication not available in chitta-field (symbols: " + std::to_string(count) + ")",
-        {{"symbols", count}, {"note", "dedupe requires Rust-side implementation"}}
-    );
+ToolResult FieldRpcHandler::tool_dedupe_symbols(const json& params) {
+    bool dry_run = params.value("dry_run", true);
+    bool check_fs = params.value("check_fs", true);
+    // Default excludes: caches and fetched build deps only — never plain
+    // source dirs, so a deliberate learn_codebase of a vendored tree survives
+    // unless excluded explicitly.
+    std::string excludes = params.value("exclude",
+        "plugins/cache,_deps,node_modules,__pycache__,.venv");
+
+    std::string stats = field_store_->dedupe_symbols(dry_run, check_fs, excludes);
+    if (stats.empty()) return ToolResult::error("dedupe_symbols failed");
+    json j = json::parse(stats, nullptr, false);
+    if (j.is_discarded()) return ToolResult::error("dedupe_symbols returned invalid stats");
+
+    std::ostringstream ss;
+    ss << (dry_run ? "Symbol GC (DRY RUN)" : "Symbol GC") << ":\n";
+    ss << "  Total symbols: " << j.value("total", 0) << "\n";
+    ss << "  Stale-line duplicates: " << j.value("dup", 0) << "\n";
+    ss << "  Excluded paths (" << excludes << "): " << j.value("excluded_path", 0) << "\n";
+    ss << "  Dead files: " << j.value("dead_path", 0) << "\n";
+    if (dry_run) ss << "  Would remove: " << j.value("would_remove", 0) << "\n";
+    else         ss << "  Removed: " << j.value("removed", 0) << "\n";
+    if (j.contains("top_dirs")) {
+        ss << "  Top directories by symbol count:\n";
+        for (const auto& d : j["top_dirs"]) {
+            ss << "    " << d.value("count", 0) << "  " << d.value("dir", "") << "\n";
+        }
+    }
+    return ToolResult::ok(ss.str(), j);
 }
 
 ToolResult FieldRpcHandler::tool_extract_symbols(const json& params) {
@@ -169,7 +191,8 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
     size_t max_files = static_cast<size_t>(params.value("max_files", 500));
 
     std::vector<std::string> exclude = {
-        "node_modules", ".git", "build", "__pycache__", "venv", "target", ".venv"
+        "node_modules", ".git", "build", "__pycache__", "venv", "target", ".venv",
+        "_deps", "dist", ".cache"
     };
     if (params.contains("exclude") && params["exclude"].is_string()) {
         std::istringstream iss(params["exclude"].get<std::string>());
@@ -257,6 +280,14 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
         return ToolResult::ok("No symbols found in " + path, {{"stored", 0}});
     }
 
+    // Per-file invalidation: a changed file's previous symbols are stale
+    // (moved/renamed/deleted definitions) — remove them before re-inserting,
+    // or the index accumulates one copy per historical line position.
+    size_t symbols_invalidated = 0;
+    for (const auto& fp : changed_files) {
+        symbols_invalidated += field_store_->remove_symbols_by_file(fp);
+    }
+
     // Store symbols (all are from changed files — parsed only those)
     size_t symbols_stored = 0, symbols_embedded = 0;
     size_t symbols_skipped = seen_files.size() - changed_files.size();
@@ -301,6 +332,7 @@ ToolResult FieldRpcHandler::tool_learn_codebase(const json& params) {
         ss << "  Path: " << path << "\n";
     }
     ss << "  Symbols stored: " << symbols_stored << "\n";
+    ss << "  Symbols invalidated (changed files): " << symbols_invalidated << "\n";
     ss << "  Symbols skipped (unchanged): " << symbols_skipped << "\n";
     ss << "  Symbols embedded: " << symbols_embedded << "\n";
     ss << "  Callsites: " << callsites_stored << "\n";
@@ -338,24 +370,56 @@ ToolResult FieldRpcHandler::tool_find_symbol(const json& params) {
     std::string name = params.value("name", "");
     if (name.empty()) return ToolResult::error("Name is required");
 
-    auto hits = field_store_->search_symbols_by_name(name, 50);
+    // Scoping: `path` restricts to file paths containing the substring
+    // (repo/directory), `lang` filters by extension.
+    std::string path_filter = params.value("path", "");
+    std::string lang = params.value("lang", "");
+    size_t limit = static_cast<size_t>(params.value("limit", 50));
+
+    auto hits = field_store_->search_symbols_by_name_scoped(name, limit, path_filter);
     if (hits.empty()) {
-        return ToolResult::ok("No symbols found matching '" + name + "'",
+        return ToolResult::ok("No symbols found matching '" + name + "'" +
+            (path_filter.empty() ? "" : " under '" + path_filter + "'"),
             {{"symbols", json::array()}});
     }
 
-    std::ostringstream ss;
-    ss << "Found " << hits.size() << " symbols matching '" << name << "':\n";
+    static const std::unordered_map<std::string, std::vector<std::string>> kLangExts = {
+        {"cpp",    {".cpp", ".cc", ".cxx", ".hpp", ".hh", ".h"}},
+        {"c",      {".c", ".h"}},
+        {"python", {".py"}},
+        {"rust",   {".rs"}},
+        {"js",     {".js", ".jsx", ".ts", ".tsx"}},
+        {"go",     {".go"}},
+        {"java",   {".java"}},
+        {"ruby",   {".rb"}},
+    };
+    auto lang_match = [&](const std::string& file) {
+        if (lang.empty()) return true;
+        auto it = kLangExts.find(lang);
+        if (it == kLangExts.end()) return true;  // unknown lang: no filter
+        for (const auto& ext : it->second) {
+            if (file.size() >= ext.size() &&
+                file.compare(file.size() - ext.size(), ext.size(), ext) == 0)
+                return true;
+        }
+        return false;
+    };
 
+    std::ostringstream ss;
     json symbols_json = json::array();
     std::string kind_filter = params.value("kind", "");
     for (const auto& h : hits) {
         auto s = from_cf_hit(h);
         if (!kind_filter.empty() && s.kind != kind_filter) continue;
+        if (!lang_match(s.file_path)) continue;
         ss << "  " << s.kind << " " << s.name << " @" << s.file_path << ":" << s.line_start << "\n";
         symbols_json.push_back(sym_to_json(s));
     }
-    return ToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols_json.size()}});
+    std::string header = "Found " + std::to_string(symbols_json.size()) +
+        " symbols matching '" + name + "'" +
+        (path_filter.empty() ? "" : " under '" + path_filter + "'") + ":\n";
+    return ToolResult::ok(header + ss.str(),
+        {{"symbols", symbols_json}, {"count", symbols_json.size()}});
 }
 
 ToolResult FieldRpcHandler::tool_symbol_callers(const json& params) {
