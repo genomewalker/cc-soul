@@ -234,6 +234,26 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     std::string strategy = params.value("strategy", "");
     bool expand          = params.value("expand", true);
 
+    // Temporal window (parsed from the query at the pre-embed hook, e.g.
+    // "last week" / "in June"). The window GATES candidates by authored ts;
+    // semantic relevance still RANKS — never recency-sorted (recency-ordered
+    // temporal recall floods context with operationally-fresh noise).
+    int64_t win_from = 0, win_to = 0;
+    if (params.contains("_twindow") && params["_twindow"].is_array()
+        && params["_twindow"].size() == 2) {
+        win_from = params["_twindow"][0].get<int64_t>();
+        win_to   = params["_twindow"][1].get<int64_t>();
+    }
+    const bool windowed = win_to > 0;
+    auto window_gate = [&](std::vector<FieldRecallHit> v) {
+        if (windowed) {
+            v.erase(std::remove_if(v.begin(), v.end(),
+                [&](const FieldRecallHit& h) { return h.ts_ms < win_from || h.ts_ms >= win_to; }),
+                v.end());
+        }
+        return v;
+    };
+
     // Field-RAG / Modern Hopfield mode: bypass RRF, run DAM relaxation.
     if (strategy == "field") {
         auto emb = params.contains("_preembedding")
@@ -284,14 +304,14 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             for (const auto& f : forms) {
                 auto emb = (f == query) ? base_emb : embed_query(f);
                 if (emb.empty()) continue;
-                rrf_lane(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm));
+                rrf_lane(window_gate(field_store_->recall(emb, std::min(fetch_limit, (size_t)20), realm)));
             }
         }
         // BM25 lane
-        rrf_lane(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20), realm));
+        rrf_lane(window_gate(field_store_->recall_keyword(query, std::min(fetch_limit, (size_t)20), realm)));
         // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
         if (!params.value("disable_hdc", false)) {
-            rrf_lane(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm));
+            rrf_lane(window_gate(field_store_->recall_hdc(query, std::min(fetch_limit, (size_t)20), realm)));
         }
 
         // Collect sorted by RRF score, keep original hit metadata
@@ -318,9 +338,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         // Never call embed_query() here — that's inside rpc_mutex_ and blocks readers.
         if (params.contains("_preembedding")) {
             auto emb = params["_preembedding"].get<std::vector<float>>();
-            hits = field_store_->recall(emb, fetch_limit, realm);
+            hits = window_gate(field_store_->recall(emb, fetch_limit, realm));
         } else {
-            hits = field_store_->recall_keyword(query, fetch_limit);
+            hits = window_gate(field_store_->recall_keyword(query, fetch_limit));
         }
     }
 
@@ -329,6 +349,21 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         std::remove_if(hits.begin(), hits.end(),
             [](const FieldRecallHit& h) { return h.content.empty(); }),
         hits.end());
+
+    // Windowed starvation backfill: the gate can leave the shallow (≤20-wide)
+    // lanes short. The Rust windowed hybrid over-fetches inside the window and
+    // ranks any remainder by cosine — window gates, semantic ranks.
+    if (windowed && hits.size() < limit && params.contains("_preembedding")) {
+        auto emb = params["_preembedding"].get<std::vector<float>>();
+        std::unordered_set<uint64_t> have;
+        for (const auto& h : hits) have.insert(h.memory_id);
+        for (auto& h : field_store_->recall_with_fallback(emb, query, limit, realm,
+                                                          win_from, win_to)) {
+            if (hits.size() >= limit) break;
+            if (h.content.empty() || have.count(h.memory_id)) continue;
+            hits.push_back(std::move(h));
+        }
+    }
 
     // Hard-filter by tag: keep only memories that have (id, "tagged", tag) triplet
     if (!tag.empty()) {
@@ -414,6 +449,46 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         }
     }
 
+    // Tier-1 rescore: exact-term-overlap fusion. RRF rank fusion discards raw
+    // lexical evidence, so a memory literally containing the query's terms can
+    // tie with a mere semantic neighbor (the high-k-recall / low-top-k-rank
+    // gap). Additive bounded boost; weight validated on GOLDEN_SET v6 nDCG@10.
+    if (hits.size() > 1) {
+        auto tokens = [](const std::string& s) {
+            static const std::unordered_set<std::string> stop = {
+                "the", "and", "for", "with", "what", "how", "did", "does", "was",
+                "were", "are", "that", "this", "when", "where", "who", "why"};
+            std::unordered_set<std::string> out;
+            std::string cur;
+            for (char c : s) {
+                if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') {
+                    cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                } else if (!cur.empty()) {
+                    if (cur.size() >= 3 && !stop.count(cur)) out.insert(cur);
+                    cur.clear();
+                }
+            }
+            if (cur.size() >= 3 && !stop.count(cur)) out.insert(cur);
+            return out;
+        };
+        auto q_toks = tokens(query);
+        if (!q_toks.empty()) {
+            // w=0.4: knee of the GOLDEN_SET v6 offline sweep (0.312→0.385 nDCG@10;
+            // higher w keeps climbing but overfits 30 queries / lexical notation).
+            constexpr float kOverlapW = 0.4f;
+            for (auto& h : hits) {
+                auto c_toks = tokens(h.content);
+                size_t inter = 0;
+                for (const auto& t : q_toks) inter += c_toks.count(t);
+                h.score += kOverlapW * (static_cast<float>(inter) / q_toks.size());
+            }
+            std::sort(hits.begin(), hits.end(),
+                      [](const FieldRecallHit& a, const FieldRecallHit& b) {
+                          return a.score > b.score;
+                      });
+        }
+    }
+
     bool explain = params.value("explain", false);
     json results_json = hits_to_results_json(hits, explain);
 
@@ -490,10 +565,23 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     }
 
     std::string recall_status = results_json.empty() ? "empty" : (weak ? "weak" : "ok");
-    auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm},
-                                            {"status", recall_status},
-                                            {"atoms", atoms_json},
-                                            {"abstain", weak}, {"max_relevance", max_rel}});
+    json meta = {{"results", results_json}, {"realm", realm},
+                 {"status", recall_status},
+                 {"atoms", atoms_json},
+                 {"abstain", weak}, {"max_relevance", max_rel}};
+    if (windowed) {
+        // Surface the applied gate so a mis-parsed phrase is visible and correctable.
+        auto iso = [](int64_t ms) {
+            std::time_t t = static_cast<std::time_t>(ms / 1000);
+            char buf[24];
+            std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M", std::gmtime(&t));
+            return std::string(buf);
+        };
+        meta["window"] = {{"from", iso(win_from)}, {"to", iso(win_to)},
+                          {"from_ms", win_from}, {"to_ms", win_to}};
+        ss << "\n[window: " << iso(win_from) << " → " << iso(win_to) << " UTC]\n";
+    }
+    auto result = ToolResult::ok(ss.str(), meta);
     fire_recall_callback(results_json, 1);
     return result;
 }

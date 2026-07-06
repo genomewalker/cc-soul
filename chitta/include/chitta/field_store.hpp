@@ -79,11 +79,17 @@ int cf_recall_field(struct CfHandle* h,
     const char* query_text, const char* realm, size_t k,
     CfRecallHit* buf, size_t buf_cap, size_t* written);
 
-// Hybrid recall: HNSW + BM25 fused via RRF in Rust (real hybrid path)
+// Hybrid recall: HNSW + BM25 fused via RRF in Rust (real hybrid path).
+// start_ms/end_ms: optional authored_at_ms window gate (0/0 = disabled).
 int cf_recall_with_fallback(struct CfHandle* h,
     const float* query_embedding, size_t embedding_len,
     const char* query_text, const char* realm, size_t k,
+    int64_t start_ms, int64_t end_ms,
     CfRecallHit* buf, size_t buf_cap, size_t* written);
+
+// Deterministic temporal-phrase parser ("last week", "in June", "since 2026-05-01").
+// Returns JSON {"from_ms","to_ms","stripped"} (free with cf_free_string) or null.
+char* cf_parse_time_window(const char* query, int64_t now_ms, int32_t tz_offset_min);
 
 // FEP attractor network FFI
 float cf_reconstruction_error(const struct CfHandle* h, uint64_t memory_id);
@@ -626,11 +632,15 @@ public:
     /// Hybrid recall: HNSW semantic + BM25 fused via RRF internally.
     /// Prefer over recall() for strategy="hybrid" — this runs the real
     /// recall_with_fallback path, not semantic-only.
+    /// start_ms/end_ms (0/0 = off): authored_at_ms window GATE — the window
+    /// gates candidates, semantic relevance ranks (never recency-sorts).
     std::vector<FieldRecallHit> recall_with_fallback(
         const std::vector<float>& query_embedding,
         const std::string&        query_text,
         size_t                    k,
-        const std::string&        realm = ""
+        const std::string&        realm = "",
+        int64_t                   start_ms = 0,
+        int64_t                   end_ms = 0
     ) {
         constexpr size_t MAX_HITS = 256;
         CfRecallHit buf[MAX_HITS];
@@ -640,10 +650,22 @@ public:
             handle_,
             query_embedding.data(), query_embedding.size(),
             query_text.c_str(), realm_ptr, k,
+            start_ms, end_ms,
             buf, MAX_HITS, &written
         );
         cf_checked(r, __func__);
         return hits_to_results(buf, written);
+    }
+
+    /// Parse a natural-language temporal phrase ("last week", "in June") out of
+    /// a query. Returns empty string when no phrase matches (the no-match →
+    /// unchanged-behavior guarantee); otherwise JSON {"from_ms","to_ms","stripped"}.
+    std::string parse_time_window(const std::string& query, int64_t now_ms, int32_t tz_offset_min) {
+        char* raw = cf_parse_time_window(query.c_str(), now_ms, tz_offset_min);
+        if (!raw) return "";
+        std::string out(raw);
+        cf_free_string(raw);
+        return out;
     }
 
     /// Semantic recall with affective context — mood-congruent retrieval.

@@ -389,6 +389,28 @@ public:
             //   upgrade: per-query dedup map (share one GPU call across concurrent waiters).
             if (is_read_only_tool(name) && !args.contains("_preembedding")) {
                 std::string q = args.value("query", "");
+                // Temporal-phrase parse (recall only, deterministic, no LLM):
+                // "last week"/"in June" → ts window gate + stripped query for
+                // embedding. No phrase → parse returns empty → behavior unchanged.
+                if (name == "recall" && !q.empty() && field_store_ && !args.contains("_twindow")) {
+                    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    time_t tt = time(nullptr);
+                    struct tm loc {};
+                    localtime_r(&tt, &loc);
+                    // timegm(local-fields) - t == the local UTC offset, DST included.
+                    int32_t tz_min = static_cast<int32_t>((timegm(&loc) - tt) / 60);
+                    std::string w = field_store_->parse_time_window(q, now, tz_min);
+                    if (!w.empty()) {
+                        try {
+                            auto wj = json::parse(w);
+                            args["_twindow"] = {wj.value("from_ms", int64_t(0)),
+                                                wj.value("to_ms", int64_t(0))};
+                            std::string stripped = wj.value("stripped", "");
+                            if (!stripped.empty()) q = stripped;
+                        } catch (...) {}
+                    }
+                }
                 if (!q.empty()) {
                     std::vector<float> emb;
                     if (embed_queue_) {
