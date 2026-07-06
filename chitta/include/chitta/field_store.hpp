@@ -1419,6 +1419,40 @@ public:
         return std::vector<CfSymbolHit>(buf, buf + written);
     }
 
+    /// Name search restricted to file paths containing `path_filter`
+    /// (empty = unscoped).
+    std::vector<CfSymbolHit> search_symbols_by_name_scoped(
+        const std::string& query, size_t limit, const std::string& path_filter) {
+        constexpr size_t MAX = 256;
+        CfSymbolHit buf[MAX];
+        size_t written = 0;
+        cf_search_symbols_by_name_scoped(handle_, query.c_str(), limit,
+            path_filter.empty() ? nullptr : path_filter.c_str(),
+            buf, MAX, &written);
+        return std::vector<CfSymbolHit>(buf, buf + written);
+    }
+
+    /// Remove every symbol in a file (per-file invalidation before re-extract).
+    /// Returns the number removed.
+    size_t remove_symbols_by_file(const std::string& file_path) {
+        size_t removed = 0;
+        cf_remove_symbols_by_file(handle_, file_path.c_str(), &removed);
+        return removed;
+    }
+
+    /// GC the symbol index. `path_excludes_csv` = comma-separated substrings.
+    /// Returns the JSON stats string (empty on failure).
+    std::string dedupe_symbols(bool dry_run, bool check_fs,
+                               const std::string& path_excludes_csv) {
+        std::vector<uint8_t> buf(1 << 20);
+        size_t written = 0;
+        int r = cf_dedupe_symbols(handle_, dry_run ? 1 : 0, check_fs ? 1 : 0,
+            path_excludes_csv.empty() ? nullptr : path_excludes_csv.c_str(),
+            buf.data(), buf.size(), &written);
+        if (r != 0) return "";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
     void add_sym_call_edge(uint64_t caller_id, uint64_t callee_id) {
         cf_add_sym_call_edge(handle_, caller_id, callee_id);
     }
