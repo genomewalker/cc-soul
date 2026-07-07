@@ -13,6 +13,22 @@ pkill -f "chitta m[c]p" 2>/dev/null; sleep 1   # [c] so pkill -f can't match thi
 ```
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.
 
+## Dev install (editable — repo IS the live plugin)
+The live plugin loads **hooks + MCP python from `~/.claude/hooks/*` and
+`~/.claude/plugins/marketplaces/genomewalker-cc-soul/chitta-mcp/*`** — NOT from
+this repo directly. `scripts/dev-install.sh` symlinks those live paths back at
+this repo so `edit repo → restart service → live`, one source of truth, no drift.
+```bash
+bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; restarts MCP
+```
+- Hooks are live immediately (bash re-reads per invocation). MCP python needs the
+  MCP restart (the script does `pkill -f "chitta m[c]p"`).
+- Binaries are the exception: keep the `build → install` (atomic) flow above —
+  symlinking a running binary risks ETXTBSY.
+- ⚠️ The marketplace is a **git checkout** that a plugin update can re-clone,
+  replacing the symlinks with a stale copy (this is what caused the
+  `server.py` dual-copy drift). Re-run `dev-install.sh` after any plugin update.
+
 ## Release
 `./scripts/release.sh patch|minor|major -y`
 
