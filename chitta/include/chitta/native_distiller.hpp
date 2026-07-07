@@ -44,6 +44,8 @@ struct DistillResult {
     int learnings_deduped = 0;  // Strengthened existing instead of storing new
     int triplets_created = 0;
     int citations_linked = 0;   // Code citations (memory→file:line)
+    int value_facts_stored = 0; // Deterministic (identifier,value) atoms stored
+    int value_facts_deduped = 0;// Value-facts a strict holder already covered
     int64_t episode_id = 0;
     int64_t last_line = 0;      // Last JSONL line processed (for progress tracking)
     bool success = false;
@@ -72,6 +74,7 @@ struct PreparedDistillation {
     std::vector<float> ep_embedding;
     SSLParser::Result ssl_result;
     std::vector<LearningPrep> learning_preps;  // indexed 1:1 with ssl_result.learnings
+    std::string conversation;                  // raw text — fed to the value-fact extractor
     bool valid = false;
     std::string error;
 };
@@ -141,6 +144,18 @@ private:
         const std::vector<LearningPrep>& learning_preps,
         DistillResult& result
     );
+
+    // Deterministic value-fact pass (no LLM): extract (identifier,value) atoms from
+    // prep.conversation, dedup against the store, write survivors via field_store_.
+    // Gated by env CHITTA_VALUE_FACTS (default on). Runs right after store_learnings.
+    void store_value_facts(
+        const std::string& conversation,
+        const std::string& realm,
+        uint64_t episode_mem_id,
+        DistillResult& result
+    );
+
+    static bool value_facts_enabled();
 
     static float category_to_confidence(const std::string& category);
     static float category_to_decay(const std::string& category);
