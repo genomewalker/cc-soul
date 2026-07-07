@@ -413,6 +413,16 @@ while IFS= read -r line; do
         _ah=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
         printf '{"h":"%s","conf":%s,"shares":%d,"qn":%s}\n' "$_ah" "${conf:-0}" "$_shares" "${_QTOK_N:-0}" \
             >> "${MIND_PATH}/.inj_anchor_shadow.jsonl" 2>/dev/null || true
+        # ENFORCE (opt-in, default OFF): drop off-topic sem candidates that share
+        # ZERO entity with a FOCUSED turn. Query-size window guards both ends:
+        # tiny qn can't anchor, huge qn is a paste/relay (gate is inert there
+        # anyway). Only flip on after the join-validation clears BOTH gates
+        # (precision(shares=1) >= 2x precision(shares=0) AND used-recall >= 90%)
+        # on a FRESH Fable audit — else this becomes the #14 mirage on the read path.
+        if [[ "${CC_SOUL_ANCHOR_ENFORCE:-0}" == "1" && "$_shares" -eq 0 \
+              && "${_QTOK_N:-0}" -ge 3 && "${_QTOK_N:-0}" -le 50 ]]; then
+            ((++_drop_meta)); continue
+        fi
     fi
 
     _cand_reason+=("$reason"); _cand_line+=("$line")

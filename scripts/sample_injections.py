@@ -48,11 +48,11 @@ def main():
             reply = assistant_text(o)
             if reply and pending:
                 rt = norm_tokens(reply)
-                for lane, score, content in pending:
+                for lane, score, content, h in pending:
                     it = norm_tokens(content)
                     ov = len(it & rt) / len(it) if len(it) >= 3 else 0.0
                     by_lane[lane].append({
-                        "lane": lane, "score": score, "content": content,
+                        "lane": lane, "score": score, "content": content, "h": h,
                         "reply": reply[:MAX_REPLY_CHARS],
                         "session": Path(path).stem, "overlap": round(ov, 3),
                     })
