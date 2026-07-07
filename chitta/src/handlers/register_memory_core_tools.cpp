@@ -566,6 +566,11 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["densify_backfill"] = [this](const json& p) { return tool_densify_backfill(p); };
 
+    tools_.push_back({{"name","assoc_census"},{"description","Read-only assoc-graph census: per-EdgeType directed-edge count plus weight histogram (<0.05 / 0.05-0.2 / 0.2-0.5 / 0.5-0.8 / >=0.8). Measure-first gate for plasticity levers."},
+        {"inputSchema",{{"type","object"},{"properties",{}}}}
+    });
+    handlers_["assoc_census"] = [this](const json& p) { return tool_assoc_census(p); };
+
     tools_.push_back({{"name","span_stats"},{"description","Report span lane size: unique atoms, on-disk bytes, total redactions."},
         {"inputSchema",{{"type","object"},{"properties",{}}}}
     });
