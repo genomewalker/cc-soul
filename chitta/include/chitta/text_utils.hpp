@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <string>
 #include <string_view>
 
 namespace chitta {
@@ -22,6 +23,17 @@ inline std::size_t estimate_tokens(std::string_view text) {
         }
     }
     return static_cast<std::size_t>(words * 1.3f);
+}
+
+// Truncate a UTF-8 string at a valid character boundary (never mid multibyte
+// sequence). Content previews built with raw substr() can split a multibyte
+// char; nlohmann::json::dump() then throws on the invalid UTF-8 and the whole
+// RPC reply is lost. Use this for ANY truncated text that can reach JSON.
+inline std::string utf8_trunc(const std::string& s, std::size_t max_bytes) {
+    if (s.size() <= max_bytes) return s;
+    std::size_t i = max_bytes;
+    while (i > 0 && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) --i;
+    return s.substr(0, i);
 }
 
 } // namespace chitta
