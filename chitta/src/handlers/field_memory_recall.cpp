@@ -1388,6 +1388,28 @@ ToolResult FieldRpcHandler::tool_span_backfill_memories(const json& /*params*/) 
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_densify_backfill(const json& params) {
+    bool apply = params.value("apply", false);
+    std::string raw = field_store_->densify_backfill_json(apply);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        auto h = parsed.value("histogram", json::object());
+        ss << "densify_backfill apply=" << (apply ? "true" : "false")
+           << " sessions=" << parsed.value("sessions", 0)
+           << " memories_in_sessions=" << parsed.value("memories_in_sessions", 0)
+           << " pairs=" << parsed.value("pairs", 0)
+           << " directed_edges=" << parsed.value("directed_edges", 0)
+           << " | group-size hist n1=" << h.value("n1", 0)
+           << " n2=" << h.value("n2", 0) << " n3_5=" << h.value("n3_5", 0)
+           << " n6_10=" << h.value("n6_10", 0) << " n11_50=" << h.value("n11_50", 0)
+           << " n51+=" << h.value("n51plus", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 ToolResult FieldRpcHandler::tool_span_stats(const json& /*params*/) {
     std::string raw = field_store_->span_stats_json();
     auto parsed = json::parse(raw, nullptr, false);

@@ -561,6 +561,11 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["span_backfill_memories"] = [this](const json& p) { return tool_span_backfill_memories(p); };
 
+    tools_.push_back({{"name","densify_backfill"},{"description","#13 retro-backfill of SameSession edges over existing session-tagged memories (same K=3 decaying-weight rule as the write-time hook). apply=false is a dry run: reports sessions, memories, sibling pairs, and a group-size histogram, writing nothing. apply=true creates the edges (idempotent; rollback via remove_assoc_edges_by_type)."},
+        {"inputSchema",{{"type","object"},{"properties",{{"apply",{{"type","boolean"}}}}}}}
+    });
+    handlers_["densify_backfill"] = [this](const json& p) { return tool_densify_backfill(p); };
+
     tools_.push_back({{"name","span_stats"},{"description","Report span lane size: unique atoms, on-disk bytes, total redactions."},
         {"inputSchema",{{"type","object"},{"properties",{}}}}
     });

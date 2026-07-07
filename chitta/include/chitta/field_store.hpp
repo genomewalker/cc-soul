@@ -323,6 +323,7 @@ char* cf_span_stats(struct CfHandle* h);
 char* cf_span_for_memory(struct CfHandle* h, uint64_t memory_id, size_t k);
 int64_t cf_span_ingest_memory(struct CfHandle* h, uint64_t memory_id, const char* text, const char* realm);
 char* cf_span_backfill_memories(struct CfHandle* h);
+char* cf_densify_backfill(struct CfHandle* h, bool apply);
 int   cf_span_flush(struct CfHandle* h);
 }
 
@@ -1044,6 +1045,14 @@ public:
 
     std::string span_backfill_memories_json() {
         char* raw = cf_span_backfill_memories(handle_);
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string densify_backfill_json(bool apply) {
+        char* raw = cf_densify_backfill(handle_, apply);
         if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
