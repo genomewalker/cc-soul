@@ -242,9 +242,14 @@ else
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
     _hyb_pid=$!
     # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
-    # regardless of semantic similarity. Use --toon for consistent parseable output.
+    # regardless of semantic similarity. Plain format (NOT --toon): the daemon's
+    # TOON results[] schema is variable (an optional `affect` key) and its `atoms`
+    # column is nested JSON carrying its own commas/quotes, which broke the old
+    # positional-sed parser → the kw lane silently emitted zero lines every turn.
+    # The plain format prints the same `[NN%] [type] text` shape as the hyb lane,
+    # so it merges via the identical `[kw]`-prefix idiom below with no CSV parse.
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
-              --limit 3 --toon --realm "$REALM" >"$_ld/kw" 2>/dev/null || true ) &
+              --limit 3 --realm "$REALM" >"$_ld/kw" 2>/dev/null || true ) &
     _kw_pid=$!
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true >"$_ld/corr" 2>/dev/null || true ) &
     _corr_pid=$!
@@ -281,11 +286,21 @@ else
         fi
     fi
 
-    # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
-    # Extract text field and reformat as [kw][50%] [type] text
-    _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -vE '^(realm:|results\[)' | \
-              sed 's/^ [0-9]*,[0-9]*,[^,]*,[^,]*,[^,]*,"\(.*\)",\([a-z]*\)$/[kw][50%] [\2] \1/' | \
-              grep '^\[kw\]' | grep -v '\[thought\]' || true)
+    # Keyword lane (plain format): keep only the per-result header lines
+    # ("[NN%] [type] ... text"), drop multi-line bodies / the verbatim-atoms
+    # trailer, and prefix [kw] so the admission filter uses the low BM25 floor.
+    #
+    # Type filter: BM25 fires on literal tokens, so it readily matches memories
+    # that merely RESTATE a past user prompt — [belief]/[correction]/[goal]/
+    # [preference] nodes are the user talking, not knowledge the reasoner can
+    # use (self-referential prompt-echo). It also surfaces [rollup]/[task]/
+    # [result]/[episode] process cruft. A relevance judge over 29 replayed real
+    # prompts scored the unfiltered kw lane 0.345 useful; restricting to
+    # knowledge types lifts it to 0.818 (drops 18 of 19 noise items, loses 1
+    # useful). Keep only knowledge-typed results.
+    _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -E '^\[[0-9]+%\]' | \
+              grep -E '\] \[(wisdom|insight|research|data|milestone|convergence)\]' | \
+              grep -v '\[thought\]' | sed 's/^\[/[kw][/')
 
     # Merge: prefix hybrid lines with [hyb] marker so filter can use lower threshold.
     # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
@@ -320,6 +335,9 @@ OUTPUT=""
 COUNT=0
 _adm_sem=0; _adm_hyb=0; _adm_kw=0; _adm_corr=0; _adm_xr=0
 _drop_conf=0; _drop_dup=0; _drop_meta=0; _drop_cap=0
+_INJECTED_FILE="${MIND_PATH}/.injected_hashes_${SESSION_ID}"
+# Phase 1: filter each candidate, collect survivors in merge order (sem first).
+_cand_reason=(); _cand_line=()
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     # Match both formats: "[79%]..." (full_resonate) and "#123 [kind] [79%]..." (smart_recall)
@@ -358,15 +376,37 @@ while IFS= read -r line; do
     # Lifetime limit: skip memories already injected this session (they ride in history).
     # First injection is kept; re-injection on every subsequent turn is suppressed.
     # Uses a content hash (first 80 chars) since memory IDs aren't always present.
-    _INJECTED_FILE="${MIND_PATH}/.injected_hashes_${SESSION_ID}"
     _line_hash=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
     if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -f "$_INJECTED_FILE" ]]; then
         grep -qF "$_line_hash" "$_INJECTED_FILE" 2>/dev/null && { ((++_drop_dup)); continue; }
     fi
 
-    # Workspace capacity: count overflow instead of silently breaking
-    [[ $COUNT -ge 3 ]] && { ((++_drop_cap)); continue; }
+    _cand_reason+=("$reason"); _cand_line+=("$line")
+done <<< "$memories"
 
+# Phase 2: workspace fill (cap 3). Sem-first merge order used to monopolize all
+# 3 slots — smart_recall reports normalized ~100% scores while BM25 lanes report
+# raw display_pct (17-40%), so the working keyword lane (exact filenames, IDs,
+# paths) was structurally evicted every turn. Reserve one slot for the best
+# non-sem candidate (kw > hyb > corr > xr): take the first 3 in merge order,
+# and if no non-sem made it, displace the 3rd with the reserved one.
+_n=${#_cand_reason[@]}
+_resv=-1
+for _pref in kw hyb corr xr; do
+    for ((i = 0; i < _n; i++)); do
+        [[ "${_cand_reason[$i]}" == "$_pref" ]] && { _resv=$i; break 2; }
+    done
+done
+_sel=()
+for ((i = 0; i < _n && ${#_sel[@]} < 3; i++)); do _sel+=("$i"); done
+if [[ $_resv -ge 0 && ${#_sel[@]} -gt 0 ]]; then
+    _in_sel=0
+    for i in "${_sel[@]}"; do [[ $i -eq $_resv ]] && _in_sel=1; done
+    [[ $_in_sel -eq 0 ]] && _sel[$(( ${#_sel[@]} - 1 ))]=$_resv
+fi
+_drop_cap=$(( _n - ${#_sel[@]} ))
+for i in "${_sel[@]}"; do
+    reason="${_cand_reason[$i]}"; line="${_cand_line[$i]}"
     # Truncate and add, tagged with admission reason
     OUTPUT="$OUTPUT[$reason]${line:0:150}
 "
@@ -380,9 +420,10 @@ while IFS= read -r line; do
     esac
     # Record injected hash so this memory is suppressed on future turns
     if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -n "${MIND_PATH:-}" ]]; then
+        _line_hash=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
         printf '%s\n' "$_line_hash" >> "$_INJECTED_FILE" 2>/dev/null || true
     fi
-done <<< "$memories"
+done
 
 # C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
 # max_relevance (from the hybrid-lane header) into TWO honest bands.
