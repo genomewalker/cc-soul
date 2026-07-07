@@ -222,6 +222,15 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"densify_backfill", "#13 retro-backfill of SameSession edges over existing session-tagged memories. Dry-run by default (counts sibling pairs + group-size histogram, no writes).",
      {{"apply", "Create the edges (default false = dry-run count only)", false, "false"}}},
 
+    {"assoc_census", "Read-only assoc-graph census: per-EdgeType directed-edge count plus weight histogram. Measure-first gate for plasticity levers.",
+     {}},
+
+    {"assoc_decay", "Gate B: decay + floor-prune one assoc EdgeType. Every edge weight is multiplied by factor; edges below prune_below are removed. Dry-run by default. One-shot saturation migration: factor=1.0, prune_below=0.2. Snapshot before apply.",
+     {{"edge_type", "Wire numbering 0-5 (default 3=CoRetrieved)", false, "3"},
+      {"factor", "Weight multiplier in (0,1] (default 1.0 = no decay)", false, "1.0"},
+      {"prune_below", "Remove edges below this weight (default 0.0 = keep all)", false, "0.0"},
+      {"apply", "Perform the mutation (default false = dry-run count only)", false, "false"}}},
+
     {"span_stats", "Span lane size: unique atoms, disk bytes, redactions.",
      {}},
 
