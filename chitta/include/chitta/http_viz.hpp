@@ -3,6 +3,7 @@
 #define CPPHTTPLIB_NO_SSL
 #include "httplib.h"
 #include "field_store.hpp"
+#include "text_utils.hpp"
 #include "version.hpp"
 #include <chitta_field.h>
 #include <nlohmann/json.hpp>
@@ -25,13 +26,8 @@ namespace chitta {
 
 using json = nlohmann::json;
 
-// Truncate a UTF-8 string at a valid character boundary (not in the middle of a multibyte seq)
-static inline std::string utf8_trunc(const std::string& s, size_t max_bytes) {
-    if (s.size() <= max_bytes) return s;
-    size_t i = max_bytes;
-    while (i > 0 && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) --i;
-    return s.substr(0, i);
-}
+// utf8_trunc (UTF-8-safe preview truncation) lives in text_utils.hpp — shared
+// with the RPC handlers so every JSON-bound preview goes through one helper.
 
 class VizServer {
 public:
@@ -180,7 +176,7 @@ public:
                 CfRecallHit hits[100];
                 size_t written = 0;
                 size_t max_hits = std::min(limit, size_t(100));
-                cf_recall_keyword(field_->handle(), query.c_str(), max_hits, nullptr, hits, max_hits, &written);
+                cf_recall_keyword(field_->handle(), query.c_str(), max_hits, nullptr, hits, max_hits, &written, /*no_learn=*/true);
                 json arr = json::array();
                 for (size_t i = 0; i < written; ++i) {
                     json m;
@@ -503,7 +499,7 @@ private:
 
             CfRecallHit hits[6];
             size_t written = 0;
-            cf_recall_keyword(field_->handle(), q.c_str(), 5, nullptr, hits, 6, &written);
+            cf_recall_keyword(field_->handle(), q.c_str(), 5, nullptr, hits, 6, &written, /*no_learn=*/true);
 
             for (size_t h = 0; h < written; ++h) {
                 uint64_t tgt_id = hits[h].memory_id;

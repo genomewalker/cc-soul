@@ -349,8 +349,12 @@ GRADE_REALM = "project:cc-soul"
 def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
     """Full recall response — keeps top-level fields (max_relevance, abstain)."""
     env = dict(os.environ, SQZ_NO_DEDUP="1")
+    # --no-learn: the eval must never mutate the store it measures. Without it,
+    # every graded recall enqueues co-retrieval strengthening (+0.05/pair) that
+    # drains on the next snapshot, reinforcing near-but-wrong hits on a sparse
+    # store — the store degrades exactly the queries we measure.
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
-           "--realm", GRADE_REALM, "--json"]
+           "--realm", GRADE_REALM, "--no-learn", "--json"]
     if strategy:
         cmd += ["--strategy", strategy]
     try:

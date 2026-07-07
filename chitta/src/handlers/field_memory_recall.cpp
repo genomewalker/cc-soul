@@ -233,6 +233,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     std::string tag      = params.value("tag", "");
     std::string strategy = params.value("strategy", "");
     bool expand          = params.value("expand", true);
+    // Measurement mode: skip co-retrieval strengthening so an eval/diagnostic
+    // recall never mutates the store. "no_learn":true or "strengthen":false.
+    bool no_learn        = params.value("no_learn", false) || !params.value("strengthen", true);
 
     // Temporal window (parsed from the query at the pre-embed hook, e.g.
     // "last week" / "in June"). The window GATES candidates by authored ts;
@@ -311,11 +314,11 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             for (const auto& f : forms) {
                 auto emb = (f == query) ? base_emb : embed_query(f);
                 if (emb.empty()) continue;
-                rrf_lane(window_gate(field_store_->recall(emb, lane_depth, realm)));
+                rrf_lane(window_gate(field_store_->recall(emb, lane_depth, realm, no_learn)));
             }
         }
         // BM25 lane
-        rrf_lane(window_gate(field_store_->recall_keyword(query, lane_depth, realm)));
+        rrf_lane(window_gate(field_store_->recall_keyword(query, lane_depth, realm, no_learn)));
         // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
         if (!params.value("disable_hdc", false)) {
             rrf_lane(window_gate(field_store_->recall_hdc(query, lane_depth, realm)));
@@ -347,9 +350,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         // Never call embed_query() here — that's inside rpc_mutex_ and blocks readers.
         if (params.contains("_preembedding")) {
             auto emb = params["_preembedding"].get<std::vector<float>>();
-            hits = window_gate(field_store_->recall(emb, pool_limit, realm));
+            hits = window_gate(field_store_->recall(emb, pool_limit, realm, no_learn));
         } else {
-            hits = window_gate(field_store_->recall_keyword(query, pool_limit));
+            hits = window_gate(field_store_->recall_keyword(query, pool_limit, "", no_learn));
         }
     }
 
@@ -721,18 +724,22 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
 
     size_t limit      = static_cast<size_t>(params.value("limit", 10));
     std::string realm = params.value("realm", "");
+    // Measurement mode: skip co-retrieval strengthening so an eval/diagnostic
+    // recall never mutates the store it reads. Accepts either "strengthen":false
+    // or "no_learn":true.
+    bool no_learn = params.value("no_learn", false) || !params.value("strengthen", true);
 
     auto embedding = embed_query(query);
 
     std::vector<FieldRecallHit> semantic_hits;
     if (!embedding.empty()) {
-        semantic_hits = field_store_->recall(embedding, limit, realm);
+        semantic_hits = field_store_->recall(embedding, limit, realm, no_learn);
         semantic_hits.erase(
             std::remove_if(semantic_hits.begin(), semantic_hits.end(),
                 [](const FieldRecallHit& h) { return h.content.empty(); }),
             semantic_hits.end());
     }
-    auto keyword_hits  = field_store_->recall_keyword(query, limit, realm);
+    auto keyword_hits  = field_store_->recall_keyword(query, limit, realm, no_learn);
 
     // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
     {
