@@ -2312,6 +2312,20 @@ async def call_tool(name: str, arguments: dict):
                 if realm:
                     arguments["sender_realm"] = realm
 
+    # Auto-inject source_session for memory writes (substrate coverage lever:
+    # feeds recall_session grouping + densify_backfill SameSession edges).
+    # Best-effort: skip silently if the session can't be resolved — an
+    # untagged memory is fine, a failed write is not.
+    if name in ("remember", "remember_batch"):
+        sid = get_current_session_id(use_cache=False)
+        if sid:
+            if name == "remember":
+                arguments.setdefault("source_session", sid)
+            else:
+                for _item in arguments.get("items") or []:
+                    if isinstance(_item, dict):
+                        _item.setdefault("source_session", sid)
+
     # Auto-inject session_id for transcript_search if not provided
     # Pass session_id="*" to explicitly search all transcripts
     if name == "transcript_search":
