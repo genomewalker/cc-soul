@@ -897,7 +897,8 @@ def store_session_summaries(conv: dict, sample_id: str, tag_prefix: str = "locom
             category="episode",
             title=title,
             content=session_text[:4000],  # Full session content for retrieval
-            tags=f"{tag_prefix},{sample_id},session,raw"
+            tags=f"{tag_prefix},{sample_id},session,raw",
+            realm=tag_prefix
         )
         stored += 1
 
@@ -1005,7 +1006,8 @@ def ingest_conversation(conv: dict, tag_prefix: str = "locomo", use_llm: bool = 
                             category="signal",
                             title=line[:250],
                             content=line[:500],
-                            tags=f"{tag_prefix},{sample_id},fact,ssl"
+                            tags=f"{tag_prefix},{sample_id},fact,ssl",
+                            realm=tag_prefix
                         )
                         stored += 1
 
@@ -1033,7 +1035,8 @@ def ingest_conversation(conv: dict, tag_prefix: str = "locomo", use_llm: bool = 
                 category="episode",
                 title=f"[{tag_prefix}:{sample_id}] Session {session_num} ({date})",
                 content=session_text[:1500],
-                tags=f"{tag_prefix},{sample_id},session_{session_num}"
+                tags=f"{tag_prefix},{sample_id},session_{session_num}",
+                realm=tag_prefix
             )
             stored += 1
 
