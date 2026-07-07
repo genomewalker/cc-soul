@@ -354,7 +354,12 @@ def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
     # drains on the next snapshot, reinforcing near-but-wrong hits on a sparse
     # store — the store degrades exactly the queries we measure.
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
-           "--realm", GRADE_REALM, "--no-learn", "--json"]
+           "--realm", GRADE_REALM, "--json"]
+    # CC_GRADE_LEARN=1 removes the hygiene flag for the pollution-magnitude
+    # experiment (WITHOUT-flag arm of the S0 drain protocol). Default keeps
+    # --no-learn so routine grading never mutates the store it measures.
+    if os.environ.get("CC_GRADE_LEARN") != "1":
+        cmd.insert(-1, "--no-learn")
     if strategy:
         cmd += ["--strategy", strategy]
     try:
