@@ -1,8 +1,11 @@
 #include "../include/chitta/native_distiller.hpp"
 #include "../include/chitta/ssl_gloss.hpp"
 #include "../include/chitta/ssl_prompt.hpp"
+#include "../include/chitta/value_fact_extractor.hpp"
 #include <sstream>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 
@@ -223,6 +226,73 @@ void NativeDistiller::store_learnings(
     }
 }
 
+// ── value-facts (deterministic pass — extract, dedup, write) ─────────────────
+
+bool NativeDistiller::value_facts_enabled() {
+    // Default ON (net-positive: +0.907 coverage, 0.000 degradation). Off only when
+    // CHITTA_VALUE_FACTS is explicitly 0/false/no/off.
+    const char* v = std::getenv("CHITTA_VALUE_FACTS");
+    if (!v || !*v) return true;
+    return !(std::strcmp(v, "0") == 0 || std::strcmp(v, "false") == 0 ||
+             std::strcmp(v, "no") == 0 || std::strcmp(v, "off") == 0);
+}
+
+void NativeDistiller::store_value_facts(
+    const std::string& conversation,
+    const std::string& realm,
+    uint64_t episode_mem_id,
+    DistillResult& result
+) {
+    if (conversation.empty()) return;
+    auto facts = extract_value_facts(conversation);
+    if (facts.empty()) return;
+    log("[distill]   value-facts: " + std::to_string(facts.size()) + " candidates");
+
+    // Operational scalars: high confidence, slow decay (like OPERATIONAL/belief).
+    constexpr float kConfidence = 0.85f;
+    constexpr float kDecay      = 0.001f;
+
+    for (const auto& fact : facts) {
+        std::vector<float> emb;
+        if (embedder_) emb = embedder_(chitta::ssl::retrieval_text(fact.content));
+
+        // DEDUP: if a strict holder already covers this identifier+value, skip.
+        // The content leads with "<identifier> <value>", so semantic recall on it
+        // matches an existing memory that already states the pair. This holds volume
+        // to ~1 write/new-fact and is why measured degradation was zero.
+        if (!emb.empty() && config_.dedup_threshold > 0.0f) {
+            bool dup = false;
+            auto check = [&](const std::vector<FieldRecallHit>& hits) {
+                for (const auto& hit : hits)
+                    if (hit.semantic_score >= config_.dedup_threshold) { dup = true; return true; }
+                return false;
+            };
+            if (!check(field_store_->recall(emb, 5, realm)) && !realm.empty())
+                check(field_store_->recall(emb, 5, ""));
+            if (dup) {
+                result.value_facts_deduped++;
+                continue;
+            }
+        }
+
+        uint64_t mem_id = 0;
+        try {
+            mem_id = field_store_->remember("operational", realm, fact.content,
+                                            emb, kConfidence, kDecay);
+        } catch (...) { continue; }
+        if (mem_id == 0) continue;
+
+        result.value_facts_stored++;
+        log("[distill]   +value-fact: " + fact.identifier + " = " + fact.value);
+
+        if (episode_mem_id > 0) {
+            field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);
+            field_store_->add_triplet(std::to_string(mem_id), "derived_from",
+                                      std::to_string(episode_mem_id));
+        }
+    }
+}
+
 // ── distill_session ──────────────────────────────────────────────────────────
 
 PreparedDistillation NativeDistiller::prepare_distillation(
@@ -266,6 +336,7 @@ PreparedDistillation NativeDistiller::prepare_distillation(
         trunc.max_chars = std::numeric_limits<size_t>::max();
     }
     auto conversation = TranscriptParser::build_conversation(turns, trunc);
+    prep.conversation = conversation;  // reused by the deterministic value-fact pass
 
     // 4. Build SSL prompt
     auto prompt = ssl::build_prompt(conversation);
@@ -328,11 +399,20 @@ DistillResult NativeDistiller::commit_distillation(const PreparedDistillation& p
                     static_cast<uint64_t>(episode_id), prep.learning_preps, result);
     result.triplets_created = static_cast<int>(prep.ssl_result.triplets.size());
 
+    // Deterministic value-fact pass over the same conversation (no LLM). Compensates
+    // for Tier-2 SSL compression dropping exact scalars. Gated by CHITTA_VALUE_FACTS.
+    if (value_facts_enabled()) {
+        store_value_facts(prep.conversation, prep.realm,
+                          static_cast<uint64_t>(episode_id), result);
+    }
+
     log("[distill] Session " + prep.session_id + ": Done (+" +
         std::to_string(result.learnings_stored) + " new, " +
         std::to_string(result.learnings_deduped) + " deduped, " +
         std::to_string(result.triplets_created) + " triplets, " +
-        std::to_string(result.citations_linked) + " citations)");
+        std::to_string(result.citations_linked) + " citations, +" +
+        std::to_string(result.value_facts_stored) + " value-facts/" +
+        std::to_string(result.value_facts_deduped) + " dedup)");
 
     result.last_line = prep.last_line;
     result.success = true;

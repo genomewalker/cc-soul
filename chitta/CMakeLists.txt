@@ -353,6 +353,7 @@ add_executable(chittad
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
+    src/value_fact_extractor.cpp
     src/ingester.cpp
     src/wiki_export.cpp
     src/embedding_export.cpp
@@ -463,6 +464,9 @@ if(CHITTA_BUILD_TESTS)
     add_executable(callsite_extract_test src/callsite_extract_test.cpp)
     target_link_libraries(callsite_extract_test PRIVATE chitta)
     add_test(NAME callsite_extract_test COMMAND callsite_extract_test)
+    add_executable(value_fact_extract_test
+        src/value_fact_extract_test.cpp src/value_fact_extractor.cpp)
+    add_test(NAME value_fact_extract_test COMMAND value_fact_extract_test)
 endif()
 
 # RPATH configuration for runtime library discovery
