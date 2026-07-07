@@ -798,10 +798,21 @@ def main():
     s_vals = [r["s_entropy"] for r in records if r.get("s_entropy") is not None]
     mean_s_entropy = sum(s_vals) / len(s_vals) if s_vals else None
 
+    # Canonical baseline config (frozen 2026-07-07): v6 golden / reranker on /
+    # limit=10. The cross-encoder stalls at depth-20 (>9min), so limit=20 is NOT
+    # a routine baseline. Never mix limits when comparing runs.
+    canonical = (not a.no_reranker and a.limit == 10)
+    if not canonical and not a.quiet:
+        print(f"WARNING: non-canonical config (baseline = v{GOLDEN_VERSION}/reranker/limit=10); "
+              f"this run: {'no-reranker' if a.no_reranker else 'reranker'}/limit={a.limit}")
+
     report = {
         "ts": ts,
+        "canonical_baseline": "v6/reranker/limit=10 (frozen 2026-07-07)",
+        "is_canonical_run": canonical,
         "version": GOLDEN_VERSION,
         "limit": a.limit,
+        "reranker": not a.no_reranker,
         "metric": "mean_nDCG",
         "score": mean_ndcg,
         "score_active": mean_ndcg_active,
