@@ -494,6 +494,20 @@ if [[ -n "${_c2_pct:-}" ]]; then
     fi
 fi
 
+# C2 DISPLAY calibration. The daemon's raw Platt maxrel is over-confident as a
+# hit-probability: on a frozen golden snapshot it read mean 0.844 while the true
+# hit@3 was 0.533 (ECE 0.31, Brier 0.34). A logistic re-fit on gold-hit data
+# (w=1.8029, c=-2.9263 over logit(maxrel)) cuts leave-one-out ECE to 0.159 and
+# kills the mean over-confidence (0.844->0.53). We recalibrate the DISPLAYED
+# percent only — the KNOWN/UNKNOWN band stays on raw maxrel (its KNOWN-vs-OOD
+# separation is already clean), so behavior is unchanged; the number the reasoner
+# reads just stops lying. (Daemon-side Platt re-fit is NO-GO: a hardcoded slope
+# re-inherits the store-drift staleness that forced the 2-band revert.)
+_c2_cal="$_c2_pct"
+if [[ -n "${_c2_pct:-}" ]]; then
+    _c2_cal=$(awk -v p="$_c2_pct" 'BEGIN{x=p/100; if(x<0.001)x=0.001; if(x>0.999)x=0.999; z=log(x/(1-x)); v=1/(1+exp(-(1.8029*z-2.9263))); printf "%d", v*100+0.5}' 2>/dev/null || echo "$_c2_pct")
+fi
+
 # [admit] summary: C2 tag + admitted per lane + rejected per cause. Only
 # lanes/causes with nonzero counts are shown to keep the line minimal.
 ADMIT_LINE=""
@@ -509,7 +523,7 @@ if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap)) -gt 0
     [[ $_drop_dup  -gt 0 ]] && _out="$_out dup:$_drop_dup"
     [[ $_drop_meta -gt 0 ]] && _out="$_out meta:$_drop_meta"
     [[ $_drop_cap  -gt 0 ]] && _out="$_out cap:$_drop_cap"
-    ADMIT_LINE="[admit]${_c2_tag:+ C2:$_c2_tag($_c2_pct%)}${_in:- none} | drop${_out:- none}${_c2_phrase}"
+    ADMIT_LINE="[admit]${_c2_tag:+ C2:$_c2_tag($_c2_cal%)}${_in:- none} | drop${_out:- none}${_c2_phrase}"
 fi
 
 # ===========================================
