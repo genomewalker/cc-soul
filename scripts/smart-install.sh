@@ -766,6 +766,11 @@ After=default.target
 [Service]
 Type=simple
 Environment="PATH=$HOME/.bun/bin:$HOME/.local/bin:$HOME/.claude/bin:/usr/local/bin:/usr/bin:/bin"
+# OpenBLAS defaults to nproc spin-wait threads; the daemon's matmuls are small
+# (768-dim), so uncapped BLAS turns an embed backlog into a node-wide load
+# convoy that starves the RPC pool (observed 2026-07-07, load ~70).
+Environment=OPENBLAS_NUM_THREADS=4
+Environment=OMP_NUM_THREADS=4
 ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground --no-autonomous --distill-interval 60 --no-enrich${embed_flag}
 Restart=always
 RestartSec=10
