@@ -393,7 +393,12 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -x "$CHITTA_BIN" ]]; the
 
             echo "[compact_context] ${before}→${after} tok | ${dropped}% memory-covered drops | embedding=${embedded}" >&2
 
-            if [[ -n "$before" && "$before" != "0" ]]; then
+            # Only write a real compaction record. A multi-object COMPACT_RESULT
+            # makes jq emit one "0" per object ("0\n0\n0…"), which is non-empty
+            # and != "0" — the old guard let that through and wrote the
+            # "Memory-aware compaction: 0\n0\n0" stubs. Require a single positive
+            # integer (collapses the multi-line/non-numeric junk to a reject).
+            if [[ "$before" =~ ^[0-9]+$ && "$before" -gt 0 ]]; then
                 queue_write "observe" "$(jq -n \
                     --arg realm "$REALM" \
                     --arg sid "${REAL_SESSION_ID:-$SESSION_ID}" \
