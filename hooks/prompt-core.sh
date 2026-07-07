@@ -338,6 +338,14 @@ _drop_conf=0; _drop_dup=0; _drop_meta=0; _drop_cap=0
 _INJECTED_FILE="${MIND_PATH}/.injected_hashes_${SESSION_ID}"
 # Phase 1: filter each candidate, collect survivors in merge order (sem first).
 _cand_reason=(); _cand_line=()
+# M0 turn-entity anchor (SHADOW): distinctive tokens of the cleaned user turn,
+# computed once. Used to log — not yet enforce — whether each sem candidate
+# shares an entity with the turn. Fable's 80-pair audit found off-topic waste
+# (the dominant bucket, 25/54) has zero shared entity with the turn, while every
+# USED memory echoes the turn's entities. Shadow-join with the used-signal
+# validates the gate before it's allowed to drop live context.
+_QTOK=$(printf '%s' "$CLEAN_QUERY" | tr '[:upper:]' '[:lower:]' | grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
+_QTOK_N=$(printf '%s\n' "$_QTOK" | grep -c . || echo 0)
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     # Match both formats: "[79%]..." (full_resonate) and "#123 [kind] [79%]..." (smart_recall)
@@ -371,6 +379,20 @@ while IFS= read -r line; do
     # Soul cycles that need [thought] memories query soul:meta explicitly.
     [[ "$line" =~ \[thought\] ]] && { ((++_drop_meta)); continue; }
 
+    # M0 content-quality floor (Fable-audited over 80 injection/reply pairs; 0 of
+    # the matched records were USED). Two waste shapes carry no reusable content
+    # for the triggering turn: completion-announcement stubs ("X DONE/complete
+    # (Fable <hash>)" with no open question) and bare citation refs (a lone
+    # Author_YEAR_ID token). Cheap reversible injection-time floor; the root fix is
+    # store-time (don't index these). Off-topic/realm-bleed waste is the larger
+    # bucket and is handled separately by the turn-entity anchor gate.
+    if [[ "$line" =~ (DONE|complete|completed|launched|shipped).*Fable\ [0-9a-f]{6,} && "$line" != *'?'* ]]; then
+        ((++_drop_meta)); continue
+    fi
+    if [[ ${#line} -lt 90 && "$line" =~ [A-Z][a-z]+_et_al_[0-9]{4}_[A-Za-z0-9]+ ]]; then
+        ((++_drop_meta)); continue
+    fi
+
     # Code symbol filtering is now done server-side via --partnership-only flag
 
     # Lifetime limit: skip memories already injected this session (they ride in history).
@@ -379,6 +401,18 @@ while IFS= read -r line; do
     _line_hash=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
     if [[ -n "$SESSION_ID" && "$SESSION_ID" != "unknown" && -f "$_INJECTED_FILE" ]]; then
         grep -qF "$_line_hash" "$_INJECTED_FILE" 2>/dev/null && { ((++_drop_dup)); continue; }
+    fi
+
+    # M0 SHADOW anchor-log (sem only; log-only, does NOT drop). Records whether
+    # this candidate shares a distinctive token with the turn, keyed by the same
+    # first-80-char hash the used-signal uses, so the two can be joined offline.
+    if [[ "$reason" == "sem" && "${_QTOK_N:-0}" -gt 0 ]]; then
+        _ctok=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
+        _shares=0
+        if [[ -n "$_ctok" ]] && comm -12 <(printf '%s\n' "$_QTOK") <(printf '%s\n' "$_ctok") | grep -q .; then _shares=1; fi
+        _ah=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
+        printf '{"h":"%s","conf":%s,"shares":%d,"qn":%s}\n' "$_ah" "${conf:-0}" "$_shares" "${_QTOK_N:-0}" \
+            >> "${MIND_PATH}/.inj_anchor_shadow.jsonl" 2>/dev/null || true
     fi
 
     _cand_reason+=("$reason"); _cand_line+=("$line")
