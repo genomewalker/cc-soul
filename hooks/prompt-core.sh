@@ -411,7 +411,7 @@ while IFS= read -r line; do
         _shares=0
         if [[ -n "$_ctok" ]] && comm -12 <(printf '%s\n' "$_QTOK") <(printf '%s\n' "$_ctok") | grep -q .; then _shares=1; fi
         _ah=$(printf '%s' "${line:0:80}" | md5sum | cut -c1-16)
-        printf '{"h":"%s","conf":%s,"shares":%d,"qn":%s}\n' "$_ah" "${conf:-0}" "$_shares" "${_QTOK_N:-0}" \
+        printf '{"h":"%s","conf":%s,"shares":%d,"qn":%s,"s":"%s"}\n' "$_ah" "${conf:-0}" "$_shares" "${_QTOK_N:-0}" "${SESSION_ID:-unknown}" \
             >> "${MIND_PATH}/.inj_anchor_shadow.jsonl" 2>/dev/null || true
         # ENFORCE (opt-in, default OFF): drop off-topic sem candidates that share
         # ZERO entity with a FOCUSED turn. Query-size window guards both ends:
