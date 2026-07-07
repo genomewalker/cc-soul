@@ -1427,6 +1427,32 @@ ToolResult FieldRpcHandler::tool_assoc_census(const json& /*params*/) {
     return ToolResult::ok(ss.str(), {{"census", parsed.is_array() ? parsed : json::array()}});
 }
 
+ToolResult FieldRpcHandler::tool_assoc_decay(const json& params) {
+    bool apply = params.value("apply", false);
+    int edge_type = params.value("edge_type", 3);  // wire numbering; default CoRetrieved
+    float factor = params.value("factor", 1.0f);
+    float prune_below = params.value("prune_below", 0.0f);
+    if (edge_type < 0 || edge_type > 5)
+        return ToolResult::error("edge_type must be 0-5 (wire numbering, see assoc_census)");
+    if (factor <= 0.0f || factor > 1.0f)
+        return ToolResult::error("factor must be in (0, 1]");
+    std::string raw = field_store_->assoc_decay_json(
+        static_cast<uint8_t>(edge_type), factor, prune_below, apply);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "assoc_decay apply=" << (apply ? "true" : "false")
+           << " edge_type=" << edge_type
+           << " factor=" << factor
+           << " prune_below=" << prune_below
+           << " survivors=" << parsed.value("survivors", 0)
+           << " pruned=" << parsed.value("pruned", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
 ToolResult FieldRpcHandler::tool_span_stats(const json& /*params*/) {
     std::string raw = field_store_->span_stats_json();
     auto parsed = json::parse(raw, nullptr, false);

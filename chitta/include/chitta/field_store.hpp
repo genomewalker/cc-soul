@@ -325,6 +325,7 @@ int64_t cf_span_ingest_memory(struct CfHandle* h, uint64_t memory_id, const char
 char* cf_span_backfill_memories(struct CfHandle* h);
 char* cf_densify_backfill(struct CfHandle* h, bool apply);
 char* cf_assoc_census(struct CfHandle* h);
+char* cf_assoc_decay(struct CfHandle* h, uint8_t edge_type, float factor, float prune_below, bool apply);
 int   cf_span_flush(struct CfHandle* h);
 }
 
@@ -1063,6 +1064,14 @@ public:
     std::string assoc_census_json() {
         char* raw = cf_assoc_census(handle_);
         if (!raw) { cf_soft(-1, __func__); return "[]"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    std::string assoc_decay_json(uint8_t edge_type, float factor, float prune_below, bool apply) {
+        char* raw = cf_assoc_decay(handle_, edge_type, factor, prune_below, apply);
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;

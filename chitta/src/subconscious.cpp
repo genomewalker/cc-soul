@@ -138,6 +138,10 @@ void Subconscious::process_loop() {
             }
         }
 
+        // Eval quiesce: freeze every periodic store-mutating pass while the
+        // flag file is fresh (see quiesce_active in mind/subconscious.hpp).
+        if (quiesce_active(config_.quiesce_flag_path)) continue;
+
         // Theme maintenance via FieldStore
         if (config_.enable_theme_maintenance && time_for_theme_maintenance()) {
             run_theme_maintenance();

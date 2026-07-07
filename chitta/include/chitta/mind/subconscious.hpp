@@ -23,6 +23,7 @@
 #include <regex>
 #include <chrono>
 #include <shared_mutex>
+#include <filesystem>
 
 namespace chitta {
 
@@ -85,7 +86,21 @@ struct SubconsciousConfig {
     bool enable_correction_promotion{true};       // Promote repeated cross-project corrections to brahman
     int correction_promotion_interval_hours{12};
     int correction_promotion_min_realms{2};       // Min distinct non-brahman realms to trigger promotion
+    std::string quiesce_flag_path;                // Eval freeze: skip periodic passes while this file is fresh
 };
+
+// Eval quiesce: hooks/grade-recall.sh touches $MIND/.quiesce before a
+// measurement run so back-to-back evals see a frozen store (periodic
+// distill/consolidation passes swing golden nDCG by ±0.027 mid-eval).
+// TTL 30 min via mtime — a crashed eval can't freeze the daemon forever.
+inline bool quiesce_active(const std::string& flag_path) {
+    if (flag_path.empty()) return false;
+    std::error_code ec;
+    auto mtime = std::filesystem::last_write_time(flag_path, ec);
+    if (ec) return false;
+    auto age = std::filesystem::file_time_type::clock::now() - mtime;
+    return age < std::chrono::minutes(30);
+}
 
 // Queued embedding result (computed in background, flushed by main thread)
 struct QueuedEmbedding {
