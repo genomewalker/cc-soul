@@ -9,7 +9,7 @@ install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
 [ -f ../bin/chitta_hintd ] && install -m 0755 ../bin/chitta_hintd ~/.claude/bin/chitta_hintd
 systemctl --user restart chittad
 systemctl --user try-restart chitta-hintd 2>/dev/null || true
-pkill -f "chitta m[c]p" 2>/dev/null; sleep 1   # [c] so pkill -f can't match this command's own shell
+pkill -f "chitta-m[c]p" 2>/dev/null; sleep 1   # process is `chitta-mcp` (hyphen); [c] so pkill -f can't match its own shell
 ```
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.
 
@@ -22,7 +22,7 @@ this repo so `edit repo → restart service → live`, one source of truth, no d
 bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; restarts MCP
 ```
 - Hooks are live immediately (bash re-reads per invocation). MCP python needs the
-  MCP restart (the script does `pkill -f "chitta m[c]p"`).
+  MCP restart (the script does `pkill -f "chitta-m[c]p"`).
 - Binaries are the exception: keep the `build → install` (atomic) flow above —
   symlinking a running binary risks ETXTBSY.
 - ⚠️ The marketplace is a **git checkout** that a plugin update can re-clone,

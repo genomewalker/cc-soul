@@ -52,7 +52,10 @@ for h in "$REPO"/hooks/*.sh; do
 done
 
 echo "[dev-install] restarting MCP (respawns on next tool call):"
-pkill -f "chitta m[c]p" 2>/dev/null || true
+# Process is `chitta-mcp` (hyphen), not the old `chitta mcp` subcommand — the
+# space pattern silently matched nothing, so MCP python edits never went live.
+# [c] bracket keeps this pkill from matching its own shell.
+pkill -f "chitta-m[c]p" 2>/dev/null || true
 
 echo "[dev-install] DONE. Live plugin now loads from $REPO."
 echo "[dev-install] Binaries unchanged — rebuild+install them via the CLAUDE.md flow."
