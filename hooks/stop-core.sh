@@ -504,6 +504,9 @@ while IFS= read -r marker; do
 
     # Strengthen the memory (existing behavior)
     queue_write "strengthen" "{\"id\":\"$mem_id\",\"amount\":0.1}"
+    # Feed AckScoreFactor (scoring/factors.rs:382) — live 1.1x/1.2x recall
+    # multiplier that previously had no producer.
+    queue_write "ack_memory" "{\"id\":\"$mem_id\"}"
     # CRITICAL: Record positive usage outcome with fallback (feedback loop must not silently fail)
     if ! "$CHITTA_BIN" learn_outcome --memory-id "$mem_id" --outcome "positive" --context "Memory explicitly marked as helpful via [USED] marker" 2>/dev/null; then
         echo "{\"tool\":\"learn_outcome\",\"args\":{\"memory-id\":\"$mem_id\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"},\"ts\":$(date +%s)}" >> "$HOME/.claude/mind/.failed_observations.jsonl"
