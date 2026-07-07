@@ -21,6 +21,7 @@ the production ack path already trusts.
 
 import argparse
 import glob
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -76,7 +77,8 @@ def injected_lines(o):
         if not any(tag in t for tag in ("[sem]", "[hyb]", "[kw]", "[corr]", "[xr]")):
             continue
         for ln in t.splitlines():
-            m = INJ_LINE.match(ln.strip())
+            s = ln.strip()
+            m = INJ_LINE.match(s)
             if not m:
                 continue
             lane, score, content = m.group(1), int(m.group(2)), m.group(3).strip()
@@ -86,7 +88,12 @@ def injected_lines(o):
             if key in seen:
                 continue
             seen.add(key)
-            out.append((lane, score, content))
+            # Reconstruct the hook's dedup/shadow hash: the hook hashes the
+            # lane-marker-stripped line (["[NN%] [kind] content"])[:80]. Rendered
+            # to the transcript as "[lane]" + that, so drop the leading "[lane]".
+            hookline = s[len(lane) + 2:]
+            h = hashlib.md5(hookline[:80].encode()).hexdigest()[:16]
+            out.append((lane, score, content, h))
     return out
 
 
@@ -145,7 +152,7 @@ def main():
                 explicit = bool(USED_REAL.search(reply))
                 turns += 1
                 hit_this_turn = explicit
-                for lane, _score, content in pending:
+                for lane, _score, content, _h in pending:
                     inj_total += 1
                     lane_total[lane] += 1
                     inj_chars += len(content)
