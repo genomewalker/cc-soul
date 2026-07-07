@@ -85,7 +85,7 @@ ToolResult FieldRpcHandler::tool_what_superseded(const json& params) {
     json chain_json = json::array();
     for (size_t i = 0; i < chain.size(); ++i) {
         std::string content = field_store_->get_content(chain[i]);
-        std::string snippet = content.substr(0, 200);
+        std::string snippet = utf8_trunc(content, 200);
         ss << "  " << (i + 1) << ". #" << chain[i] << ": " << snippet;
         if (content.size() > 200) ss << "...";
         ss << "\n";
@@ -128,7 +128,7 @@ ToolResult FieldRpcHandler::tool_show_conflicts(const json& params) {
 
         json group = {
             {"id", std::to_string(h.memory_id)},
-            {"snippet", h.content.substr(0, 200)},
+            {"snippet", utf8_trunc(h.content, 200)},
             {"conflicts", json::array()},
         };
 
