@@ -352,14 +352,14 @@ ToolResult FieldRpcHandler::tool_soul_context(const json&) {
         ss << "\nTop corrections:\n";
         size_t shown = std::min(corrections.size(), size_t(5));
         for (size_t i = 0; i < shown; ++i) {
-            ss << "  - " << corrections[i].content.substr(0, 120) << "\n";
+            ss << "  - " << utf8_trunc(corrections[i].content, 120) << "\n";
         }
     }
     if (!preferences.empty()) {
         ss << "\nTop preferences:\n";
         size_t shown = std::min(preferences.size(), size_t(5));
         for (size_t i = 0; i < shown; ++i) {
-            ss << "  - " << preferences[i].content.substr(0, 120) << "\n";
+            ss << "  - " << utf8_trunc(preferences[i].content, 120) << "\n";
         }
     }
 

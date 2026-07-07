@@ -25,11 +25,11 @@ ToolResult FieldRpcHandler::tool_cooccurrence_graph(const json& params) {
         uint64_t dst = edge.value("dst", uint64_t(0));
         if (src != 0) {
             std::string content = field_store_->get_content(src);
-            edge["a_preview"] = content.substr(0, 80);
+            edge["a_preview"] = utf8_trunc(content, 80);
         }
         if (dst != 0) {
             std::string content = field_store_->get_content(dst);
-            edge["b_preview"] = content.substr(0, 80);
+            edge["b_preview"] = utf8_trunc(content, 80);
         }
     }
 
@@ -63,7 +63,7 @@ ToolResult FieldRpcHandler::tool_labile_memories_top(const json& params) {
     std::ostringstream ss;
     ss << "Top " << hits.size() << " most-accessed (labile) memories:\n";
     for (const auto& h : hits) {
-        std::string preview = h.content.substr(0, 100);
+        std::string preview = utf8_trunc(h.content, 100);
         json entry = {
             {"id", std::to_string(h.memory_id)},
             {"preview", preview},

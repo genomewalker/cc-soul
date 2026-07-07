@@ -789,7 +789,7 @@ ToolResult FieldRpcHandler::tool_smart_context(const json& params) {
             for (const auto& h : hits) {
                 int pct = static_cast<int>(std::min(h.score, 1.0f) * 100);
                 std::string type_short = h.kind.substr(0, 3);
-                std::string title = h.content.substr(0, 60);
+                std::string title = utf8_trunc(h.content, 60);
                 size_t newline = title.find('\n');
                 if (newline != std::string::npos) title = title.substr(0, newline);
                 ss << "[" << pct << "%:" << type_short << ":#" << h.memory_id << "] " << title << "\n";
@@ -802,7 +802,7 @@ ToolResult FieldRpcHandler::tool_smart_context(const json& params) {
                     {"id", std::to_string(h.memory_id)},
                     {"relevance", h.score},
                     {"type", h.kind},
-                    {"text", h.content.substr(0, std::min(h.content.size(), text_limit))}
+                    {"text", utf8_trunc(h.content, text_limit)}
                 });
             }
         }

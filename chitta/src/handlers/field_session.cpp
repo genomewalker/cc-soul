@@ -45,7 +45,7 @@ ToolResult FieldRpcHandler::tool_transcript_get(const json& params) {
     for (const auto& h : hits) {
         if (h.kind == "transcript" || h.content.find(session_id) != std::string::npos) {
             std::string preview = h.content.size() > kMaxPreviewChars
-                ? h.content.substr(0, kMaxPreviewChars) + "..."
+                ? utf8_trunc(h.content, kMaxPreviewChars) + "..."
                 : h.content;
             return ToolResult::ok("Found transcript event", {
                 {"found",      true},
@@ -215,7 +215,7 @@ ToolResult FieldRpcHandler::tool_transcript_search(const json& params) {
             results_json.push_back({
                 {"memory_id",  h.memory_id},
                 {"score",      h.score},
-                {"content",    h.content.size() > kMaxPreviewChars ? h.content.substr(0, kMaxPreviewChars) + "..." : h.content},
+                {"content",    h.content.size() > kMaxPreviewChars ? utf8_trunc(h.content, kMaxPreviewChars) + "..." : h.content},
                 {"kind",       h.kind},
                 {"realm",      h.realm}
             });
@@ -236,7 +236,7 @@ ToolResult FieldRpcHandler::tool_transcript_search(const json& params) {
             results_json.push_back({
                 {"memory_id",  h.memory_id},
                 {"score",      h.score},
-                {"content",    h.content.size() > kMaxPreviewChars ? h.content.substr(0, kMaxPreviewChars) + "..." : h.content},
+                {"content",    h.content.size() > kMaxPreviewChars ? utf8_trunc(h.content, kMaxPreviewChars) + "..." : h.content},
                 {"kind",       h.kind},
                 {"realm",      h.realm}
             });
@@ -406,7 +406,7 @@ ToolResult FieldRpcHandler::tool_read_transcript(const json& params) {
 
         std::string content = t.content;
         if (max_chars > 0 && content.size() > max_chars) {
-            content = content.substr(0, max_chars) + "...";
+            content = utf8_trunc(content, max_chars) + "...";
         }
 
         if (output_chars + content.size() > max_output_chars) {
