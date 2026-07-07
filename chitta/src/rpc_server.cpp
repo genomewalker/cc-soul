@@ -219,6 +219,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"span_backfill_memories", "Backfill the memory↔span edge over all live memories (idempotent).",
      {}},
 
+    {"densify_backfill", "#13 retro-backfill of SameSession edges over existing session-tagged memories. Dry-run by default (counts sibling pairs + group-size histogram, no writes).",
+     {{"apply", "Create the edges (default false = dry-run count only)", false, "false"}}},
+
     {"span_stats", "Span lane size: unique atoms, disk bytes, redactions.",
      {}},
 
