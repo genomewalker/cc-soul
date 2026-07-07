@@ -712,6 +712,17 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
 
     arguments = _normalize_args(arguments)
 
+    # Choke-point source_session tagging: every singular `remember` (direct or via
+    # a composite wrapper like learn_*/remember_typed that builds its own dict and
+    # would otherwise drop the caller session) carries the origin session. The
+    # daemon's remember handler honors source_session (field_memory_recall.cpp);
+    # remember_batch is tagged per-item at the call_tool layer instead. Best-effort:
+    # skip silently when the session can't be resolved.
+    if tool_name == "remember" and not arguments.get("source_session"):
+        _sid = get_current_session_id(use_cache=True)
+        if _sid:
+            arguments["source_session"] = _sid
+
     req = {
         "jsonrpc": "2.0",
         "method": "tools/call",
