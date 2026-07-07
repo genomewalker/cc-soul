@@ -124,7 +124,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     handler.set_distill_enabled(distill_config.enabled);
 
     // Start subconscious background processor
-    Subconscious subconscious(&field_store, yantra, subconscious_config);
+    SubconsciousConfig sub_cfg = subconscious_config;
+    sub_cfg.quiesce_flag_path = mind_path + "/.quiesce";  // eval freeze flag
+    Subconscious subconscious(&field_store, yantra, sub_cfg);
 
     subconscious.start();
     handler.set_subconscious(&subconscious);
@@ -523,6 +525,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
 
             auto now_time = std::chrono::steady_clock::now();
             if (now_time - last_distill >= interval_mins) {
+                // Eval quiesce: distillation mid-eval swings golden nDCG ±0.027.
+                if (quiesce_active(mind_path + "/.quiesce")) continue;
                 // Skip if daemon is actively handling queries (prevent blocking)
                 if (!subconscious.is_idle()) {
                     auto busy_duration = now_time - last_busy_skip_start;

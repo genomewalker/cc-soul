@@ -571,6 +571,16 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["assoc_census"] = [this](const json& p) { return tool_assoc_census(p); };
 
+    tools_.push_back({{"name","assoc_decay"},{"description","Gate B: decay + floor-prune one assoc EdgeType (wire numbering 0-5, default 3=CoRetrieved). Every edge weight is multiplied by factor; edges below prune_below are removed. apply=false is a dry run (counts only). One-shot saturation migration: factor=1.0, prune_below=0.2. Snapshot before apply."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"edge_type",{{"type","integer"}}},
+            {"factor",{{"type","number"}}},
+            {"prune_below",{{"type","number"}}},
+            {"apply",{{"type","boolean"}}}
+        }}}}
+    });
+    handlers_["assoc_decay"] = [this](const json& p) { return tool_assoc_decay(p); };
+
     tools_.push_back({{"name","span_stats"},{"description","Report span lane size: unique atoms, on-disk bytes, total redactions."},
         {"inputSchema",{{"type","object"},{"properties",{}}}}
     });

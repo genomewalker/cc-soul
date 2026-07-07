@@ -123,6 +123,7 @@
     ToolResult tool_span_backfill_memories(const json& params);
     ToolResult tool_densify_backfill(const json& params);
     ToolResult tool_assoc_census(const json& params);
+    ToolResult tool_assoc_decay(const json& params);
     ToolResult tool_span_stats(const json& params);
     ToolResult tool_executor_flush(const json& params);
     ToolResult tool_list_policies(const json& params);
