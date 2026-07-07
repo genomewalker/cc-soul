@@ -1410,6 +1410,23 @@ ToolResult FieldRpcHandler::tool_densify_backfill(const json& params) {
     return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
 }
 
+ToolResult FieldRpcHandler::tool_assoc_census(const json& /*params*/) {
+    std::string raw = field_store_->assoc_census_json();
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    ss << "assoc_census (weight buckets <0.05 / 0.05-0.2 / 0.2-0.5 / 0.5-0.8 / >=0.8):\n";
+    if (parsed.is_array()) {
+        for (const auto& e : parsed) {
+            ss << "  " << e.value("type", "?") << ": count=" << e.value("count", 0);
+            if (e.contains("weights")) ss << " weights=" << e["weights"].dump();
+            ss << "\n";
+        }
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"census", parsed.is_array() ? parsed : json::array()}});
+}
+
 ToolResult FieldRpcHandler::tool_span_stats(const json& /*params*/) {
     std::string raw = field_store_->span_stats_json();
     auto parsed = json::parse(raw, nullptr, false);
