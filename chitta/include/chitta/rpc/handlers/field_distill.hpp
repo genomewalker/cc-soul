@@ -2,6 +2,7 @@
 // Bodies live in chitta/src/handlers/field_distill.cpp.
 
     ToolResult tool_distill_status(const json&);
+    ToolResult tool_distill_now(const json& params);
     ToolResult tool_distill_set_model(const json& params);
     ToolResult tool_suggestion_track(const json& params);
     ToolResult tool_suggestion_pending(const json& params);

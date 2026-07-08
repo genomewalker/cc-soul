@@ -11,6 +11,18 @@ void FieldRpcHandler::register_distill_drift_tools() {
     });
     handlers_["distill_status"] = [this](const json& p) { return tool_distill_status(p); };
 
+    tools_.push_back({{"name","distill_now"},
+        {"description","Synchronously distill ONE session now and return the counts "
+            "(learnings + value-facts stored/deduped). Runs the lock-fixed distill path "
+            "in-daemon; recall stays responsive."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"session_id",{{"type","string"},{"description","Session ID to distill"}}},
+            {"transcript_path",{{"type","string"},{"description","Optional JSONL path; registers it if given, else resolves from durable transcript/register"}}},
+            {"realm",{{"type","string"},{"description","Optional realm (default brahman or the registered realm)"}}}
+        }},{"required",{"session_id"}}}}
+    });
+    handlers_["distill_now"] = [this](const json& p) { return tool_distill_now(p); };
+
     tools_.push_back({{"name","distill_set_model"},{"description","Change distillation model"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"model",{{"type","string"}}},{"enabled",{{"type","boolean"}}}

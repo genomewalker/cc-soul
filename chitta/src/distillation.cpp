@@ -22,7 +22,8 @@ bool run_distillation(
     const TranscriptState& state,
     const DistillConfig& config,
     FieldRpcHandler* handler,
-    bool queue_triggered
+    bool queue_triggered,
+    DistillResult* out
 ) {
     NativeDistillConfig native_config;
     native_config.model = handler ? handler->get_distill_model() : config.model;
@@ -75,6 +76,7 @@ bool run_distillation(
         std::unique_lock<std::shared_mutex> _lk;
         if (handler) _lk = handler->acquire_lock();
         result = distiller->commit_distillation(prep);
+        if (out) *out = result;
 
         if (!result.success) {
             if (!result.error.empty())

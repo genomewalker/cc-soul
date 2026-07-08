@@ -276,6 +276,7 @@ public:
         static const std::unordered_set<std::string> kSubprocess = {
             "predicate_run",
             "consolidation_pass",   // long-running Sequitur+FEP rebuild; manages own Rust RwLocks
+            "distill_now",          // synchronous on-demand distill; run_distillation locks internally
         };
         return kSubprocess.count(name) > 0;
     }

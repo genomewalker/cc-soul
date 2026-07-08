@@ -2,6 +2,8 @@
 // chitta/include/chitta/rpc/handlers/field_distill.hpp.
 
 #include "../../include/chitta/rpc/field_handler.hpp"
+#include <chitta/distillation.hpp>
+#include <chitta/daemon_config.hpp>
 
 namespace chitta {
 
@@ -15,6 +17,90 @@ ToolResult FieldRpcHandler::tool_distill_status(const json&) {
         "Distill model: " + get_distill_model() +
         (get_distill_enabled() ? " (enabled)" : " (disabled)"),
         result);
+}
+
+// Synchronous, on-demand distill of ONE session — force-and-observe.
+// Runs the SAME lock-fixed path as the queue's process_distill: this handler is
+// classified is_subprocess_tool (see is_subprocess_tool), so handle() holds NO
+// rpc_mutex_ across it; run_distillation does the LLM pass lock-free and takes
+// only the brief commit lock via acquire_lock(). Recall stays responsive.
+ToolResult FieldRpcHandler::tool_distill_now(const json& params) {
+    if (!get_distill_enabled())
+        return ToolResult::error("distillation disabled");
+    if (!field_store_)
+        return ToolResult::error("no store");
+
+    std::string session_id = params.value("session_id", "");
+    if (session_id.empty())
+        return ToolResult::error("session_id is required");
+
+    // Transcript resolution mirrors QueueProcessor::process_distill: an explicit
+    // transcript_path wins (and is registered durably so future distills track it);
+    // otherwise resolve from the durable transcript/register event.
+    std::string transcript_path = params.value("transcript_path", "");
+    std::string realm = params.value("realm", "");
+    if (!transcript_path.empty()) {
+        json reg = {{"session_id", session_id},
+                    {"transcript_path", transcript_path},
+                    {"realm", realm.empty() ? "brahman" : realm}};
+        field_store_->emit_event("transcript", "register", session_id, reg.dump());
+    } else {
+        auto regev = field_store_->get_latest_event("transcript", "register", session_id);
+        if (regev) {
+            try {
+                auto r = json::parse(*regev);
+                transcript_path = r.value("transcript_path", "");
+                if (realm.empty()) realm = r.value("realm", "brahman");
+            } catch (...) {}
+        }
+    }
+    if (transcript_path.empty())
+        return ToolResult::error("no transcript registered for " + session_id +
+                                 " (pass transcript_path)");
+    if (realm.empty()) realm = "brahman";
+
+    // Catch up on new transcript bytes, then resume from durable progress watermark.
+    field_store_->span_ingest(transcript_path);
+    TranscriptState ts;
+    ts.session_id = session_id;
+    ts.transcript_path = transcript_path;
+    ts.realm = realm;
+    ts.last_processed_line = 0;
+    auto prog = field_store_->get_latest_event("transcript", "progress", session_id);
+    if (prog) {
+        try { ts.last_processed_line = json::parse(*prog).value("last_line", (int64_t)0); }
+        catch (...) {}
+    }
+
+    DistillConfig cfg;              // defaults; endpoint empty → NativeDistiller discovers GPU
+    DistillResult res;
+    bool ok = run_distillation(*field_store_, yantra_, ts, cfg, this, true, &res);
+
+    int64_t lines_processed = res.last_line - ts.last_processed_line;
+    if (lines_processed < 0) lines_processed = 0;
+    bool capped = cfg.max_lines_per_pass > 0 && lines_processed >= cfg.max_lines_per_pass;
+
+    json result = {
+        {"success",             ok && res.success},
+        {"session_id",          session_id},
+        {"realm",               realm},
+        {"learnings_stored",    res.learnings_stored},
+        {"learnings_deduped",   res.learnings_deduped},
+        {"value_facts_stored",  res.value_facts_stored},
+        {"value_facts_deduped", res.value_facts_deduped},
+        {"triplets_created",    res.triplets_created},
+        {"last_line",           res.last_line},
+        {"lines_processed",     lines_processed},
+        {"capped",              capped},
+    };
+    if (!ok && !res.error.empty()) result["error"] = res.error;
+
+    std::ostringstream ss;
+    ss << (ok ? "distilled " : "distill FAILED ") << session_id
+       << ": +" << res.learnings_stored << " learnings, +"
+       << res.value_facts_stored << " value-facts (dedup "
+       << res.value_facts_deduped << "), line " << res.last_line;
+    return ToolResult::ok(ss.str(), result);
 }
 
 ToolResult FieldRpcHandler::tool_distill_set_model(const json& params) {
