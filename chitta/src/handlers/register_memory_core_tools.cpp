@@ -93,6 +93,21 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["recall_keyword"] = [this](const json& p) { return tool_recall_keyword(p); };
 
+    tools_.push_back({{"name","provenance_check"},{"description","Deterministic anti-reprocessing check: has this file/task already been processed? Exact keyed lookup of a prior [done] record by content-hash and/or input path — bypasses fuzzy recall. Returns found + the record."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"sha",{{"type","string"},{"description","Content hash of the input (tried first — content identity)"}}},
+            {"input",{{"type","string"},{"description","Input path (fallback handle)"}}}
+        }},{"required",json::array()}}}
+    });
+    handlers_["provenance_check"] = [this](const json& p) { return tool_provenance_check(p); };
+
+    tools_.push_back({{"name","correction_check"},{"description","Deterministic durable-correction check (capability #2): does any stored [correction] trigger recur in this turn? Exact keyed bigram probe of the turn text against corrected-mistake phrases — reserves an injection slot, bypassing fuzzy recall (which loses corrections on cosine similarity ~99% of the time). Returns found + the correction(s), newest first (latest-wins)."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"text",{{"type","string"},{"description","Turn / context text to scan for a recurring corrected mistake"}}}
+        }},{"required",{"text"}}}}
+    });
+    handlers_["correction_check"] = [this](const json& p) { return tool_correction_check(p); };
+
     // Exploration primitives
     tools_.push_back({{"name","explore_recall"},{"description","Lightweight recall - titles/scores only"},
         {"inputSchema",{{"type","object"},{"properties",{

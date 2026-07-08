@@ -880,6 +880,52 @@ public:
         return cf_recommended_window(handle_, session_type.c_str());
     }
 
+    /// Deterministic provenance lookup (keyed lane, capability #1).
+    /// Exact-key resolution of a `[done]` record by content-hash and/or input
+    /// path — bypasses the fuzzy retriever entirely. Returns {found, memory_id,
+    /// content}. `sha` is tried first, then `input`; either may be empty.
+    struct ProvenanceHit { bool found = false; uint64_t memory_id = 0; std::string content; };
+    ProvenanceHit provenance_lookup(const std::string& sha, const std::string& input) {
+        size_t cap = 8192;
+        std::vector<uint8_t> buf(cap);
+        uint64_t id = 0;
+        size_t written = 0;
+        const char* sha_p = sha.empty() ? nullptr : sha.c_str();
+        const char* in_p  = input.empty() ? nullptr : input.c_str();
+        int r = cf_provenance_lookup(handle_, sha_p, in_p, &id, buf.data(), buf.size(), &written);
+        if (r == 1) return {};                       // clean miss
+        if (r == -2) {                               // record longer than buffer: grow + retry
+            buf.resize(written + 1);
+            r = cf_provenance_lookup(handle_, sha_p, in_p, &id, buf.data(), buf.size(), &written);
+            if (r == 1) return {};
+        }
+        cf_checked(r, __func__);
+        return {true, id, std::string(reinterpret_cast<char*>(buf.data()), written)};
+    }
+
+    /// Deterministic correction lookup (keyed lane, capability #2 — durable
+    /// corrections with override semantics). Exact-key bigram probe of free turn
+    /// text against stored [correction] mistake-phrase triggers — reserves an
+    /// injection slot for a correction whose mistake recurs, bypassing the fuzzy
+    /// retriever entirely. Returns {found, memory_id, content} where content is
+    /// up to 3 fired corrections (newest first), joined by "\n---\n".
+    struct CorrectionHit { bool found = false; uint64_t memory_id = 0; std::string content; };
+    CorrectionHit correction_check(const std::string& text) {
+        size_t cap = 8192;
+        std::vector<uint8_t> buf(cap);
+        uint64_t id = 0;
+        size_t written = 0;
+        int r = cf_correction_check(handle_, text.c_str(), &id, buf.data(), buf.size(), &written);
+        if (r == 1) return {};                       // clean miss
+        if (r == -2) {                               // fired set longer than buffer: grow + retry
+            buf.resize(written + 1);
+            r = cf_correction_check(handle_, text.c_str(), &id, buf.data(), buf.size(), &written);
+            if (r == 1) return {};
+        }
+        cf_checked(r, __func__);
+        return {true, id, std::string(reinterpret_cast<char*>(buf.data()), written)};
+    }
+
     /// BM25 keyword recall.
     std::vector<FieldRecallHit> recall_keyword(const std::string& query, size_t k,
                                                const std::string& realm = "",
