@@ -32,6 +32,7 @@ bool run_distillation(
     native_config.verbose = verbose_mode;
     native_config.max_context_chars = config.max_context_chars;
     native_config.max_tokens = config.max_tokens;
+    native_config.max_lines_per_pass = config.max_lines_per_pass;
 
     auto embed_fn = [yantra](const std::string& text) -> std::vector<float> {
         if (!yantra) return {};

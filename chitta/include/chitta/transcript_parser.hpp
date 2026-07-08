@@ -23,6 +23,8 @@ struct ConversationTurn {
 
 struct TranscriptParseOptions {
     int64_t skip_lines = 0;              // Skip first N lines (resume from checkpoint)
+    int64_t max_lines = 0;               // Stop after N lines past skip (0 = no cap). Bounds
+                                         // work per pass; remainder resumes via last_line.
     bool include_thinking = true;        // Include <thinking> blocks (>100 chars only)
     bool filter_system_reminders = true; // Remove <system-reminder> tags
 };
@@ -63,8 +65,13 @@ public:
     // Get last error message
     const std::string& last_error() const { return last_error_; }
 
+    // True if the last parse() stopped because it hit options.max_lines (i.e. there
+    // is more transcript to process on the next incremental pass).
+    bool hit_line_cap() const { return hit_line_cap_; }
+
 private:
     std::string last_error_;
+    bool hit_line_cap_ = false;
 
     // Extract text content from Claude message JSON
     static std::string extract_content(const nlohmann::json& entry, bool include_thinking, bool filter_reminders);

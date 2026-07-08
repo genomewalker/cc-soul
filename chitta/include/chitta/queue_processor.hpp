@@ -62,6 +62,15 @@ private:
     static void recover_processing(const std::string& queue_file);
     void process_distill(const nlohmann::json& args, const std::string& endpoint);
 
+    // POISON-PILL guard: a durable per-session distill attempt counter. Bumped
+    // (and persisted) BEFORE each distill so a crash mid-distill leaves the count
+    // incremented; a session that crashes the daemon repeatedly is dead-lettered
+    // after kMaxDistillAttempts instead of re-crashing forever on restart. Cleared
+    // when a distill returns without crashing.
+    int  bump_distill_attempt(const std::string& session_id);
+    void clear_distill_attempt(const std::string& session_id);
+    static constexpr int kMaxDistillAttempts = 3;
+
     FieldStore& field_store_;
     VakYantra* yantra_;
     const DistillConfig& distill_config_;
@@ -73,6 +82,7 @@ private:
     std::atomic<size_t>& queue_fail_count_;
     std::atomic<size_t> batch_remaining_{0};
     std::string slow_path_;   // distill_trigger re-route target (fast lane appends)
+    std::string attempts_path_; // durable per-session distill attempt counter (poison-pill)
     // Serializes fast-lane appends vs slow-lane claim-rename of slow_path_.
     // Without it an append racing the rename lands on the already-read inode
     // and is silently dropped when .processing is removed. Leaf lock: never

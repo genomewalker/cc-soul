@@ -237,53 +237,87 @@ bool NativeDistiller::value_facts_enabled() {
              std::strcmp(v, "no") == 0 || std::strcmp(v, "off") == 0);
 }
 
+// Phase 1c (lock-free): extract + embed + dedup-recall value-facts. NO writes, NO
+// lock. Populates prep.value_fact_preps for the write-only commit pass. The dedup
+// here is a TOCTOU snapshot (same discipline as precompute_dedup for learnings): a
+// concurrent writer could insert a matching fact between this recall and the commit
+// remember(), producing a rare duplicate that the next distill's semantic dedup
+// absorbs. The slow lane is single-threaded so distills never overlap each other;
+// the only concurrent writers are fast-lane remembers, and a stray near-dup is
+// strengthened rather than corrupting the store.
+void NativeDistiller::precompute_value_facts(PreparedDistillation& prep) {
+    prep.value_fact_preps.clear();
+    if (!value_facts_enabled() || prep.conversation.empty()) return;
+
+    // BOUND: cap the bytes handed to the deterministic extractor so a giant
+    // conversation can't make even the lock-free pass unbounded.
+    const std::string* conv = &prep.conversation;
+    std::string capped;
+    if (config_.value_fact_max_bytes > 0 &&
+        prep.conversation.size() > config_.value_fact_max_bytes) {
+        // Keep the tail — most recent turns carry the freshest scalars.
+        capped = prep.conversation.substr(prep.conversation.size() - config_.value_fact_max_bytes);
+        conv = &capped;
+        log("[distill]   value-facts: capped input " +
+            std::to_string(prep.conversation.size()) + "→" +
+            std::to_string(config_.value_fact_max_bytes) + " bytes");
+    }
+
+    auto facts = extract_value_facts(*conv);
+    if (facts.empty()) return;
+    log("[distill]   value-facts: " + std::to_string(facts.size()) + " candidates");
+
+    prep.value_fact_preps.reserve(facts.size());
+    for (auto& fact : facts) {
+        ValueFactPrep vp;
+        if (embedder_) vp.embedding = embedder_(chitta::ssl::retrieval_text(fact.content));
+
+        // DEDUP: if a strict holder already covers this identifier+value, mark skip.
+        // The content leads with "<identifier> <value>", so semantic recall on it
+        // matches an existing memory that already states the pair.
+        if (!vp.embedding.empty() && config_.dedup_threshold > 0.0f) {
+            auto check = [&](const std::vector<FieldRecallHit>& hits) {
+                for (const auto& hit : hits)
+                    if (hit.semantic_score >= config_.dedup_threshold) { vp.is_dup = true; return true; }
+                return false;
+            };
+            if (!check(field_store_->recall(vp.embedding, 5, prep.realm)) && !prep.realm.empty())
+                check(field_store_->recall(vp.embedding, 5, ""));
+        }
+
+        vp.fact = std::move(fact);
+        prep.value_fact_preps.push_back(std::move(vp));
+    }
+}
+
+// Phase 2b (write lock): write precomputed value-facts. Writes only — no embed, no
+// recall — so the RPC lock is held for microseconds per fact, not the seconds/minutes
+// the embed+recall used to cost under the lock.
 void NativeDistiller::store_value_facts(
-    const std::string& conversation,
+    const std::vector<ValueFactPrep>& value_fact_preps,
     const std::string& realm,
     uint64_t episode_mem_id,
     DistillResult& result
 ) {
-    if (conversation.empty()) return;
-    auto facts = extract_value_facts(conversation);
-    if (facts.empty()) return;
-    log("[distill]   value-facts: " + std::to_string(facts.size()) + " candidates");
-
     // Operational scalars: high confidence, slow decay (like OPERATIONAL/belief).
     constexpr float kConfidence = 0.85f;
     constexpr float kDecay      = 0.001f;
 
-    for (const auto& fact : facts) {
-        std::vector<float> emb;
-        if (embedder_) emb = embedder_(chitta::ssl::retrieval_text(fact.content));
-
-        // DEDUP: if a strict holder already covers this identifier+value, skip.
-        // The content leads with "<identifier> <value>", so semantic recall on it
-        // matches an existing memory that already states the pair. This holds volume
-        // to ~1 write/new-fact and is why measured degradation was zero.
-        if (!emb.empty() && config_.dedup_threshold > 0.0f) {
-            bool dup = false;
-            auto check = [&](const std::vector<FieldRecallHit>& hits) {
-                for (const auto& hit : hits)
-                    if (hit.semantic_score >= config_.dedup_threshold) { dup = true; return true; }
-                return false;
-            };
-            if (!check(field_store_->recall(emb, 5, realm)) && !realm.empty())
-                check(field_store_->recall(emb, 5, ""));
-            if (dup) {
-                result.value_facts_deduped++;
-                continue;
-            }
+    for (const auto& vp : value_fact_preps) {
+        if (vp.is_dup) {
+            result.value_facts_deduped++;
+            continue;
         }
 
         uint64_t mem_id = 0;
         try {
-            mem_id = field_store_->remember("operational", realm, fact.content,
-                                            emb, kConfidence, kDecay);
+            mem_id = field_store_->remember("operational", realm, vp.fact.content,
+                                            vp.embedding, kConfidence, kDecay);
         } catch (...) { continue; }
         if (mem_id == 0) continue;
 
         result.value_facts_stored++;
-        log("[distill]   +value-fact: " + fact.identifier + " = " + fact.value);
+        log("[distill]   +value-fact: " + vp.fact.identifier + " = " + vp.fact.value);
 
         if (episode_mem_id > 0) {
             field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);
@@ -306,14 +340,22 @@ PreparedDistillation NativeDistiller::prepare_distillation(
     prep.session_id = session_id;
     prep.realm = realm;
 
-    // 1. Parse transcript
+    // 1. Parse transcript (BOUND: cap lines per pass; remainder resumes next distill
+    // via the progress event's last_line — a 108MB transcript is chunked, never a
+    // single unbounded parse+distill).
     TranscriptParseOptions parse_opts;
     parse_opts.skip_lines = skip_lines;
+    parse_opts.max_lines  = config_.max_lines_per_pass;
     auto turns = parser_.parse(transcript_path, parse_opts, &prep.last_line);
 
     if (turns.empty()) {
         prep.error = parser_.last_error().empty() ? "No turns found" : parser_.last_error();
         return prep;
+    }
+    if (parser_.hit_line_cap()) {
+        log("[distill] bounded pass: line cap " + std::to_string(config_.max_lines_per_pass) +
+            " hit at line " + std::to_string(prep.last_line) +
+            " (remainder resumes on next distill)");
     }
 
     // 2. Check minimum turns
@@ -368,6 +410,10 @@ PreparedDistillation NativeDistiller::prepare_distillation(
     // 8. Precompute embeddings + dedup recalls (no writes, safe outside lock)
     precompute_dedup(prep);
 
+    // 9. Precompute value-facts (extract + embed + dedup recall) — also lock-free.
+    // Moved out of commit_distillation so the write lock never covers this heavy pass.
+    precompute_value_facts(prep);
+
     prep.valid = true;
     return prep;
 }
@@ -399,12 +445,10 @@ DistillResult NativeDistiller::commit_distillation(const PreparedDistillation& p
                     static_cast<uint64_t>(episode_id), prep.learning_preps, result);
     result.triplets_created = static_cast<int>(prep.ssl_result.triplets.size());
 
-    // Deterministic value-fact pass over the same conversation (no LLM). Compensates
-    // for Tier-2 SSL compression dropping exact scalars. Gated by CHITTA_VALUE_FACTS.
-    if (value_facts_enabled()) {
-        store_value_facts(prep.conversation, prep.realm,
-                          static_cast<uint64_t>(episode_id), result);
-    }
+    // Value-fact write-back: precomputed (extract+embed+dedup) in prepare_distillation,
+    // so this is writes-only under the lock. Gated by CHITTA_VALUE_FACTS at precompute.
+    store_value_facts(prep.value_fact_preps, prep.realm,
+                      static_cast<uint64_t>(episode_id), result);
 
     log("[distill] Session " + prep.session_id + ": Done (+" +
         std::to_string(result.learnings_stored) + " new, " +

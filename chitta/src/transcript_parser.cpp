@@ -13,6 +13,7 @@ std::vector<ConversationTurn> TranscriptParser::parse(
 ) {
     std::vector<ConversationTurn> turns;
     last_error_.clear();
+    hit_line_cap_ = false;
 
     std::ifstream file(path);
     if (!file) {
@@ -30,6 +31,12 @@ std::vector<ConversationTurn> TranscriptParser::parse(
     }
 
     while (std::getline(file, line)) {
+        // BOUND: stop after max_lines lines past the checkpoint. The already-read
+        // line is left for the next pass (last_line = current_line points before it).
+        if (options.max_lines > 0 && current_line - options.skip_lines >= options.max_lines) {
+            hit_line_cap_ = true;
+            break;
+        }
         current_line++;
         if (line.empty()) continue;
 

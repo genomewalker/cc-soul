@@ -34,7 +34,34 @@ QueueProcessor::QueueProcessor(FieldStore& field_store,
     , queue_distill_count_(queue_distill_count)
     , queue_fail_count_(queue_fail_count)
     , slow_path_(queue_path + ".slow")
+    , attempts_path_(queue_path + ".slow.attempts")
 {}
+
+// POISON-PILL: durable per-session distill attempt counter. Bump persists the new
+// count before the distill runs, so a crash mid-distill leaves it incremented and
+// the next restart sees the elevated count. ceiling: rename is atomic but not
+// fsync'd, so a hard power-loss between write and the crash may lose one increment
+// (worst case: one extra retry). Single slow thread → no concurrent access.
+int QueueProcessor::bump_distill_attempt(const std::string& session_id) {
+    json m = json::object();
+    { std::ifstream in(attempts_path_); if (in.good()) { try { in >> m; } catch (...) { m = json::object(); } } }
+    int n = m.value(session_id, 0) + 1;
+    m[session_id] = n;
+    std::string tmp = attempts_path_ + ".tmp";
+    { std::ofstream out(tmp, std::ios::trunc); out << m.dump(); }
+    std::rename(tmp.c_str(), attempts_path_.c_str());
+    return n;
+}
+
+void QueueProcessor::clear_distill_attempt(const std::string& session_id) {
+    json m = json::object();
+    { std::ifstream in(attempts_path_); if (in.good()) { try { in >> m; } catch (...) { return; } } }
+    if (!m.contains(session_id)) return;
+    m.erase(session_id);
+    std::string tmp = attempts_path_ + ".tmp";
+    { std::ofstream out(tmp, std::ios::trunc); out << m.dump(); }
+    std::rename(tmp.c_str(), attempts_path_.c_str());
+}
 
 // Crash recovery for one queue file: if its .processing sidecar exists,
 // re-queue only the UNPROCESSED suffix. The batch loops checkpoint their
@@ -774,6 +801,23 @@ void QueueProcessor::run_slow() {
             try {
                 auto j = json::parse(line);
                 if (j.value("tool", "") == "distill_trigger") {
+                    // POISON-PILL: bump the durable attempt count BEFORE distilling.
+                    // A session that has already crashed the daemon kMaxDistillAttempts
+                    // times is dead-lettered instead of re-crashing on every restart.
+                    std::string sid = j.value("args", json::object()).value("session_id", "");
+                    if (!sid.empty() && bump_distill_attempt(sid) > kMaxDistillAttempts) {
+                        std::cerr << "[queue] distill poison-pill: session " << sid
+                                  << " exceeded " << kMaxDistillAttempts
+                                  << " attempts, dead-lettering\n";
+                        write_failed_item(line, std::runtime_error(
+                            "distill poison-pill: exceeded " +
+                            std::to_string(kMaxDistillAttempts) + " attempts"));
+                        clear_distill_attempt(sid);
+                        ++processed;
+                        field_store_.sync();
+                        write_checkpoint(ckpt_path, processed);
+                        continue;
+                    }
                     // Fail-fast probe: verify the endpoint before run_distillation
                     // burns its 180s timeout (or worse, discovery's 120s
                     // chitta-gpu start) on a dead ollama.
@@ -782,6 +826,8 @@ void QueueProcessor::run_slow() {
                                                          nullptr, /*allow_start=*/false);
                     if (endpoint.empty()) { endpoint_down = true; break; }
                     process_distill(j.value("args", json::object()), endpoint);
+                    // Reached here without crashing → reset the attempt count.
+                    if (!sid.empty()) clear_distill_attempt(sid);
                 }
             } catch (const std::exception& e) {
                 std::cerr << "[queue] slow-lane FAILED: " << e.what() << "\n";
