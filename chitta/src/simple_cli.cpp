@@ -477,6 +477,20 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                             auto emb = embed_queue->query(text,
                                                           std::chrono::milliseconds(30000));
                             if (emb.size() == EMBED_DIM) {
+                                // Recall-priority gate: backfill_embedding() below takes the
+                                // EXCLUSIVE rpc_mutex (acquire_lock) around an HNSW upsert, which
+                                // blocks ALL recalls while held. Under a large embed backlog this
+                                // fires continuously and is the dominant recall-starvation source
+                                // (recall tail >15s). Yield the lock to live recalls: while a recall
+                                // arrived recently, wait before taking it. This never *holds* the
+                                // lock longer (locking discipline unchanged → no ABBA regression) —
+                                // it only defers *acquiring* it while recalls are hot. Drains resume
+                                // the moment recalls pause.
+                                // ceiling: relentless recall (no gaps) defers backfill indefinitely
+                                //   and embed_pending persists; upgrade: force a batch every N deferrals.
+                                for (int _g = 0; _g < 100 && daemon_running
+                                                 && subconscious.recall_pressured(); ++_g)
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
                                 // MUST hold acquire_lock() here: backfill_embedding()
                                 // calls hnsw.upsert() which acquires semantic_idx.write().
                                 // Without the C++ lock, this races with pool workers
@@ -1393,6 +1407,21 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Failed to daemonize\n";
                 return 1;
             }
+        }
+        // Recall-starvation ceiling: cap in-process embed inference threads so the
+        // background embed_loop / backfill / distill precompute can never monopolize
+        // every core and CPU-starve the RPC pool (recall latency then spikes >15s at
+        // 400-750% CPU). Leaves the vast majority of cores for the pool. Daemon-only
+        // and non-overwriting: bulk `re_embed` (which exports its own high value for
+        // throughput) is untouched.
+        if (!std::getenv("CHITTA_EMBED_THREADS")) {
+            unsigned hw = std::thread::hardware_concurrency();
+            if (hw == 0) hw = 8;
+            unsigned cap = hw / 8;
+            if (cap < 4)  cap = 4;
+            if (cap > 16) cap = 16;
+            if (cap > hw) cap = hw;
+            setenv("CHITTA_EMBED_THREADS", std::to_string(cap).c_str(), 0);
         }
     }
 

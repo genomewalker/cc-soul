@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include <unordered_map>
 
 namespace chitta {
@@ -1003,46 +1004,68 @@ void Subconscious::embed_loop() {
         }
     }
 
+    // Embed the backlog in small chunks with a recall-priority gate between chunks.
+    // A single transform_batch over the full 256-item backlog is 256 sequential
+    // llama decodes that peg every embed thread for seconds; the RPC pool then
+    // can't get CPU and recall latency spikes to >15s. Chunking lets an incoming
+    // recall preempt embedding within one chunk (~sub-second), and the per-chunk
+    // gate holds embedding off entirely while recalls are arriving — so recall
+    // never starves, while the backlog still drains during idle gaps.
+    // ceiling: relentless recall (a query every <embed_defer_ms, no gaps) defers
+    //   embedding indefinitely and embed_pending grows; upgrade: age-based override
+    //   that forces a chunk after N deferred cycles.
+    static constexpr size_t EMBED_CHUNK = 16;
     while (running_.load()) {
         auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
         if (!pending.empty()) {
             stats_.last_embedding_at = now_ms();
             size_t embedded = 0;
+            std::vector<uint64_t> orphan_ids;   // content missing / too short to embed
 
-            // Collect texts for the batch (content fetch + gloss prep).
-            std::vector<uint64_t>    batch_ids;
-            std::vector<std::string> batch_texts;
-            batch_ids.reserve(pending.size());
-            batch_texts.reserve(pending.size());
-            std::vector<uint64_t> unembed_ids;
-            for (uint64_t id : pending) {
+            for (size_t off = 0; off < pending.size() && running_.load(); off += EMBED_CHUNK) {
+                // Recall-priority gate: yield the cores to any active recall. Re-checked
+                // per chunk so a burst of recalls holds embedding off and it resumes the
+                // moment recalls pause. Holds no lock — safe to sleep here.
+                while (running_.load()) {
+                    auto lq = stats_.last_query_at.load();
+                    if (lq == 0 || (now_ms() - lq) >= config_.embed_defer_ms) break;
+                    stats_.embedding_skips++;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
                 if (!running_.load()) break;
-                auto content = field_store_->get_content(id);
-                if (content.size() < 20) { unembed_ids.push_back(id); continue; }
-                batch_ids.push_back(id);
-                batch_texts.push_back(prefix + chitta::ssl::retrieval_text(content));
-            }
-            if (!unembed_ids.empty()) {
-                field_store_->force_clear_embed_pending(unembed_ids);
-                field_store_->flush();  // persist clears so they survive daemon restart
-            }
 
-            // One ONNX session_->Run() for the whole batch.
-            if (!batch_ids.empty() && embedder_ && embedder_->ready()) {
-                auto arthas = embedder_->transform_batch(batch_texts);
-                for (size_t i = 0; i < batch_ids.size() && i < arthas.size(); ++i) {
+                size_t end = std::min(off + EMBED_CHUNK, pending.size());
+                std::vector<uint64_t>    chunk_ids;
+                std::vector<std::string> chunk_texts;
+                chunk_ids.reserve(end - off);
+                chunk_texts.reserve(end - off);
+                for (size_t i = off; i < end; ++i) {
+                    auto content = field_store_->get_content(pending[i]);
+                    if (content.size() < 20) { orphan_ids.push_back(pending[i]); continue; }
+                    chunk_ids.push_back(pending[i]);
+                    chunk_texts.push_back(prefix + chitta::ssl::retrieval_text(content));
+                }
+                if (chunk_ids.empty() || !embedder_ || !embedder_->ready()) continue;
+
+                auto arthas = embedder_->transform_batch(chunk_texts);
+                std::vector<uint64_t> failed;
+                for (size_t i = 0; i < chunk_ids.size() && i < arthas.size(); ++i) {
                     if (arthas[i].nu.is_zero()) {
                         stats_.embedding_skips++;
-                        unembed_ids.push_back(batch_ids[i]);
+                        failed.push_back(chunk_ids[i]);
                         continue;
                     }
-                    field_store_->backfill_embedding(batch_ids[i], arthas[i].nu.data);
+                    field_store_->backfill_embedding(chunk_ids[i], arthas[i].nu.data);
                     embedded++;
                 }
-                if (!unembed_ids.empty())
-                    field_store_->force_clear_embed_pending(unembed_ids);
+                if (!failed.empty())
+                    field_store_->force_clear_embed_pending(failed);
             }
 
+            if (!orphan_ids.empty()) {
+                field_store_->force_clear_embed_pending(orphan_ids);
+                field_store_->flush();  // persist clears so they survive daemon restart
+            }
             if (embedded > 0) {
                 stats_.symbols_embedded += embedded;
                 std::cerr << "[embed_loop] Embedded " << embedded << "/" << pending.size() << " pending\n";
