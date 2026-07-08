@@ -188,6 +188,10 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"correction_check", "Deterministic durable-correction check (capability #2): does a stored [correction] trigger recur in this turn? Exact keyed bigram probe — reserves an injection slot, bypasses fuzzy recall.",
      {{"text", "Turn/context text to scan for a recurring corrected mistake", true, nullptr}}},
 
+    {"provenance_check", "Deterministic anti-reprocessing check (capability #1): has this file/task already been processed? Exact keyed lookup of a prior [done] record by content-hash and/or input path — bypasses fuzzy recall.",
+     {{"sha", "Content hash of the input (tried first — content identity)", false, nullptr},
+      {"input", "Input path (fallback handle)", false, nullptr}}},
+
     {"recall_temporal", "Search memories within a time window",
      {{"query", "Optional semantic search query", false, nullptr},
       {"start", "Start date (ISO8601 or YYYY-MM-DD)", false, nullptr},
