@@ -529,6 +529,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"distill_status", "Get distillation system status: transcripts, realms, pending work",
      {}},
 
+    {"distill_now", "Synchronously distill ONE session now and return the counts (learnings + value-facts)",
+     {{"session_id", "Session ID to distill", true, nullptr},
+      {"transcript_path", "Optional JSONL path; registers it if given, else resolves durable register", false, nullptr},
+      {"realm", "Optional realm (default brahman or the registered realm)", false, nullptr}}},
+
     {"epiplexity_check", "Compute epiplexity (ε) score for a seed - measures reconstruction quality",
      {{"original", "Original full text", true, nullptr},
       {"seed", "Compressed SSL seed", true, nullptr},

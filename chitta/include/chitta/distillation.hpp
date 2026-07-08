@@ -17,7 +17,8 @@ bool run_distillation(
     const TranscriptState& state,
     const DistillConfig& config,
     FieldRpcHandler* handler = nullptr,
-    bool queue_triggered = false
+    bool queue_triggered = false,
+    DistillResult* out = nullptr   // if set, receives the commit counts (distill_now observability)
 );
 
 std::string generate_stats(FieldStore& field_store, VakYantra* yantra);
