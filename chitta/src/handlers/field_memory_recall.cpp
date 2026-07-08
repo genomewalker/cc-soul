@@ -718,6 +718,48 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
     return ToolResult::ok(ss.str(), {{"results", results_json}});
 }
 
+// Deterministic anti-reprocessing check (keyed lane, capability #1). Resolves a
+// prior `[done]` record by content-hash and/or input path via an exact O(1)
+// lookup that NEVER touches the embedder or the fuzzy retriever — no rpc_mutex
+// heavy op. Returns {found, memory_id, record} so a caller can skip reprocessing.
+ToolResult FieldRpcHandler::tool_provenance_check(const json& params) {
+    std::string sha   = params.value("sha", "");
+    std::string input = params.value("input", "");
+    if (sha.empty() && input.empty())
+        return ToolResult::error("provenance_check requires 'sha' and/or 'input'");
+
+    auto hit = field_store_->provenance_lookup(sha, input);
+    json data{{"found", hit.found}};
+    if (hit.found) {
+        data["memory_id"] = hit.memory_id;
+        data["record"]    = hit.content;
+        return ToolResult::ok(
+            "ALREADY PROCESSED (#" + std::to_string(hit.memory_id) + "): " + hit.content, data);
+    }
+    return ToolResult::ok("NOT PROCESSED — no prior [done] record for this key", data);
+}
+
+// Deterministic durable-correction check (keyed lane, capability #2). Given
+// free turn text, returns any stored [correction] whose corrected-mistake
+// trigger recurs — an exact-key bigram probe that RESERVES an injection slot
+// for the correction instead of letting it lose on cosine similarity in fuzzy
+// recall (the ~99% miss). No embedder, no fuzzy retriever, no rpc_mutex heavy op.
+ToolResult FieldRpcHandler::tool_correction_check(const json& params) {
+    std::string text = params.value("text", "");
+    if (text.empty())
+        return ToolResult::error("correction_check requires 'text'");
+
+    auto hit = field_store_->correction_check(text);
+    json data{{"found", hit.found}};
+    if (hit.found) {
+        data["memory_id"] = hit.memory_id;
+        data["record"]    = hit.content;
+        return ToolResult::ok(
+            "CORRECTION FIRED (#" + std::to_string(hit.memory_id) + "):\n" + hit.content, data);
+    }
+    return ToolResult::ok("NO CORRECTION — no stored [correction] trigger matches this turn", data);
+}
+
 ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");

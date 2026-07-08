@@ -253,8 +253,15 @@ else
     _kw_pid=$!
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true >"$_ld/corr" 2>/dev/null || true ) &
     _corr_pid=$!
-    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" "$_corr_pid" 2>/dev/null || true
-    _sem_out=$(<"$_ld/sem"); _hyb_out=$(<"$_ld/hyb"); _kw_out=$(<"$_ld/kw"); _corr_out=$(<"$_ld/corr")
+    # DETERMINISTIC correction lane (capability #2). Unlike the fuzzy --tag lane
+    # above (which ranks corrections by cosine and drops the right one ~99% of
+    # the time), correction_check is an exact-key bigram probe: if this turn
+    # re-states a corrected mistake, its correction FIRES regardless of ranking.
+    # Its result is promoted to systemMessage below on a RESERVED slot.
+    ( timeout "$MAX_WAIT" "$CHITTA_BIN" correction_check --text "$QUERY" >"$_ld/corrk" 2>/dev/null || true ) &
+    _corrk_pid=$!
+    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" "$_corr_pid" "$_corrk_pid" 2>/dev/null || true
+    _sem_out=$(<"$_ld/sem"); _hyb_out=$(<"$_ld/hyb"); _kw_out=$(<"$_ld/kw"); _corr_out=$(<"$_ld/corr"); _corrk_out=$(<"$_ld/corrk")
     rm -rf "$_ld"
 
     # C2 signal: the hybrid-lane header carries the daemon's Platt-calibrated
@@ -616,6 +623,14 @@ while IFS= read -r _sus_corr_line; do
         _sus_last_mid=""
     fi
 done <<< "${memories:-}"
+# Keyed lane (capability #2): a fired correction is deterministically injected to
+# systemMessage, so it is definitively "exposed" — record its id for the M metric
+# even though it never rode the fuzzy $memories lane.
+if [[ -n "${_corrk_out:-}" && "$_corrk_out" =~ FIRED\ \(#([0-9]+) ]]; then
+    _sus_kid="${BASH_REMATCH[1]}"
+    [[ "$_sus_corr_first" == "true" ]] && _sus_corr_first=false || _sus_corr_ids+=","
+    _sus_corr_ids+="$_sus_kid"
+fi
 _sus_corr_ids+="]"
 if [[ "$_sus_corr_ids" != "[]" && -n "${SESSION_ID:-}" && -n "${MIND_PATH:-}" ]]; then
     printf '%s' "$_sus_corr_ids" > "${MIND_PATH}/.exposed_corrections_${SESSION_ID}"
@@ -1110,9 +1125,22 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         # Promote matched [correction] memories to systemMessage so model cannot ignore them.
         # Guard: only short correction tags (<400 chars total) — never escalate bulk memory
         # volume to systemMessage as that busts the prefix cache at 1.25× write cost.
-        if [[ -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
+        # RESERVED SLOT (capability #2): the deterministic keyed lane fires first
+        # and unconditionally. A correction whose trigger recurs in this turn is
+        # promoted to systemMessage even when the fuzzy --tag lane ranked it out
+        # of the top-3 — this is the enforcement that ends the ~99% correction miss.
+        _corr_sys=""
+        if [[ -n "$_corrk_out" && "$_corrk_out" == *"[correction]"* ]]; then
+            _corr_sys=$(printf '%s' "$_corrk_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
+        fi
+        # Fuzzy lane fills any remaining budget (topic-adjacent corrections the
+        # keyed probe did not trigger on) — only if the reserved slot left room.
+        if [[ -z "$_corr_sys" && -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
             _corr_sys=$(printf '%s' "$_corr_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
-            [[ -n "$_corr_sys" && ${#_corr_sys} -lt 400 ]] && SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
+        fi
+        if [[ -n "$_corr_sys" ]]; then
+            _corr_sys=${_corr_sys:0:400}
+            SYSTEM_MSG="${SYSTEM_MSG:+$SYSTEM_MSG | }CORRECTION: ${_corr_sys}"
         fi
         # Cache-expired: prefix cache is already busted, so escalating memories to systemMessage
         # costs nothing extra. Without this the model has no learned behaviour to check additionalContext
