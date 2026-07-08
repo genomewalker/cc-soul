@@ -469,40 +469,44 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                     }
                     if (!pending.empty()) {
                         std::cerr << "[backfill] Processing " << pending.size() << " memories\n";
+                        // Phase 0 (OFF-LOCK): embed the whole chunk. ONNX forward passes touch
+                        // no shared state. Backfill runs at nice(10) so the 30s waits never
+                        // block RPCs. Collect into a row-major batch for the deferred insert.
+                        std::vector<uint64_t> bids;
+                        std::vector<float>    bembs;   // n * EMBED_DIM, row-major
+                        bids.reserve(pending.size());
+                        bembs.reserve(pending.size() * EMBED_DIM);
                         for (size_t i = 0; i < pending.size() && daemon_running; ++i) {
                             if (contents[i].empty()) continue;
-                            auto text  = chitta::ssl::retrieval_text(contents[i]);
-                            // READ path with long timeout — gets vector back for persistence.
-                            // Backfill runs at nice(10) so this 30s wait never blocks RPCs.
-                            auto emb = embed_queue->query(text,
-                                                          std::chrono::milliseconds(30000));
+                            auto text = chitta::ssl::retrieval_text(contents[i]);
+                            auto emb  = embed_queue->query(text,
+                                                           std::chrono::milliseconds(30000));
                             if (emb.size() == EMBED_DIM) {
-                                // Recall-priority gate: backfill_embedding() below takes the
-                                // EXCLUSIVE rpc_mutex (acquire_lock) around an HNSW upsert, which
-                                // blocks ALL recalls while held. Under a large embed backlog this
-                                // fires continuously and is the dominant recall-starvation source
-                                // (recall tail >15s). Yield the lock to live recalls: while a recall
-                                // arrived recently, wait before taking it. This never *holds* the
-                                // lock longer (locking discipline unchanged → no ABBA regression) —
-                                // it only defers *acquiring* it while recalls are hot. Drains resume
-                                // the moment recalls pause.
-                                // ceiling: relentless recall (no gaps) defers backfill indefinitely
-                                //   and embed_pending persists; upgrade: force a batch every N deferrals.
-                                for (int _g = 0; _g < 100 && daemon_running
-                                                 && subconscious.recall_pressured(); ++_g)
-                                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                                // MUST hold acquire_lock() here: backfill_embedding()
-                                // calls hnsw.upsert() which acquires semantic_idx.write().
-                                // Without the C++ lock, this races with pool workers
-                                // holding rpc_mutex_.rdlock() while waiting for
-                                // semantic_idx.read() → ABBA deadlock with sync_foreign
-                                // (which holds semantic_idx.write() and waits for
-                                // rpc_mutex_.wrlock()). Serialising via acquire_lock()
-                                // breaks the cycle: no pool worker can hold rpc_mutex_
-                                // while backfill holds semantic_idx.write().
-                                auto _lk = handler.acquire_lock();
-                                field_store.backfill_embedding(pending[i], emb);
+                                bids.push_back(pending[i]);
+                                bembs.insert(bembs.end(), emb.begin(), emb.end());
                             }
+                        }
+                        if (!bids.empty() && daemon_running) {
+                            // Recall-priority gate: yield to live recalls before taking the
+                            // exclusive lock. Deferred-batched insert (Step-1): the per-item
+                            // backfill_embedding() used to hold the EXCLUSIVE rpc_mutex around
+                            // an O(log N) HNSW upsert — the dominant recall-starvation source
+                            // (recall tail >15s). Now the HNSW neighbor SEARCH runs in
+                            // backfill_plan() with NO rpc_mutex (recall runs concurrently); only
+                            // the brief stage (metadata) and apply (pointer-wire) hold the lock.
+                            // ABBA unchanged: stage/apply take rpc_mutex BEFORE semantic_idx.write()
+                            // (same order as before / as sync_foreign); plan takes only
+                            // semantic_idx.read(), identical to a pool-worker recall — no new cycle.
+                            // ceiling: relentless recall (no gaps) defers the drain indefinitely;
+                            //   upgrade: force a batch every N deferrals.
+                            for (int _g = 0; _g < 100 && daemon_running
+                                             && subconscious.recall_pressured(); ++_g)
+                                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                            { auto _lk = handler.acquire_lock();
+                              field_store.backfill_stage(bids, bembs, EMBED_DIM); }
+                            field_store.backfill_plan();   // OFF the rpc_mutex — recall unblocked
+                            { auto _lk = handler.acquire_lock();
+                              field_store.backfill_apply(); }
                         }
                     }
                 } catch (const std::exception& e) {
