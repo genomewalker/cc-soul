@@ -182,6 +182,40 @@ TOOLS = [
         }
     ),
     Tool(
+        name="provenance_check",
+        description="Deterministic anti-reprocessing check: has this file/task already been processed? Exact keyed lookup of a prior [done] record by content-hash and/or input path — bypasses fuzzy recall. Returns found + the record.",
+        inputSchema={
+                "properties": {
+                        "sha": {
+                                "description": "Content hash of the input (tried first — content identity)",
+                                "type": "string"
+                        },
+                        "input": {
+                                "description": "Input path (fallback handle)",
+                                "type": "string"
+                        }
+                },
+                "required": [],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="correction_check",
+        description="Deterministic durable-correction check (capability #2): does any stored [correction] trigger recur in this turn? Exact keyed bigram probe of the turn text against corrected-mistake phrases — bypasses fuzzy recall (which loses corrections on cosine similarity ~99% of the time). Returns found + the correction(s), newest first (latest-wins).",
+        inputSchema={
+                "properties": {
+                        "text": {
+                                "description": "Turn / context text to scan for a recurring corrected mistake",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "text"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="recall_temporal",
         description="Search memories within a time window (defaults to last 7 days)",
         inputSchema={
