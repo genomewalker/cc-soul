@@ -14,6 +14,7 @@
 #include "ssl_parser.hpp"
 #include "field_store.hpp"
 #include "llm_http.hpp"
+#include "value_fact_extractor.hpp"
 #include <string>
 #include <functional>
 #include <vector>
@@ -37,6 +38,13 @@ struct NativeDistillConfig {
                                               // instead of storing a duplicate
     size_t max_context_chars = 0;             // 0 = no limit (pass full transcript to LLM)
     int max_tokens = 8192;                    // LLM output token limit
+    // BOUND: cap lines parsed per distill pass so a 108MB transcript is chunked
+    // across incremental passes (progress event carries last_line forward) rather
+    // than parsed+distilled in one unbounded shot. 0 = no cap.
+    int64_t max_lines_per_pass = 20000;
+    // BOUND: cap bytes fed to the deterministic value-fact extractor. Independent
+    // of the LLM context cap; keeps the lock-free precompute pass finite. 0 = no cap.
+    size_t value_fact_max_bytes = 4u * 1024 * 1024;
 };
 
 struct DistillResult {
@@ -62,6 +70,16 @@ struct LearningPrep {
     float dup_confidence = 0.0f;
 };
 
+// Per-value-fact result from the lock-free precompute phase — mirrors LearningPrep
+// so commit_distillation writes value-facts without any embed/recall under the lock
+// (the fix for the daemon-wide hang: extraction + embedding + dedup recall all run
+// lock-free in prepare_distillation, only remember()/edges run under the write lock).
+struct ValueFactPrep {
+    ValueFact fact;
+    std::vector<float> embedding;
+    bool is_dup = false;
+};
+
 // Output of the lock-free preparation phase (transcript parse + LLM call + SSL parse
 // + dedup embedding recalls).  Pass to commit_distillation() under the write lock.
 struct PreparedDistillation {
@@ -75,6 +93,7 @@ struct PreparedDistillation {
     SSLParser::Result ssl_result;
     std::vector<LearningPrep> learning_preps;  // indexed 1:1 with ssl_result.learnings
     std::string conversation;                  // raw text — fed to the value-fact extractor
+    std::vector<ValueFactPrep> value_fact_preps; // precomputed value-facts (embed+dedup done lock-free)
     bool valid = false;
     std::string error;
 };
@@ -145,11 +164,16 @@ private:
         DistillResult& result
     );
 
-    // Deterministic value-fact pass (no LLM): extract (identifier,value) atoms from
-    // prep.conversation, dedup against the store, write survivors via field_store_.
-    // Gated by env CHITTA_VALUE_FACTS (default on). Runs right after store_learnings.
+    // Phase 1c (lock-free): extract value-facts from prep.conversation, embed each,
+    // and run recall-based dedup — populates prep.value_fact_preps. No field_store
+    // writes, so this heavy pass (extract + N embeds + 2N recalls) runs OUTSIDE the
+    // RPC lock. This is the core hang fix: previously all of this ran under the lock.
+    void precompute_value_facts(PreparedDistillation& prep);
+
+    // Phase 2b (needs write lock): write the precomputed value-facts — remember() +
+    // episode edges only, no embed/recall. Gated by env CHITTA_VALUE_FACTS (default on).
     void store_value_facts(
-        const std::string& conversation,
+        const std::vector<ValueFactPrep>& value_fact_preps,
         const std::string& realm,
         uint64_t episode_mem_id,
         DistillResult& result

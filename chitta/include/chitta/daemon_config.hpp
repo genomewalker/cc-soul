@@ -40,6 +40,7 @@ struct DistillConfig {
     int cooldown_seconds = 180;
     size_t max_context_chars = 0;  // 0 = no limit (full transcript)
     int max_tokens = 8192;         // LLM output token limit
+    int64_t max_lines_per_pass = 20000;  // BOUND: cap lines parsed per distill pass (0 = no cap)
     std::string endpoint;          // pre-probed LLM endpoint; empty = discover per distill
 };
 
