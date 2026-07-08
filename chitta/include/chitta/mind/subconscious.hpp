@@ -57,6 +57,9 @@ struct SubconsciousConfig {
     std::chrono::minutes distillation_interval{120};      // Auto-distillation every 2 hours
     std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
     std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
+    int embed_defer_ms{1500};                     // Recall-priority gate: pause embed_loop if a query
+                                                  // arrived within this window (keeps recall off the
+                                                  // embed cores under load; drains during idle gaps)
     std::chrono::minutes sleep_consolidation_interval{10};  // encode_all + save_snapshot every 10 min
     std::chrono::minutes demotion_interval{60};             // run_demotion pass every hour
     std::chrono::minutes belief_maintenance_interval{120};  // Belief maintenance every 2 hours
@@ -203,6 +206,19 @@ public:
     // Query notification (call from RPC handlers to signal daemon is busy)
     void notify_query();
     bool is_idle() const;
+
+    // Recall-priority gate: true if a recall/read arrived within embed_defer_ms.
+    // Background embedders (embed_loop AND the daemon backfill thread) consult this
+    // to yield CPU *and* the exclusive rpc_mutex to live recalls under load, so a
+    // large embed backlog draining can never starve recall. Drains resume the moment
+    // recalls pause. Lock-free (atomic load) — safe to call from any thread.
+    bool recall_pressured() const {
+        auto lq = stats_.last_query_at.load();
+        if (lq == 0) return false;
+        auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        return (now - lq) < config_.embed_defer_ms;
+    }
 
     // Dream callback: called when the soul has been idle long enough to dream
     void set_dream_callback(std::function<void()> fn) { dream_callback_ = std::move(fn); }

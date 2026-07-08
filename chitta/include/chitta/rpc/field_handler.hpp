@@ -83,6 +83,11 @@ public:
     void set_mind_path(const std::string& p) { mind_path_ = p; }
 
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
+    // Recall-priority gate for background workers (queue processor, backfill): true
+    // if a recall/read arrived within embed_defer_ms. Lets them yield the exclusive
+    // rpc_mutex to live recalls under load so a burst of queued writes can't stall
+    // recall. Lock-free; safe before subconscious is wired (returns false).
+    bool recall_pressured() const { return subconscious_ && subconscious_->recall_pressured(); }
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
     void set_queue_stats(std::atomic<size_t>* count, std::atomic<size_t>* fails,
                          const std::string& failed_path) {
@@ -435,6 +440,10 @@ public:
                 // an index-mutating write can never block it (is_lockfree_read).
                 result = it->second(args);
             } else if (is_read_only_tool(name)) {
+                // Mark recall/read activity so the background embed_loop's
+                // recall-priority gate yields the cores to live queries under load
+                // (embed inference otherwise CPU-starves the pool → recall >15s).
+                if (subconscious_) subconscious_->notify_query();
                 auto _lp_w0 = std::chrono::steady_clock::now();
                 std::shared_lock<std::shared_mutex> _lk(rpc_mutex_);
                 if (_lp_thr > 0) {

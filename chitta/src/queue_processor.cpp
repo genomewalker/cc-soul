@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iostream>
 #include <chrono>
+#include <thread>
 
 extern std::atomic<bool> daemon_running;
 extern std::atomic<bool> verbose_mode;
@@ -315,6 +316,19 @@ void QueueProcessor::run() {
                         }
                     }
                 }
+
+                // Recall-priority gate: each queued write below holds the EXCLUSIVE
+                // rpc_mutex (observe/transcript_register ~300ms each), and a burst of
+                // them stacks into multi-second recall stalls — the dominant recall-
+                // starvation source under load (many sessions → observe/transcript
+                // floods). Yield to live recalls before taking the lock. BOUNDED (≤1.5s):
+                // after the cap the item proceeds regardless, so the queue still drains
+                // and the WAL can't back up indefinitely — recall stall per item is then
+                // capped at one ~300ms hold. Only the exclusive path is gated.
+                if (tool != "distill_trigger")
+                    for (int _g = 0; _g < 30 && daemon_running
+                                     && handler_.recall_pressured(); ++_g)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
                 // FieldStore is always ready (synchronous init).
                 // distill_trigger spawns an LLM call (10–30s); it must NOT hold
