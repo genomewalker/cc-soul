@@ -40,6 +40,12 @@ int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
     const float* embedding_ptr, size_t embedding_len);
 int cf_pending_embeddings(struct CfHandle* h,
     uint64_t* out_ids, size_t max_ids, size_t* out_count);
+// Deferred batched backfill (Step-1): stage/plan/apply. Hold rpc_mutex around
+// stage + apply ONLY; call plan WITHOUT it so the HNSW search runs off the lock.
+int cf_backfill_stage(struct CfHandle* h, const uint64_t* ids,
+    const float* embeddings, size_t n, size_t embed_dim, size_t* out_plan_count);
+int cf_backfill_plan(struct CfHandle* h);
+int cf_backfill_apply(struct CfHandle* h, size_t* out_applied);
 int cf_purge_orphan_embed_pending(struct CfHandle* h, size_t* out_cleared);
 size_t cf_requeue_ghost_embeddings(const struct CfHandle* h);
 int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
@@ -535,6 +541,26 @@ public:
         int r = cf_backfill_embedding(handle_, id,
             embedding.data(), embedding.size());
         cf_checked(r, __func__);
+    }
+
+    /// Deferred batched backfill — Phase 1 (durable stage). Call under acquire_lock().
+    /// `ids[i]` pairs with `embeddings[i*embed_dim .. (i+1)*embed_dim]`. Returns the
+    /// number of ids still needing a global-HNSW plan.
+    size_t backfill_stage(const std::vector<uint64_t>& ids,
+                          const std::vector<float>& embeddings, size_t embed_dim) {
+        size_t plan_count = 0;
+        int r = cf_backfill_stage(handle_, ids.data(), embeddings.data(),
+                                  ids.size(), embed_dim, &plan_count);
+        cf_checked(r, __func__);
+        return plan_count;
+    }
+    /// Phase 2 (plan) — call WITHOUT acquire_lock() so recall is not blocked.
+    void backfill_plan() { cf_checked(cf_backfill_plan(handle_), __func__); }
+    /// Phase 3 (apply) — call under acquire_lock(). Returns memories backfilled.
+    size_t backfill_apply() {
+        size_t applied = 0;
+        cf_checked(cf_backfill_apply(handle_, &applied), __func__);
+        return applied;
     }
 
     /// Return IDs of memories waiting for an embedding (embed_pending=true).
