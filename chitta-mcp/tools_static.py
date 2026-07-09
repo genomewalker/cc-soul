@@ -216,6 +216,22 @@ TOOLS = [
         }
     ),
     Tool(
+        name="task_state",
+        description="Deterministic task-state check (capability #3): what is the current state of task X? Exact keyed lookup of the LATEST stored [task] record by its slug — bypasses fuzzy recall so an agent resuming a discontinuous session gets the durable status/next-step. Returns found + the record.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Task slug (the id: token of the [task] record)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="recall_temporal",
         description="Search memories within a time window (defaults to last 7 days)",
         inputSchema={

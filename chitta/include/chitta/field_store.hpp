@@ -952,6 +952,28 @@ public:
         return {true, id, std::string(reinterpret_cast<char*>(buf.data()), written)};
     }
 
+    /// Deterministic task-state lookup (keyed lane, capability #3 — task
+    /// hand-off across discontinuous sessions). Exact-key resolution of a
+    /// `[task]` record by its slug — bypasses the fuzzy retriever entirely and
+    /// returns the LATEST record (status evolves). Returns {found, memory_id,
+    /// content}; `id` accepts a raw slug or a `task:<slug>` key.
+    struct TaskStateHit { bool found = false; uint64_t memory_id = 0; std::string content; };
+    TaskStateHit task_state_lookup(const std::string& id) {
+        size_t cap = 8192;
+        std::vector<uint8_t> buf(cap);
+        uint64_t mid = 0;
+        size_t written = 0;
+        int r = cf_task_state_lookup(handle_, id.c_str(), &mid, buf.data(), buf.size(), &written);
+        if (r == 1) return {};                       // clean miss
+        if (r == -2) {                               // record longer than buffer: grow + retry
+            buf.resize(written + 1);
+            r = cf_task_state_lookup(handle_, id.c_str(), &mid, buf.data(), buf.size(), &written);
+            if (r == 1) return {};
+        }
+        cf_checked(r, __func__);
+        return {true, mid, std::string(reinterpret_cast<char*>(buf.data()), written)};
+    }
+
     /// BM25 keyword recall.
     std::vector<FieldRecallHit> recall_keyword(const std::string& query, size_t k,
                                                const std::string& realm = "",

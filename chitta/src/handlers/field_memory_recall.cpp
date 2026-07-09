@@ -760,6 +760,26 @@ ToolResult FieldRpcHandler::tool_correction_check(const json& params) {
     return ToolResult::ok("NO CORRECTION — no stored [correction] trigger matches this turn", data);
 }
 
+// Deterministic task-state check (keyed lane, capability #3). Given a task slug,
+// returns the LATEST stored [task] record for that id — an exact-key HashMap
+// read that BYPASSES the fuzzy retriever, so an agent resuming a discontinuous
+// session gets the current durable status of task X without competing on cosine.
+ToolResult FieldRpcHandler::tool_task_state(const json& params) {
+    std::string id = params.value("id", "");
+    if (id.empty())
+        return ToolResult::error("task_state requires 'id'");
+
+    auto hit = field_store_->task_state_lookup(id);
+    json data{{"found", hit.found}};
+    if (hit.found) {
+        data["memory_id"] = hit.memory_id;
+        data["record"]    = hit.content;
+        return ToolResult::ok(
+            "TASK STATE (#" + std::to_string(hit.memory_id) + "): " + hit.content, data);
+    }
+    return ToolResult::ok("NO TASK STATE — no stored [task] record for this id", data);
+}
+
 ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");

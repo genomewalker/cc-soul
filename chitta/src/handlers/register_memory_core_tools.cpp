@@ -108,6 +108,13 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["correction_check"] = [this](const json& p) { return tool_correction_check(p); };
 
+    tools_.push_back({{"name","task_state"},{"description","Deterministic task-state check (capability #3): what is the current state of task X? Exact keyed lookup of the LATEST stored [task] record by its slug — bypasses fuzzy recall so an agent resuming a discontinuous session gets the durable status/next-step. Returns found + the record."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Task slug (the id: token of the [task] record)"}}}
+        }},{"required",{"id"}}}}
+    });
+    handlers_["task_state"] = [this](const json& p) { return tool_task_state(p); };
+
     // Exploration primitives
     tools_.push_back({{"name","explore_recall"},{"description","Lightweight recall - titles/scores only"},
         {"inputSchema",{{"type","object"},{"properties",{
