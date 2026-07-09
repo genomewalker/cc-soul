@@ -8,6 +8,9 @@
 #include <cstdio>
 #include <cmath>
 #include <mutex>
+#include <atomic>
+#include <thread>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -54,7 +57,7 @@ public:
     }
 
     Artha transform(const std::string& vak, EmbedMode mode) override {
-        Vector v = embed_one(add_prefix(vak, mode));
+        Vector v = embed_one(add_prefix(vak, mode), mode == EmbedMode::Query);
         return Artha{std::move(v), ready_ ? 1.0f : 0.0f, vak};
     }
 
@@ -78,6 +81,10 @@ private:
     llama_model*   model_  = nullptr;
     llama_context* ctx_    = nullptr;
     mutable std::mutex mtx_;  // llama_context is NOT thread-safe
+    // Recall-priority gate for the single llama context. Recall query embeds must not
+    // queue behind a burst of background document embeds (distill/embed_loop/backfill),
+    // which was the recall-starvation point the rpc_mutex priority gate never covered.
+    mutable std::atomic<int> query_waiters_{0};
 
     static std::string add_prefix(const std::string& text, EmbedMode mode) {
         if (mode == EmbedMode::Query) return "search_query: "    + text;
@@ -185,8 +192,29 @@ private:
         return true;
     }
 
-    Vector embed_one(const std::string& text) {
-        std::lock_guard<std::mutex> lock(mtx_);
+    // high_prio (recall query embeds) take the context ahead of background document
+    // embeds. A query registers as a waiter and blocks on the mutex; background embeds
+    // never queue on the mutex while a query waits — they try_lock and back off between
+    // attempts — so a recall waits at most one in-flight forward pass, not the whole
+    // background burst. ceiling: unbroken recall traffic defers background embeds
+    // indefinitely (same posture as the embed_loop recall gate); backlog drains in gaps.
+    Vector embed_one(const std::string& text, bool high_prio) {
+        std::unique_lock<std::mutex> lock(mtx_, std::defer_lock);
+        if (high_prio) {
+            query_waiters_.fetch_add(1, std::memory_order_acq_rel);
+            lock.lock();
+            query_waiters_.fetch_sub(1, std::memory_order_acq_rel);
+        } else {
+            for (;;) {
+                while (query_waiters_.load(std::memory_order_acquire) > 0)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                if (lock.try_lock()) {
+                    if (query_waiters_.load(std::memory_order_acquire) == 0) break;
+                    lock.unlock();  // a query arrived after try_lock — yield to it
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         Vector v;  // default: zero vector
         if (!ready_ || !ctx_ || !model_) return v;
 
