@@ -166,32 +166,6 @@ private:
         ready_ = false;
     }
 
-    // Reinitialize the llama context from the already-loaded model. Called after a decode
-    // failure to recover from a corrupted context state without reloading the model weights.
-    // Caller must hold mtx_. Returns true on success.
-    bool reinit_context() {
-        if (!model_) return false;
-        if (ctx_) { llama_free(ctx_); ctx_ = nullptr; }
-
-        llama_context_params cparams = llama_context_default_params();
-        cparams.n_ctx        = n_ctx_eff_;
-        cparams.n_batch      = n_ctx_eff_;
-        cparams.n_ubatch     = n_ctx_eff_;
-        cparams.embeddings   = true;
-        cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
-        if (const char* t = std::getenv("CHITTA_EMBED_THREADS")) {
-            int nt = std::atoi(t);
-            if (nt > 0) { cparams.n_threads = nt; cparams.n_threads_batch = nt; }
-        }
-        ctx_ = llama_init_from_model(model_, cparams);
-        if (!ctx_) {
-            log("[llama-embed] context reinit failed — embedder disabled");
-            ready_ = false;
-            return false;
-        }
-        return true;
-    }
-
     // high_prio (recall query embeds) take the context ahead of background document
     // embeds. A query registers as a waiter and blocks on the mutex; background embeds
     // never queue on the mutex while a query waits — they try_lock and back off between
@@ -243,19 +217,15 @@ private:
 
         llama_batch batch = llama_batch_get_one(toks.data(), (int)toks.size());
         if (llama_decode(ctx_, batch) != 0) {
-            // Context may be in a bad state (e.g. exhausted KV cache, corrupted state).
-            // Reinitialize ctx_ from the already-loaded model and retry once — avoids
-            // falling back to CPU-only encode() which pegs the CPU for the rest of the
-            // daemon lifetime.
+            // Edge-case input (e.g. empty/oversized batch): drop this embedding and
+            // return the zero vector. Do NOT rebuild the context here — a per-item
+            // context reinit rebuilt the whole llama ctx under the embed mutex and
+            // pegged multiple cores across the distill/backfill queue (the c20bc907
+            // recall-hang + CPU-storm regression). The shared context stays valid
+            // across a single-item decode failure; the next item embeds normally.
             log("[llama-embed] decode failed (len=" + std::to_string(text.size()) +
-                "); reinitializing context and retrying");
-            if (!reinit_context()) return v;
-            llama_memory_clear(llama_get_memory(ctx_), false);
-            batch = llama_batch_get_one(toks.data(), (int)toks.size());
-            if (llama_decode(ctx_, batch) != 0) {
-                log("[llama-embed] decode failed after context reinit — dropping embedding");
-                return v;
-            }
+                ") — dropping embedding");
+            return v;
         }
 
         // Prefer pooled sequence embedding; fall back to per-token mean if unavailable.
