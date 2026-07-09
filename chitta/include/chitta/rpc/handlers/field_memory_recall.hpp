@@ -101,6 +101,7 @@
     ToolResult tool_recall_keyword(const json& params);
     ToolResult tool_provenance_check(const json& params);
     ToolResult tool_correction_check(const json& params);
+    ToolResult tool_task_state(const json& params);
     ToolResult tool_hybrid_recall(const json& params);
     ToolResult tool_smart_recall(const json& params);
     ToolResult tool_recall_session(const json& params);

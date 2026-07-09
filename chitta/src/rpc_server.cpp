@@ -192,6 +192,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"sha", "Content hash of the input (tried first — content identity)", false, nullptr},
       {"input", "Input path (fallback handle)", false, nullptr}}},
 
+    {"task_state", "Deterministic task-state check (capability #3): what is the current state of task X? Exact keyed lookup of the LATEST stored [task] record by its slug — bypasses fuzzy recall.",
+     {{"id", "Task slug (the id: token of the [task] record)", true, nullptr}}},
+
     {"recall_temporal", "Search memories within a time window",
      {{"query", "Optional semantic search query", false, nullptr},
       {"start", "Start date (ISO8601 or YYYY-MM-DD)", false, nullptr},
