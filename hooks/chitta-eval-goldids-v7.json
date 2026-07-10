@@ -1,0 +1,1705 @@
+{
+  "version": 1,
+  "ids": {
+    "how_should_protein_splits_be_used_for_training_the_classifie": [
+      "1991994201113362520"
+    ],
+    "how_do_i_identify_empty_nodes_using_tmon?": [
+      "4179701334531899419"
+    ],
+    "what_does_the_mcp_configuration_change_error_mean?": [
+      "5918348170907090948"
+    ],
+    "how_do_i_fix_the_bgzf_mt-configuration_error_in_bam2mcaf?": [
+      "7731467412322648126"
+    ],
+    "what_is_the_design_proposal_for_the_generator-only_setup?": [
+      "16612211345126850871"
+    ],
+    "what_is_the_memory_capacity_of_modern_hopfield_networks?": [
+      "4065629442691563523"
+    ],
+    "what_is_the_status_of_the_clonal-collapse_step_3_fix?": [
+      "15005192852508508233"
+    ],
+    "how_do_i_prevent_the_session_from_forgetting_protocols?": [
+      "11024999496269431228"
+    ],
+    "what_compression_methods_are_used_for_variant_streams_and_st": [
+      "846867757206077717"
+    ],
+    "what_was_the_milestone_regarding_the_bug_fix?": [
+      "9372139769728862542"
+    ],
+    "how_to_maintain_a_unified_codex_and_claude_architecture?": [
+      "16503659830586638362"
+    ],
+    "how_can_i_optimize_mcaf_for_asymmetric,_read-heavy_workloads": [
+      "10756680085990802872"
+    ],
+    "where_is_the_arithmetic_sequence_tool_defined_in_stats_compu": [
+      "5568341523495387157"
+    ],
+    "did_the_ref_id_tracking_optimization_reduce_block_decoding_t": [
+      "11792162654850646938"
+    ],
+    "what_error_in_rooms.py_disables_adaptive_stopping?": [
+      "16612211345126850672"
+    ],
+    "what_were_the_details_of_my_last_sbatch_resubmission?": [
+      "3275981297092132892"
+    ],
+    "how_does_brahman-fallback_mitigate_misdetection_risk_in_real": [
+      "5038657028084465722"
+    ],
+    "what_was_the_error_handling_fix_in_archive.cpp?": [
+      "10756680085990802522"
+    ],
+    "how_can_i_validate_schema_fields_against_existing_inventory_": [
+      "10316252213650916065"
+    ],
+    "what_are_the_dell_xps_13_configuration_options?": [
+      "2117689519997192569"
+    ],
+    "how_do_i_prevent_unalignable_contamination_in_zp_profiles?": [
+      "8500738545147707463"
+    ],
+    "how_can_i_make_the_nativedistiller_distillation_process_inte": [
+      "12492674913204699217"
+    ],
+    "how_much_memory_is_the_process_currently_using?": [
+      "16503659830586638374"
+    ],
+    "how_does_thinking_extract.cpp_handle_llm_call_failures?": [
+      "4770829997151617044"
+    ],
+    "how_can_i_access_the_ancient.yml_extension_schema?": [
+      "10316252213650916323"
+    ],
+    "how_is_the_mmcaf_read_index_partitioned_in_the_ca_architectu": [
+      "11024999496269430980"
+    ],
+    "what_is_the_single_root_cause_for_these_three_failures?": [
+      "5296949729836400643"
+    ],
+    "how_does_the_genomics_module's_reference-divergence_function": [
+      "2106781630210244707"
+    ],
+    "what_is_the_issue_with_absent_matrix_rows_at_workerb?": [
+      "4236524911499149785"
+    ],
+    "how_do_i_stream_only_target_rows_from_large_gzipped_tsvs?": [
+      "4236524911499149726"
+    ],
+    "where_is_the_reference_base_sequence_stored_in_the_database?": [
+      "6583290613922267147"
+    ],
+    "what_are_the_hardware_specifications_for_each_node_in_the_cl": [
+      "11483800603046445344"
+    ],
+    "how_do_i_visualize_observed_versus_model_damage_profiles?": [
+      "15922626153588719629"
+    ],
+    "how_can_i_filter_machine-readable_tags_using_boolean_and_str": [
+      "10316252213650916006"
+    ],
+    "how_do_i_define_the_time-to-correct-synthesis_benchmark?": [
+      "18341722884847698141"
+    ],
+    "how_do_we_validate_the_json_structure_in_fqdup_profile?": [
+      "4236524911499149350"
+    ],
+    "how_should_we_highlight_saavs_and_complexes_in_the_structure": [
+      "3071079119048409090"
+    ],
+    "what_is_the_mcaf-optimization_ref-synopsis-skips-decoding_pe": [
+      "10756680085990802866"
+    ],
+    "what_is_the_cause_of_smart-install-exit-code-1_during_deploy": [
+      "15315026132475052045"
+    ],
+    "how_to_derive_local_learning_rules_for_online_map_inference?": [
+      "4069582354497142837"
+    ],
+    "how_do_zero-embedding_genomes_affect_hnsw_graph_structure?": [
+      "10756680085990803079"
+    ],
+    "what_are_the_idle_nodes_in_the_current_session?": [
+      "5635631334467567837"
+    ],
+    "what_is_the_formula_for_damage_shrinkage_in_arch_estimation?": [
+      "8264094759195246781"
+    ],
+    "which_cluster_has_higher_cpu_availability_according_to_sinfo": [
+      "5635631334467567816"
+    ],
+    "what_parameters_does_the_cortical-params_configuration_map_t": [
+      "2106781630210245222"
+    ],
+    "what_is_the_session_memory_for_chaos-nodes?": [
+      "5635631334467567813"
+    ],
+    "where_is_the_damage_estimation_file_located?": [
+      "17475104458537959978"
+    ],
+    "how_can_i_link_any_page_to_any_odata_service?": [
+      "13691321210875412914"
+    ],
+    "are_protein-level_metrics_primary_for_paper_functionality?": [
+      "13512495939654254980"
+    ],
+    "how_is_performance_measured_during_the_tuning_methodology?": [
+      "2106781630210245452"
+    ],
+    "how_do_i_handle_nested_version_directories_in_emi-tsv-struct": [
+      "13512495939654254631"
+    ],
+    "what_replaces_manual-mem_bytes-estimation_in_the_memory?": [
+      "16373682459373469722"
+    ],
+    "what_are_the_consequences_of_writing_without_metadata?": [
+      "5452677010537054212"
+    ],
+    "which_ancient_protein_source_corresponds_to_barley_protein_q": [
+      "13691321210875412603"
+    ],
+    "how_does_ref_scanned-bitmap_prevent_duplicate_processing?": [
+      "11792162654850646648"
+    ],
+    "what_issues_from_the_audit_need_to_be_fixed?": [
+      "17352167449256001557"
+    ],
+    "how_does_geodesic_handle_distributed_execution_for_cluster_n": [
+      "10445584626805113750"
+    ],
+    "how_does_ntdb.cpp_convert_raw_ncbi_dumps_to_zstd_blobs?": [
+      "5707379467521884317"
+    ],
+    "how_do_i_convert_the_encoding_dictionary_to_human-readable_s": [
+      "7731467412322648723"
+    ],
+    "how_does_cpg_depletion_indicate_deamination_in_ancient_dna?": [
+      "2106781630210245002"
+    ],
+    "how_does_routing_alignments_to_the_lca_taxon_avoid_misassign": [
+      "10738318185972367478"
+    ],
+    "how_do_short_molecules_affect_the_exclusion_signal_in_ancien": [
+      "2106781630210244898"
+    ],
+    "what_is_the_embedding_for_the_milestone?": [
+      "5041864389402034192"
+    ],
+    "which_metrics_outperform_precision@5_in_this_memory?": [
+      "16859570902684139558"
+    ],
+    "how_can_i_see_if_changes_are_local_or_pushed?": [
+      "17343318394992066675"
+    ],
+    "what_is_the_synth_workflow_process?": [
+      "4236524911499149976"
+    ],
+    "how_does_conditioning_bases_1_and_2_affect_dna_artifacts?": [
+      "2106781630210244849"
+    ],
+    "how_is_the_4-way_participant_configuration_defined_in_agenda": [
+      "5169070557521510435"
+    ],
+    "how_do_i_replace_keyword_matching_with_memory_id_ndcg?": [
+      "17041385651531939912"
+    ],
+    "how_is_damage_stats_weighting_calculated_by_zp_profile?": [
+      "8500738545147707492"
+    ],
+    "how_do_i_retrieve_the_taxon-marginal_zp_abundance_architectu": [
+      "9491912831222677534"
+    ],
+    "how_do_i_confirm_my_identity_configuration_settings?": [
+      "7699525431304651625"
+    ],
+    "what_value_of_pi_was_used_in_the_dna_analysis?": [
+      "2106781630210244755"
+    ],
+    "where_was_the_damage_estimation.cpp_file_actually_located?": [
+      "17475104458537959824"
+    ],
+    "how_do_i_run_the_mmseqs2_sequence-vs-sequence_search?": [
+      "11792707402732667444"
+    ],
+    "explain_the_graph_edges,_expression_entries,_and_table_struc": [
+      "13691321210875412802"
+    ],
+    "how_is_gtdbtk_parallel_chunk_execution_configured?": [
+      "5145065907994755075"
+    ],
+    "how_are_single-scalar_verdicts_and_sub-verdicts_with_provena": [
+      "2106781630210245644"
+    ],
+    "how_do_i_find_savefig_patterns_in_my_scripts?": [
+      "13512495939654254596"
+    ],
+    "how_do_i_enable_show-error-and-fix-on-failure_in_execution?": [
+      "4236524911499149603"
+    ],
+    "how_do_i_prevent_chain_corruption_during_distillation-lock_r": [
+      "10039566052460856958"
+    ],
+    "what_advantage_does_the_reference-based_approach_offer_for_i": [
+      "17475104458537960073"
+    ],
+    "how_do_i_embed_toolchain_parameters_in_file_metadata?": [
+      "7731467412322648951"
+    ],
+    "what_is_the_difference_between_ref-centric_partitioning_and_": [
+      "10756680085990802870"
+    ],
+    "what_is_the_architecture_of_kaiku?": [
+      "8671174022957891955"
+    ],
+    "what_are_the_mcaf_optimization_settings_for_sparse_batching?": [
+      "10756680085990802862"
+    ],
+    "what_is_the_current_status_of_the_extraction_source_upgrade?": [
+      "6019566685919379492"
+    ],
+    "what_was_the_last_pipeline_job_submitted_in_the_memory?": [
+      "5228975945322332189"
+    ],
+    "what_are_the_chaos_nodes_for_dandycomp01fl_and_08fl?": [
+      "13439096451804168197"
+    ],
+    "how_can_i_reduce_injected_context_over_time?": [
+      "4946404832828194824"
+    ],
+    "what_is_the_current_status_of_the_system?": [
+      "2106781630210245667"
+    ],
+    "how_do_i_fix_my_ollama_gpu_and_model_configuration?": [
+      "2106781630210245058"
+    ],
+    "how_is_the_tiered_portfolio_architecture_for_af_multimer_cam": [
+      "1991994201113362515"
+    ],
+    "what_was_the_recent_fix_for_metadata_lookup?": [
+      "11792707402732667121"
+    ],
+    "should_i_use_supersession_or_deletion_to_preserve_provenance": [
+      "7057271466563207389"
+    ],
+    "how_can_i_fix_the_json_structure_and_naming_errors?": [
+      "389174567307837454"
+    ],
+    "is_single-threaded_better_than_multithreaded_for_performance": [
+      "10728692180714520588"
+    ],
+    "how_should_the_amplitude_be_computed_for_terminal_ct_excess?": [
+      "6970676859927265294"
+    ],
+    "how_does_damage_cross-fitting_prevent_mode_collapse?": [
+      "7269634522491125767"
+    ],
+    "do_a-b_base_pairs_share_deamination_chemistry_in_ancient_dna": [
+      "2106781630210244855"
+    ],
+    "what_is_the_synthesizer_workflow_and_its_steps?": [
+      "4236524911499150069"
+    ],
+    "what_was_the_recent_deployment_process_for_denbi?": [
+      "13512495939654254716"
+    ],
+    "how_do_i_find_fixed_columns_for_counts_in_side-table_metadat": [
+      "9881291581275766832"
+    ],
+    "how_to_fix_ggarrange_vertical_alignment_warnings_in_r?": [
+      "15814940023419043847"
+    ],
+    "what_is_the_current_classifier_strategy_being_used?": [
+      "13056329417356214297"
+    ],
+    "what_are_the_names_of_the_newly_added_schema_columns?": [
+      "9617934554736099379"
+    ],
+    "how_do_i_access_the_pre-alignment_damage_prior_in_kdamage?": [
+      "7678172395802199185"
+    ],
+    "how_do_i_fix_the_contaminated_genome_length_bug?": [
+      "10445584626805112975"
+    ],
+    "what_is_the_policy_regarding_running_compute_jobs_on_login_n": [
+      "1555967557855346741"
+    ],
+    "who_is_responsible_for_the_16,222_accession_production_pipel": [
+      "1179957846993799828"
+    ],
+    "why_does_encoding_a_256_dim_embedding_cause_a_panic?": [
+      "1555967557855346758"
+    ],
+    "what_is_the_issue_with_rates[p]>0.0_in_damage.cpp?": [
+      "15534201689434227731"
+    ],
+    "analyze_token_usage_for_session_id_12345.": [
+      "13691321210875413001"
+    ],
+    "does_the_watchdog_measure_task_duration_or_queue_wait_time?": [
+      "6094165942818832495"
+    ],
+    "how_does_hnsw_index_distillation_affect_rpcs_and_latency?": [
+      "5038657028084465686"
+    ],
+    "what_enables_metadata_extraction_in_bam2mcaf.cpp?": [
+      "7731467412322648908"
+    ],
+    "how_do_i_replace_the_contig_count_prefilter_with_average_siz": [
+      "10445584626805112976"
+    ],
+    "how_do_i_visualize_a_focal_subtree_with_full_tree_supplement": [
+      "11792707402732666903"
+    ],
+    "what_is_the_difference_between_distillation_and_hook_regex_i": [
+      "6019566685919379483"
+    ],
+    "what_causes_indefinite_hangs_or_oom_in_cmd_profile.cpp?": [
+      "11792162654850646166"
+    ],
+    "what_is_the_memory_entry_for_distillation-llm_to_gemma4?": [
+      "4758927169600618535"
+    ],
+    "what_is_the_error_handling_for_do_pread_in_genopack?": [
+      "10756680085990802518"
+    ],
+    "how_can_i_retrieve_the_top-level_key_in_the_json?": [
+      "1179957846993798435"
+    ],
+    "how_much_time_was_saved_by_using_two_jobs_per_node?": [
+      "5155313781567389824"
+    ],
+    "why_can't_rrf_fix_misaligned_embedding_spaces_in_semantic_br": [
+      "2106781630210244753"
+    ],
+    "how_can_i_extract_key_facts_from_raw_episode_memories?": [
+      "12492674913204699383"
+    ],
+    "how_do_i_apply_minimal_edits_and_one-line_fixes?": [
+      "16612211345126850802"
+    ],
+    "what_is_the_default_state_for_newly_added_scoring_keys?": [
+      "2106781630210244938"
+    ],
+    "how_much_does_hipporag_2_improve_associative_memory_tasks?": [
+      "4069582354497142801"
+    ],
+    "how_does_the_alignment_pool_layout_optimize_cache_locality?": [
+      "11024999496269431500"
+    ],
+    "how_to_rename_tree_tips_and_labels_while_keeping_metadata?": [
+      "11792707402732667156"
+    ],
+    "what_is_the_deployment_name_for_the_blocked_ssh_mode?": [
+      "13512495939654254693"
+    ],
+    "how_should_we_generate_synthetic_damage_for_stress_testing?": [
+      "7929499506708579196"
+    ],
+    "how_can_i_use_read_index_to_avoid_alns_vector_collection?": [
+      "11792162654850646907"
+    ],
+    "how_do_i_check_if_systemd_is_using_a_stale_binary?": [
+      "7598981690014302225"
+    ],
+    "what_is_the_status_of_the_provenance_feature_reader_implemen": [
+      "11024999496269430847"
+    ],
+    "how_do_i_implement_the_recall-first_workflow_with_reduced_ex": [
+      "10445584626805115084"
+    ],
+    "how_does_the_dream_wander_selection_process_work?": [
+      "12492674913204699219"
+    ],
+    "what_is_the_benefit_of_using_mmap_and_munmap?": [
+      "16373682459373469748"
+    ],
+    "what_are_the_parameters_for_the_structureclusterupdate_job?": [
+      "15534201689434227237"
+    ],
+    "how_do_i_find_the_applied-6-codex-review-tasks_fix?": [
+      "6271254668567904264"
+    ],
+    "where_is_the_protein_vs_read_metrics_evaluation_table?": [
+      "13512495939654254842"
+    ],
+    "why_is_the_configuration_set_to_a_single_voice?": [
+      "2106781630210245445"
+    ],
+    "how_do_i_implement_post-processing_projection_matrix_in_pca_": [
+      "15070457118249189425"
+    ],
+    "what_is_the_mcaf_damage_expansion_architecture?": [
+      "10248830615902224599"
+    ],
+    "how_do_i_ensure_a_self-contained_package_using_rsync?": [
+      "11792707402732667394"
+    ],
+    "what_is_the_compact_memory_notation?": [
+      "17475104458537960106"
+    ],
+    "how_do_i_implement_a_bell_curve_appraisal_strategy?": [
+      "2117689519997197740"
+    ],
+    "how_does_hnsw_build_or_distillation_affect_rpc_calls_and_lat": [
+      "5038657028084465705"
+    ],
+    "what_is_my_architecture_for_pre-computing_rasters_and_using_": [
+      "1991994201113362513"
+    ],
+    "mh_how_should_we_handle_commit_decisions_on": [
+      "10445584626805112999"
+    ],
+    "mh_how_does_the_distillation_process_lead_t": [
+      "7699525431304651625"
+    ],
+    "mh_how_is_the_thinker-worker-verifier_taxon": [
+      "16411663009790820744"
+    ],
+    "mh_how_can_trinity_roles_be_used_to_optimiz": [
+      "16411663009790820658"
+    ],
+    "mh_how_should_i_locate_code_structures_and_": [
+      "17475104458537960222"
+    ],
+    "mh_does_the_deployment_strategy_for_direct_": [
+      "2106781630210245436",
+      "1706963219114885349"
+    ],
+    "mh_how_should_deployment-and-execution_pipe": [
+      "8900700313661472808",
+      "7678172395802198888"
+    ],
+    "mh_how_should_i_adjust_phylogenetic_tree_la": [
+      "11792707402732667155",
+      "11792707402732667245"
+    ],
+    "mh_how_should_we_style_key_taxa_and_layout_": [
+      "11792707402732667241"
+    ],
+    "mh_how_do_current_data_mining_trends_influe": [
+      "2117689519997205759",
+      "2319457621750317948"
+    ],
+    "abs_how_to_configure_kubernetes_ingress_for_": [],
+    "abs_what_is_the_mating_season_of_arctic_foxe": [],
+    "abs_recipe_for_sourdough_bread_with_spelt_fl": [],
+    "abs_history_of_the_byzantine_empire_trade_ro": [],
+    "abs_how_does_crispr_base_editing_differ_from": [],
+    "abs_best_practices_for_react_server_componen": [],
+    "abs_how_to_migrate_from_mysql_5.7_to_postgre": [],
+    "abs_what_caused_the_1929_stock_market_crash": [],
+    "abs_how_does_gradient_descent_find_local_min": [],
+    "abs_how_to_train_a_gan_for_image_super-resol": []
+  },
+  "meta": [
+    {
+      "query": "How should protein splits be used for training the classifier?",
+      "label": "how_should_protein_splits_be_used_for_training_the_classifie",
+      "memory_id": "1991994201113362520",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I identify empty nodes using tmon?",
+      "label": "how_do_i_identify_empty_nodes_using_tmon?",
+      "memory_id": "4179701334531899419",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "What does the mcp configuration change error mean?",
+      "label": "what_does_the_mcp_configuration_change_error_mean?",
+      "memory_id": "5918348170907090948",
+      "realm": "project:opencode-bridge",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I fix the bgzf_mt-configuration error in bam2mcaf?",
+      "label": "how_do_i_fix_the_bgzf_mt-configuration_error_in_bam2mcaf?",
+      "memory_id": "7731467412322648126",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the design proposal for the generator-only setup?",
+      "label": "what_is_the_design_proposal_for_the_generator-only_setup?",
+      "memory_id": "16612211345126850871",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the memory capacity of modern Hopfield networks?",
+      "label": "what_is_the_memory_capacity_of_modern_hopfield_networks?",
+      "memory_id": "4065629442691563523",
+      "realm": "research",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the status of the Clonal-collapse step 3 fix?",
+      "label": "what_is_the_status_of_the_clonal-collapse_step_3_fix?",
+      "memory_id": "15005192852508508233",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I prevent the session from forgetting protocols?",
+      "label": "how_do_i_prevent_the_session_from_forgetting_protocols?",
+      "memory_id": "11024999496269431228",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What compression methods are used for variant streams and structural columns?",
+      "label": "what_compression_methods_are_used_for_variant_streams_and_st",
+      "memory_id": "846867757206077717",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What was the milestone regarding the bug fix?",
+      "label": "what_was_the_milestone_regarding_the_bug_fix?",
+      "memory_id": "9372139769728862542",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How to maintain a unified codex and Claude architecture?",
+      "label": "how_to_maintain_a_unified_codex_and_claude_architecture?",
+      "memory_id": "16503659830586638362",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I optimize MCAF for asymmetric, read-heavy workloads?",
+      "label": "how_can_i_optimize_mcaf_for_asymmetric,_read-heavy_workloads",
+      "memory_id": "10756680085990802872",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "Where is the arithmetic sequence tool defined in stats_compute.cpp?",
+      "label": "where_is_the_arithmetic_sequence_tool_defined_in_stats_compu",
+      "memory_id": "5568341523495387157",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "Did the ref_id tracking optimization reduce block decoding time?",
+      "label": "did_the_ref_id_tracking_optimization_reduce_block_decoding_t",
+      "memory_id": "11792162654850646938",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What error in rooms.py disables adaptive stopping?",
+      "label": "what_error_in_rooms.py_disables_adaptive_stopping?",
+      "memory_id": "16612211345126850672",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What were the details of my last sbatch resubmission?",
+      "label": "what_were_the_details_of_my_last_sbatch_resubmission?",
+      "memory_id": "3275981297092132892",
+      "realm": "foldseek-cluster",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does brahman-fallback mitigate misdetection risk in realm-scoping?",
+      "label": "how_does_brahman-fallback_mitigate_misdetection_risk_in_real",
+      "memory_id": "5038657028084465722",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What was the error handling fix in archive.cpp?",
+      "label": "what_was_the_error_handling_fix_in_archive.cpp?",
+      "memory_id": "10756680085990802522",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I validate schema fields against existing inventory only?",
+      "label": "how_can_i_validate_schema_fields_against_existing_inventory_",
+      "memory_id": "10316252213650916065",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the Dell XPS 13 configuration options?",
+      "label": "what_are_the_dell_xps_13_configuration_options?",
+      "memory_id": "2117689519997192569",
+      "realm": "lme/0bc8ad92",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I prevent unalignable contamination in ZP profiles?",
+      "label": "how_do_i_prevent_unalignable_contamination_in_zp_profiles?",
+      "memory_id": "8500738545147707463",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I make the NativeDistiller distillation process interruptible?",
+      "label": "how_can_i_make_the_nativedistiller_distillation_process_inte",
+      "memory_id": "12492674913204699217",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How much memory is the process currently using?",
+      "label": "how_much_memory_is_the_process_currently_using?",
+      "memory_id": "16503659830586638374",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does thinking_extract.cpp handle LLM call failures?",
+      "label": "how_does_thinking_extract.cpp_handle_llm_call_failures?",
+      "memory_id": "4770829997151617044",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I access the ancient.yml extension schema?",
+      "label": "how_can_i_access_the_ancient.yml_extension_schema?",
+      "memory_id": "10316252213650916323",
+      "realm": "project:smdb-mcp\n",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is the MMCAF READ_INDEX partitioned in the CA architecture?",
+      "label": "how_is_the_mmcaf_read_index_partitioned_in_the_ca_architectu",
+      "memory_id": "11024999496269430980",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the single root cause for these three failures?",
+      "label": "what_is_the_single_root_cause_for_these_three_failures?",
+      "memory_id": "5296949729836400643",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does the genomics module's reference-divergence function create pseudo-damage?",
+      "label": "how_does_the_genomics_module's_reference-divergence_function",
+      "memory_id": "2106781630210244707",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the issue with absent matrix rows at workerB?",
+      "label": "what_is_the_issue_with_absent_matrix_rows_at_workerb?",
+      "memory_id": "4236524911499149785",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I stream only target rows from large gzipped TSVs?",
+      "label": "how_do_i_stream_only_target_rows_from_large_gzipped_tsvs?",
+      "memory_id": "4236524911499149726",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Where is the reference base sequence stored in the database?",
+      "label": "where_is_the_reference_base_sequence_stored_in_the_database?",
+      "memory_id": "6583290613922267147",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the hardware specifications for each node in the cluster?",
+      "label": "what_are_the_hardware_specifications_for_each_node_in_the_cl",
+      "memory_id": "11483800603046445344",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I visualize observed versus model damage profiles?",
+      "label": "how_do_i_visualize_observed_versus_model_damage_profiles?",
+      "memory_id": "15922626153588719629",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I filter machine-readable tags using boolean and string schemas?",
+      "label": "how_can_i_filter_machine-readable_tags_using_boolean_and_str",
+      "memory_id": "10316252213650916006",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I define the time-to-correct-synthesis benchmark?",
+      "label": "how_do_i_define_the_time-to-correct-synthesis_benchmark?",
+      "memory_id": "18341722884847698141",
+      "realm": "project",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do we validate the JSON structure in fqdup profile?",
+      "label": "how_do_we_validate_the_json_structure_in_fqdup_profile?",
+      "memory_id": "4236524911499149350",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How should we highlight SAAVs and complexes in the structure?",
+      "label": "how_should_we_highlight_saavs_and_complexes_in_the_structure",
+      "memory_id": "3071079119048409090",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the MCAF-optimization ref-synopsis-skips-decoding performance memory?",
+      "label": "what_is_the_mcaf-optimization_ref-synopsis-skips-decoding_pe",
+      "memory_id": "10756680085990802866",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the cause of smart-install-exit-code-1 during deployment?",
+      "label": "what_is_the_cause_of_smart-install-exit-code-1_during_deploy",
+      "memory_id": "15315026132475052045",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How to derive local learning rules for online MAP inference?",
+      "label": "how_to_derive_local_learning_rules_for_online_map_inference?",
+      "memory_id": "4069582354497142837",
+      "realm": "research",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do zero-embedding genomes affect HNSW graph structure?",
+      "label": "how_do_zero-embedding_genomes_affect_hnsw_graph_structure?",
+      "memory_id": "10756680085990803079",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the idle nodes in the current session?",
+      "label": "what_are_the_idle_nodes_in_the_current_session?",
+      "memory_id": "5635631334467567837",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the formula for damage shrinkage in ARCH estimation?",
+      "label": "what_is_the_formula_for_damage_shrinkage_in_arch_estimation?",
+      "memory_id": "8264094759195246781",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "Which cluster has higher CPU availability according to sinfo?",
+      "label": "which_cluster_has_higher_cpu_availability_according_to_sinfo",
+      "memory_id": "5635631334467567816",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What parameters does the cortical-params configuration map to?",
+      "label": "what_parameters_does_the_cortical-params_configuration_map_t",
+      "memory_id": "2106781630210245222",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the session memory for chaos-nodes?",
+      "label": "what_is_the_session_memory_for_chaos-nodes?",
+      "memory_id": "5635631334467567813",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "Where is the damage estimation file located?",
+      "label": "where_is_the_damage_estimation_file_located?",
+      "memory_id": "17475104458537959978",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I link any page to any OData service?",
+      "label": "how_can_i_link_any_page_to_any_odata_service?",
+      "memory_id": "13691321210875412914",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Are protein-level metrics primary for paper functionality?",
+      "label": "are_protein-level_metrics_primary_for_paper_functionality?",
+      "memory_id": "13512495939654254980",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is performance measured during the tuning methodology?",
+      "label": "how_is_performance_measured_during_the_tuning_methodology?",
+      "memory_id": "2106781630210245452",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I handle nested version directories in emi-tsv-structure?",
+      "label": "how_do_i_handle_nested_version_directories_in_emi-tsv-struct",
+      "memory_id": "13512495939654254631",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What replaces manual-mem_bytes-estimation in the memory?",
+      "label": "what_replaces_manual-mem_bytes-estimation_in_the_memory?",
+      "memory_id": "16373682459373469722",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the consequences of writing without metadata?",
+      "label": "what_are_the_consequences_of_writing_without_metadata?",
+      "memory_id": "5452677010537054212",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Which ancient protein source corresponds to barley protein Q8H6E0?",
+      "label": "which_ancient_protein_source_corresponds_to_barley_protein_q",
+      "memory_id": "13691321210875412603",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does ref_scanned-bitmap prevent duplicate processing?",
+      "label": "how_does_ref_scanned-bitmap_prevent_duplicate_processing?",
+      "memory_id": "11792162654850646648",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What issues from the audit need to be fixed?",
+      "label": "what_issues_from_the_audit_need_to_be_fixed?",
+      "memory_id": "17352167449256001557",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does geodesic handle distributed execution for cluster nodes?",
+      "label": "how_does_geodesic_handle_distributed_execution_for_cluster_n",
+      "memory_id": "10445584626805113750",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does ntdb.cpp convert raw NCBI dumps to zstd blobs?",
+      "label": "how_does_ntdb.cpp_convert_raw_ncbi_dumps_to_zstd_blobs?",
+      "memory_id": "5707379467521884317",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I convert the encoding dictionary to human-readable schema?",
+      "label": "how_do_i_convert_the_encoding_dictionary_to_human-readable_s",
+      "memory_id": "7731467412322648723",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does CpG depletion indicate deamination in ancient DNA?",
+      "label": "how_does_cpg_depletion_indicate_deamination_in_ancient_dna?",
+      "memory_id": "2106781630210245002",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does routing alignments to the LCA taxon avoid misassignment?",
+      "label": "how_does_routing_alignments_to_the_lca_taxon_avoid_misassign",
+      "memory_id": "10738318185972367478",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do short molecules affect the exclusion signal in ancient DNA?",
+      "label": "how_do_short_molecules_affect_the_exclusion_signal_in_ancien",
+      "memory_id": "2106781630210244898",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the embedding for the milestone?",
+      "label": "what_is_the_embedding_for_the_milestone?",
+      "memory_id": "5041864389402034192",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Which metrics outperform precision@5 in this memory?",
+      "label": "which_metrics_outperform_precision@5_in_this_memory?",
+      "memory_id": "16859570902684139558",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I see if changes are local or pushed?",
+      "label": "how_can_i_see_if_changes_are_local_or_pushed?",
+      "memory_id": "17343318394992066675",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the synth workflow process?",
+      "label": "what_is_the_synth_workflow_process?",
+      "memory_id": "4236524911499149976",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does conditioning bases 1 and 2 affect DNA artifacts?",
+      "label": "how_does_conditioning_bases_1_and_2_affect_dna_artifacts?",
+      "memory_id": "2106781630210244849",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is the 4-way participant configuration defined in agenda.yaml?",
+      "label": "how_is_the_4-way_participant_configuration_defined_in_agenda",
+      "memory_id": "5169070557521510435",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I replace keyword matching with memory ID nDCG?",
+      "label": "how_do_i_replace_keyword_matching_with_memory_id_ndcg?",
+      "memory_id": "17041385651531939912",
+      "realm": "project:chitta-field",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is damage stats weighting calculated by ZP profile?",
+      "label": "how_is_damage_stats_weighting_calculated_by_zp_profile?",
+      "memory_id": "8500738545147707492",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I retrieve the taxon-marginal ZP abundance architecture?",
+      "label": "how_do_i_retrieve_the_taxon-marginal_zp_abundance_architectu",
+      "memory_id": "9491912831222677534",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I confirm my identity configuration settings?",
+      "label": "how_do_i_confirm_my_identity_configuration_settings?",
+      "memory_id": "7699525431304651625",
+      "realm": "project:opencode-bridge",
+      "type": "single_hop"
+    },
+    {
+      "query": "What value of pi was used in the DNA analysis?",
+      "label": "what_value_of_pi_was_used_in_the_dna_analysis?",
+      "memory_id": "2106781630210244755",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Where was the damage_estimation.cpp file actually located?",
+      "label": "where_was_the_damage_estimation.cpp_file_actually_located?",
+      "memory_id": "17475104458537959824",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I run the MMseqs2 sequence-vs-sequence search?",
+      "label": "how_do_i_run_the_mmseqs2_sequence-vs-sequence_search?",
+      "memory_id": "11792707402732667444",
+      "realm": "project:2025-kapk-microbial",
+      "type": "single_hop"
+    },
+    {
+      "query": "Explain the graph edges, expression entries, and table structure.",
+      "label": "explain_the_graph_edges,_expression_entries,_and_table_struc",
+      "memory_id": "13691321210875412802",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is gtdbtk parallel chunk execution configured?",
+      "label": "how_is_gtdbtk_parallel_chunk_execution_configured?",
+      "memory_id": "5145065907994755075",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How are single-scalar verdicts and sub-verdicts with provenance structured?",
+      "label": "how_are_single-scalar_verdicts_and_sub-verdicts_with_provena",
+      "memory_id": "2106781630210245644",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I find savefig patterns in my scripts?",
+      "label": "how_do_i_find_savefig_patterns_in_my_scripts?",
+      "memory_id": "13512495939654254596",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I enable show-error-and-fix-on-failure in execution?",
+      "label": "how_do_i_enable_show-error-and-fix-on-failure_in_execution?",
+      "memory_id": "4236524911499149603",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I prevent chain corruption during distillation-lock release?",
+      "label": "how_do_i_prevent_chain_corruption_during_distillation-lock_r",
+      "memory_id": "10039566052460856958",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What advantage does the reference-based approach offer for identifying damage?",
+      "label": "what_advantage_does_the_reference-based_approach_offer_for_i",
+      "memory_id": "17475104458537960073",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I embed toolchain parameters in file metadata?",
+      "label": "how_do_i_embed_toolchain_parameters_in_file_metadata?",
+      "memory_id": "7731467412322648951",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the difference between ref-centric partitioning and read-centric access?",
+      "label": "what_is_the_difference_between_ref-centric_partitioning_and_",
+      "memory_id": "10756680085990802870",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the architecture of Kaiku?",
+      "label": "what_is_the_architecture_of_kaiku?",
+      "memory_id": "8671174022957891955",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the MCAF optimization settings for sparse batching?",
+      "label": "what_are_the_mcaf_optimization_settings_for_sparse_batching?",
+      "memory_id": "10756680085990802862",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the current status of the extraction source upgrade?",
+      "label": "what_is_the_current_status_of_the_extraction_source_upgrade?",
+      "memory_id": "6019566685919379492",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What was the last pipeline job submitted in the memory?",
+      "label": "what_was_the_last_pipeline_job_submitted_in_the_memory?",
+      "memory_id": "5228975945322332189",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the chaos nodes for dandycomp01fl and 08fl?",
+      "label": "what_are_the_chaos_nodes_for_dandycomp01fl_and_08fl?",
+      "memory_id": "13439096451804168197",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I reduce injected context over time?",
+      "label": "how_can_i_reduce_injected_context_over_time?",
+      "memory_id": "4946404832828194824",
+      "realm": "project:opencode-bridge",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the current status of the system?",
+      "label": "what_is_the_current_status_of_the_system?",
+      "memory_id": "2106781630210245667",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I fix my Ollama GPU and model configuration?",
+      "label": "how_do_i_fix_my_ollama_gpu_and_model_configuration?",
+      "memory_id": "2106781630210245058",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How is the tiered portfolio architecture for AF multimer campaigns structured?",
+      "label": "how_is_the_tiered_portfolio_architecture_for_af_multimer_cam",
+      "memory_id": "1991994201113362515",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What was the recent fix for metadata lookup?",
+      "label": "what_was_the_recent_fix_for_metadata_lookup?",
+      "memory_id": "11792707402732667121",
+      "realm": "project:2025-kapk-microbial",
+      "type": "single_hop"
+    },
+    {
+      "query": "Should I use supersession or deletion to preserve provenance chains?",
+      "label": "should_i_use_supersession_or_deletion_to_preserve_provenance",
+      "memory_id": "7057271466563207389",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I fix the JSON structure and naming errors?",
+      "label": "how_can_i_fix_the_json_structure_and_naming_errors?",
+      "memory_id": "389174567307837454",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Is single-threaded better than multithreaded for performance optimization?",
+      "label": "is_single-threaded_better_than_multithreaded_for_performance",
+      "memory_id": "10728692180714520588",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How should the amplitude be computed for terminal CT excess?",
+      "label": "how_should_the_amplitude_be_computed_for_terminal_ct_excess?",
+      "memory_id": "6970676859927265294",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does damage cross-fitting prevent mode collapse?",
+      "label": "how_does_damage_cross-fitting_prevent_mode_collapse?",
+      "memory_id": "7269634522491125767",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "Do A-B base pairs share deamination chemistry in ancient DNA?",
+      "label": "do_a-b_base_pairs_share_deamination_chemistry_in_ancient_dna",
+      "memory_id": "2106781630210244855",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the synthesizer workflow and its steps?",
+      "label": "what_is_the_synthesizer_workflow_and_its_steps?",
+      "memory_id": "4236524911499150069",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What was the recent deployment process for denbi?",
+      "label": "what_was_the_recent_deployment_process_for_denbi?",
+      "memory_id": "13512495939654254716",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I find fixed columns for counts in side-table metadata?",
+      "label": "how_do_i_find_fixed_columns_for_counts_in_side-table_metadat",
+      "memory_id": "9881291581275766832",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How to fix ggarrange vertical alignment warnings in R?",
+      "label": "how_to_fix_ggarrange_vertical_alignment_warnings_in_r?",
+      "memory_id": "15814940023419043847",
+      "realm": "project:mediterranean-microbial-analysis",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the current classifier strategy being used?",
+      "label": "what_is_the_current_classifier_strategy_being_used?",
+      "memory_id": "13056329417356214297",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the names of the newly added schema columns?",
+      "label": "what_are_the_names_of_the_newly_added_schema_columns?",
+      "memory_id": "9617934554736099379",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I access the pre-alignment damage prior in kdamage?",
+      "label": "how_do_i_access_the_pre-alignment_damage_prior_in_kdamage?",
+      "memory_id": "7678172395802199185",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I fix the contaminated genome length bug?",
+      "label": "how_do_i_fix_the_contaminated_genome_length_bug?",
+      "memory_id": "10445584626805112975",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the policy regarding running compute jobs on login nodes?",
+      "label": "what_is_the_policy_regarding_running_compute_jobs_on_login_n",
+      "memory_id": "1555967557855346741",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Who is responsible for the 16,222 accession production pipeline?",
+      "label": "who_is_responsible_for_the_16,222_accession_production_pipel",
+      "memory_id": "1179957846993799828",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Why does encoding a 256 dim embedding cause a panic?",
+      "label": "why_does_encoding_a_256_dim_embedding_cause_a_panic?",
+      "memory_id": "1555967557855346758",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the issue with rates[p]>0.0 in damage.cpp?",
+      "label": "what_is_the_issue_with_rates[p]>0.0_in_damage.cpp?",
+      "memory_id": "15534201689434227731",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Analyze token usage for session ID 12345.",
+      "label": "analyze_token_usage_for_session_id_12345.",
+      "memory_id": "13691321210875413001",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Does the watchdog measure task duration or queue wait time?",
+      "label": "does_the_watchdog_measure_task_duration_or_queue_wait_time?",
+      "memory_id": "6094165942818832495",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does HNSW index distillation affect RPCs and latency?",
+      "label": "how_does_hnsw_index_distillation_affect_rpcs_and_latency?",
+      "memory_id": "5038657028084465686",
+      "realm": "project:smdb-mcp",
+      "type": "single_hop"
+    },
+    {
+      "query": "What enables metadata extraction in bam2mcaf.cpp?",
+      "label": "what_enables_metadata_extraction_in_bam2mcaf.cpp?",
+      "memory_id": "7731467412322648908",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I replace the contig count prefilter with average size?",
+      "label": "how_do_i_replace_the_contig_count_prefilter_with_average_siz",
+      "memory_id": "10445584626805112976",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I visualize a focal subtree with full tree supplement?",
+      "label": "how_do_i_visualize_a_focal_subtree_with_full_tree_supplement",
+      "memory_id": "11792707402732666903",
+      "realm": "project:2025-kapk-microbial",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the difference between distillation and hook regex in POLICY.md?",
+      "label": "what_is_the_difference_between_distillation_and_hook_regex_i",
+      "memory_id": "6019566685919379483",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What causes indefinite hangs or OOM in cmd_profile.cpp?",
+      "label": "what_causes_indefinite_hangs_or_oom_in_cmd_profile.cpp?",
+      "memory_id": "11792162654850646166",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the memory entry for distillation-llm to gemma4?",
+      "label": "what_is_the_memory_entry_for_distillation-llm_to_gemma4?",
+      "memory_id": "4758927169600618535",
+      "realm": "project:opencode-bridge",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the error handling for do_pread in genopack?",
+      "label": "what_is_the_error_handling_for_do_pread_in_genopack?",
+      "memory_id": "10756680085990802518",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I retrieve the top-level key in the JSON?",
+      "label": "how_can_i_retrieve_the_top-level_key_in_the_json?",
+      "memory_id": "1179957846993798435",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How much time was saved by using two jobs per node?",
+      "label": "how_much_time_was_saved_by_using_two_jobs_per_node?",
+      "memory_id": "5155313781567389824",
+      "realm": "project:geodesic",
+      "type": "single_hop"
+    },
+    {
+      "query": "Why can't RRF fix misaligned embedding spaces in semantic bridges?",
+      "label": "why_can't_rrf_fix_misaligned_embedding_spaces_in_semantic_br",
+      "memory_id": "2106781630210244753",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I extract key facts from raw episode memories?",
+      "label": "how_can_i_extract_key_facts_from_raw_episode_memories?",
+      "memory_id": "12492674913204699383",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I apply minimal edits and one-line fixes?",
+      "label": "how_do_i_apply_minimal_edits_and_one-line_fixes?",
+      "memory_id": "16612211345126850802",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the default state for newly added scoring keys?",
+      "label": "what_is_the_default_state_for_newly_added_scoring_keys?",
+      "memory_id": "2106781630210244938",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How much does HippoRAG 2 improve associative memory tasks?",
+      "label": "how_much_does_hipporag_2_improve_associative_memory_tasks?",
+      "memory_id": "4069582354497142801",
+      "realm": "research",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does the alignment pool layout optimize cache locality?",
+      "label": "how_does_the_alignment_pool_layout_optimize_cache_locality?",
+      "memory_id": "11024999496269431500",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How to rename tree tips and labels while keeping metadata?",
+      "label": "how_to_rename_tree_tips_and_labels_while_keeping_metadata?",
+      "memory_id": "11792707402732667156",
+      "realm": "project:2025-kapk-microbial",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the deployment name for the blocked ssh mode?",
+      "label": "what_is_the_deployment_name_for_the_blocked_ssh_mode?",
+      "memory_id": "13512495939654254693",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How should we generate synthetic damage for stress testing?",
+      "label": "how_should_we_generate_synthetic_damage_for_stress_testing?",
+      "memory_id": "7929499506708579196",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How can I use READ_INDEX to avoid alns vector collection?",
+      "label": "how_can_i_use_read_index_to_avoid_alns_vector_collection?",
+      "memory_id": "11792162654850646907",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I check if systemd is using a stale binary?",
+      "label": "how_do_i_check_if_systemd_is_using_a_stale_binary?",
+      "memory_id": "7598981690014302225",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the status of the provenance feature reader implementation?",
+      "label": "what_is_the_status_of_the_provenance_feature_reader_implemen",
+      "memory_id": "11024999496269430847",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I implement the recall-first workflow with reduced exploration?",
+      "label": "how_do_i_implement_the_recall-first_workflow_with_reduced_ex",
+      "memory_id": "10445584626805115084",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does the dream_wander selection process work?",
+      "label": "how_does_the_dream_wander_selection_process_work?",
+      "memory_id": "12492674913204699219",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the benefit of using mmap and munmap?",
+      "label": "what_is_the_benefit_of_using_mmap_and_munmap?",
+      "memory_id": "16373682459373469748",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "What are the parameters for the structureclusterupdate job?",
+      "label": "what_are_the_parameters_for_the_structureclusterupdate_job?",
+      "memory_id": "15534201689434227237",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I find the applied-6-codex-review-tasks fix?",
+      "label": "how_do_i_find_the_applied-6-codex-review-tasks_fix?",
+      "memory_id": "6271254668567904264",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "Where is the protein vs read metrics evaluation table?",
+      "label": "where_is_the_protein_vs_read_metrics_evaluation_table?",
+      "memory_id": "13512495939654254842",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "Why is the configuration set to a single voice?",
+      "label": "why_is_the_configuration_set_to_a_single_voice?",
+      "memory_id": "2106781630210245445",
+      "realm": "brahman",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I implement post-processing projection matrix in PCA whitening?",
+      "label": "how_do_i_implement_post-processing_projection_matrix_in_pca_",
+      "memory_id": "15070457118249189425",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the MCAF damage expansion architecture?",
+      "label": "what_is_the_mcaf_damage_expansion_architecture?",
+      "memory_id": "10248830615902224599",
+      "realm": "project:kaiku",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I ensure a self-contained package using rsync?",
+      "label": "how_do_i_ensure_a_self-contained_package_using_rsync?",
+      "memory_id": "11792707402732667394",
+      "realm": "project:2025-kapk-microbial",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is the compact memory notation?",
+      "label": "what_is_the_compact_memory_notation?",
+      "memory_id": "17475104458537960106",
+      "realm": "project:chitta-field",
+      "type": "single_hop"
+    },
+    {
+      "query": "How do I implement a bell curve appraisal strategy?",
+      "label": "how_do_i_implement_a_bell_curve_appraisal_strategy?",
+      "memory_id": "2117689519997197740",
+      "realm": "lme/gpt4_8279ba02",
+      "type": "single_hop"
+    },
+    {
+      "query": "How does HNSW build or distillation affect RPC calls and latency?",
+      "label": "how_does_hnsw_build_or_distillation_affect_rpc_calls_and_lat",
+      "memory_id": "5038657028084465705",
+      "realm": "project:smdb-mcp",
+      "type": "single_hop"
+    },
+    {
+      "query": "What is my architecture for pre-computing rasters and using COGs?",
+      "label": "what_is_my_architecture_for_pre-computing_rasters_and_using_",
+      "memory_id": "1991994201113362513",
+      "realm": "project:cc-soul",
+      "type": "single_hop"
+    },
+    {
+      "query": "How should we handle commit decisions on cancel and distinguish fragmented from chimeric?",
+      "label": "mh_how_should_we_handle_commit_decisions_on",
+      "memory_ids": [
+        "10445584626805112999"
+      ],
+      "realm": "project:geodesic",
+      "type": "multihop"
+    },
+    {
+      "query": "How does the distillation process lead to the confirmation of identity configuration?",
+      "label": "mh_how_does_the_distillation_process_lead_t",
+      "memory_ids": [
+        "7699525431304651625"
+      ],
+      "realm": "project:opencode-bridge",
+      "type": "multihop"
+    },
+    {
+      "query": "How is the thinker-worker-verifier taxonomy optimized through the distillation and summarization process?",
+      "label": "mh_how_is_the_thinker-worker-verifier_taxon",
+      "memory_ids": [
+        "16411663009790820744"
+      ],
+      "realm": "project:opencode-bridge",
+      "type": "multihop"
+    },
+    {
+      "query": "How can TRINITY roles be used to optimize thinking-block distillation into insights?",
+      "label": "mh_how_can_trinity_roles_be_used_to_optimiz",
+      "memory_ids": [
+        "16411663009790820658"
+      ],
+      "realm": "project:opencode-bridge",
+      "type": "multihop"
+    },
+    {
+      "query": "How should I locate code structures and decide between local or Slurm parallelism?",
+      "label": "mh_how_should_i_locate_code_structures_and_",
+      "memory_ids": [
+        "17475104458537960222"
+      ],
+      "realm": "brahman",
+      "type": "multihop"
+    },
+    {
+      "query": "Does the deployment strategy for direct hot path integration require A/B testing confirmation?",
+      "label": "mh_does_the_deployment_strategy_for_direct_",
+      "memory_ids": [
+        "2106781630210245436",
+        "1706963219114885349"
+      ],
+      "realm": "brahman",
+      "type": "multihop"
+    },
+    {
+      "query": "How should deployment-and-execution pipelines handle bioinformatics thresholds regarding fixed taxonomic heuristics?",
+      "label": "mh_how_should_deployment-and-execution_pipe",
+      "memory_ids": [
+        "8900700313661472808",
+        "7678172395802198888"
+      ],
+      "realm": "project:kaiku",
+      "type": "multihop"
+    },
+    {
+      "query": "How should I adjust phylogenetic tree layouts for rectangular and circular visualizations?",
+      "label": "mh_how_should_i_adjust_phylogenetic_tree_la",
+      "memory_ids": [
+        "11792707402732667155",
+        "11792707402732667245"
+      ],
+      "realm": "project:2025-kapk-microbial",
+      "type": "multihop"
+    },
+    {
+      "query": "How should I adjust phylogenetic tree layouts for rectangular and circular visualizations?",
+      "label": "mh_how_should_i_adjust_phylogenetic_tree_la",
+      "memory_ids": [
+        "11792707402732667155",
+        "11792707402732667245"
+      ],
+      "realm": "project:2025-kapk-microbial",
+      "type": "multihop"
+    },
+    {
+      "query": "How should we style key taxa and layout large counts in phylogenetic trees?",
+      "label": "mh_how_should_we_style_key_taxa_and_layout_",
+      "memory_ids": [
+        "11792707402732667241"
+      ],
+      "realm": "project:2025-kapk-microbial",
+      "type": "multihop"
+    },
+    {
+      "query": "How do current data mining trends influence the development of new data mining applications?",
+      "label": "mh_how_do_current_data_mining_trends_influe",
+      "memory_ids": [
+        "2117689519997205759",
+        "2319457621750317948"
+      ],
+      "realm": "lme/6e984301",
+      "type": "multihop"
+    },
+    {
+      "query": "how to configure kubernetes ingress for rust services",
+      "label": "abs_how_to_configure_kubernetes_ingress_for_",
+      "type": "abstention"
+    },
+    {
+      "query": "what is the mating season of arctic foxes",
+      "label": "abs_what_is_the_mating_season_of_arctic_foxe",
+      "type": "abstention"
+    },
+    {
+      "query": "recipe for sourdough bread with spelt flour",
+      "label": "abs_recipe_for_sourdough_bread_with_spelt_fl",
+      "type": "abstention"
+    },
+    {
+      "query": "history of the Byzantine Empire trade routes",
+      "label": "abs_history_of_the_byzantine_empire_trade_ro",
+      "type": "abstention"
+    },
+    {
+      "query": "how does CRISPR base editing differ from prime editing",
+      "label": "abs_how_does_crispr_base_editing_differ_from",
+      "type": "abstention"
+    },
+    {
+      "query": "best practices for React server components in Next.js 15",
+      "label": "abs_best_practices_for_react_server_componen",
+      "type": "abstention"
+    },
+    {
+      "query": "how to migrate from MySQL 5.7 to PostgreSQL 16",
+      "label": "abs_how_to_migrate_from_mysql_5.7_to_postgre",
+      "type": "abstention"
+    },
+    {
+      "query": "what caused the 1929 stock market crash",
+      "label": "abs_what_caused_the_1929_stock_market_crash",
+      "type": "abstention"
+    },
+    {
+      "query": "how does gradient descent find local minima in neural networks",
+      "label": "abs_how_does_gradient_descent_find_local_min",
+      "type": "abstention"
+    },
+    {
+      "query": "how to train a GAN for image super-resolution",
+      "label": "abs_how_to_train_a_gan_for_image_super-resol",
+      "type": "abstention"
+    }
+  ]
+}

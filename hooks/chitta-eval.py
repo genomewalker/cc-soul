@@ -251,12 +251,15 @@ def main():
     ap.add_argument("--include-g0", action="store_true",
                     help="Include G0 (grade-recall.py) queries in eval")
     ap.add_argument("--out", default=str(RESULTS_PATH))
+    ap.add_argument("--goldids", default=str(GOLDIDS_PATH),
+                    help="Gold IDs file (default: hooks/chitta-eval-goldids.json)")
     args = ap.parse_args()
 
+    goldids_path = Path(args.goldids)
     use_reranker = not args.no_reranker
 
     # Load queries
-    queries = load_queries(GOLDIDS_PATH)
+    queries = load_queries(goldids_path)
     if args.include_g0 or not queries:
         g0 = load_g0_queries(G0_GOLDIDS_PATH)
         seen = {q["label"] for q in queries}
@@ -269,10 +272,10 @@ def main():
     if args.bootstrap:
         print(f"Bootstrapping {len(queries)} queries with strategy={args.strategy}...")
         ids = bootstrap_goldids(queries, args.limit, args.strategy)
-        existing = json.loads(GOLDIDS_PATH.read_text()) if GOLDIDS_PATH.exists() else {}
+        existing = json.loads(goldids_path.read_text()) if goldids_path.exists() else {}
         existing["ids"] = ids
-        GOLDIDS_PATH.write_text(json.dumps(existing, indent=2))
-        print(f"Updated gold IDs → {GOLDIDS_PATH}")
+        goldids_path.write_text(json.dumps(existing, indent=2))
+        print(f"Updated gold IDs → {goldids_path}")
         return
 
     strategies = args.compare if args.compare else [args.strategy]

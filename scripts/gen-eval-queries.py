@@ -51,6 +51,7 @@ def ollama_generate(prompt: str) -> str:
         "model": OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        "think": False,  # generation-only task; thinking models burn num_predict on reasoning → empty content
         "options": {"num_predict": 60, "temperature": 0.3},
     }).encode()
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
@@ -81,7 +82,7 @@ def sample_memories(realm: str | None, n: int) -> list[dict]:
     for seed in seeds:
         if len(memories) >= n * 2:
             break
-        kwargs: dict = {"query": seed, "limit": per_seed, "strategy": "priority"}
+        kwargs: dict = {"query": seed, "limit": per_seed, "strategy": "hybrid"}
         if realm:
             kwargs["realm"] = realm
         result = chitta("recall", **kwargs)
