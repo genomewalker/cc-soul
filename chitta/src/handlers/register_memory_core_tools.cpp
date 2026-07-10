@@ -588,6 +588,11 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["densify_backfill"] = [this](const json& p) { return tool_densify_backfill(p); };
 
+    tools_.push_back({{"name","semantic_backfill"},{"description","Dense-kNN SemanticNeighbor edge backfill: for each non-deleted memory, link its top-k realm-scoped HNSW neighbors (cosine>=min_cos) with bidirectional similarity edges (wire 6). The first genuine memory<->memory knowledge relation in the assoc graph, distinct from CoRetrieved's retrieval-history prior. apply=false is a dry run (counts candidate edges, no writes). apply=true creates them (idempotent; rollback via remove_assoc_edges_by_type edge_type=6)."},
+        {"inputSchema",{{"type","object"},{"properties",{{"apply",{{"type","boolean"}}},{"k",{{"type","integer"}}},{"min_cos",{{"type","number"}}}}}}}
+    });
+    handlers_["semantic_backfill"] = [this](const json& p) { return tool_semantic_backfill(p); };
+
     tools_.push_back({{"name","assoc_census"},{"description","Read-only assoc-graph census: per-EdgeType directed-edge count plus weight histogram (<0.05 / 0.05-0.2 / 0.2-0.5 / 0.5-0.8 / >=0.8). Measure-first gate for plasticity levers."},
         {"inputSchema",{{"type","object"},{"properties",{}}}}
     });

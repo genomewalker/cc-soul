@@ -943,6 +943,28 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     json keyword  = hits_to_results_json(keyword_hits, explain);
     json merged   = merge_results(semantic, keyword);
 
+    // Relevance floor: drop a hit only when it HAS a semantic cosine
+    // ("similarity") but that cosine is below CHITTA_RECALL_MIN_SIM (default
+    // 0.10). A ~1%-cosine match is noise — returning such hits derailed
+    // downstream consumers (e.g. a fusion room anchored on an unrelated memory).
+    // Keyword-only hits carry no cosine (similarity==0) and are KEPT, so lexical
+    // recall is unaffected. Set CHITTA_RECALL_MIN_SIM=0 to disable.
+    {
+        static const float kMinSim = [] {
+            const char* e = std::getenv("CHITTA_RECALL_MIN_SIM");
+            float v = e ? std::strtof(e, nullptr) : 0.10f;
+            if (!(v >= 0.0f && v <= 1.0f)) v = 0.10f;
+            return v;
+        }();
+        if (kMinSim > 0.0f) {
+            merged.erase(std::remove_if(merged.begin(), merged.end(),
+                [](const nlohmann::json& r) {
+                    float sim = r.value("similarity", 0.0f);
+                    return sim > 0.0f && sim < kMinSim;
+                }), merged.end());
+        }
+    }
+
     if (merged.size() > limit) merged.erase(merged.begin() + static_cast<int>(limit), merged.end());
 
     std::ostringstream ss;
@@ -1580,6 +1602,26 @@ ToolResult FieldRpcHandler::tool_densify_backfill(const json& params) {
            << " n2=" << h.value("n2", 0) << " n3_5=" << h.value("n3_5", 0)
            << " n6_10=" << h.value("n6_10", 0) << " n11_50=" << h.value("n11_50", 0)
            << " n51+=" << h.value("n51plus", 0);
+    } else {
+        ss << raw;
+    }
+    return ToolResult::ok(ss.str(), {{"result", parsed.is_object() ? parsed : json::object()}});
+}
+
+ToolResult FieldRpcHandler::tool_semantic_backfill(const json& params) {
+    bool apply = params.value("apply", false);
+    size_t k = params.value("k", 6);
+    float min_cos = params.value("min_cos", 0.6f);
+    std::string raw = field_store_->semantic_backfill_json(apply, k, min_cos);
+    auto parsed = json::parse(raw, nullptr, false);
+    std::ostringstream ss;
+    if (parsed.is_object()) {
+        ss << "semantic_backfill apply=" << (apply ? "true" : "false")
+           << " k=" << parsed.value("k", 0)
+           << " min_cos=" << parsed.value("min_cos", 0.0)
+           << " | memories_scanned=" << parsed.value("memories_scanned", 0)
+           << " memories_with_neighbors=" << parsed.value("memories_with_neighbors", 0)
+           << " directed_edges=" << parsed.value("directed_edges", 0);
     } else {
         ss << raw;
     }

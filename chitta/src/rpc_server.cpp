@@ -232,6 +232,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"densify_backfill", "#13 retro-backfill of SameSession edges over existing session-tagged memories. Dry-run by default (counts sibling pairs + group-size histogram, no writes).",
      {{"apply", "Create the edges (default false = dry-run count only)", false, "false"}}},
 
+    {"semantic_backfill", "Dense-kNN SemanticNeighbor edge backfill: link each memory to its top-k realm-scoped HNSW neighbors (cosine>=min_cos) with bidirectional similarity edges. First real memory<->memory knowledge relation. Dry-run by default (counts, no writes).",
+     {{"apply", "Create the edges (default false = dry-run count only)", false, "false"},
+      {"k", "Neighbors per memory (default 6)", false, "6"},
+      {"min_cos", "Minimum cosine to link (default 0.6)", false, "0.6"}}},
+
     {"assoc_census", "Read-only assoc-graph census: per-EdgeType directed-edge count plus weight histogram. Measure-first gate for plasticity levers.",
      {}},
 
