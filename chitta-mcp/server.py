@@ -28,6 +28,43 @@ from concurrent.futures import ThreadPoolExecutor
 _reranker = None
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _RERANK_FETCH_MUL = 4
+_RERANK_MAX_LEN = int(os.environ.get("CHITTA_RERANK_MAX_LEN", "128"))
+# INT8 ONNX backend: rerank runs on onnxruntime CPU instead of torch when an
+# export dir (model_int8.onnx + tokenizer) is present. CHITTA_RERANK_ONNX_DIR
+# overrides; otherwise auto-detect ~/.claude/models/rerank-onnx. Falls back to
+# torch CrossEncoder if neither the dir nor onnxruntime is available.
+# Measured e2e (dev): L-6 INT8 @ 8 threads, max_len=128 → ~500ms median/recall,
+# multihop nDCG@20 0.688 (+0.146 vs 0.542 native), single_hop 0.852 (flat).
+def _resolve_onnx_dir():
+    d = os.environ.get("CHITTA_RERANK_ONNX_DIR", "")
+    if d:
+        return d
+    default = os.path.expanduser("~/.claude/models/rerank-onnx")
+    return default if os.path.isdir(default) else ""
+_RERANK_ONNX_DIR = _resolve_onnx_dir()
+
+class _OnnxReranker:
+    """onnxruntime-backed cross-encoder. Same .predict(pairs) contract as CrossEncoder."""
+    def __init__(self, model_dir):
+        import onnxruntime as ort
+        from transformers import AutoTokenizer
+        self._tok = AutoTokenizer.from_pretrained(model_dir)
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = int(os.environ.get("CHITTA_RERANK_THREADS", "8"))
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self._sess = ort.InferenceSession(
+            os.path.join(model_dir, "model_int8.onnx"), so,
+            providers=["CPUExecutionProvider"])
+        self._innames = {i.name for i in self._sess.get_inputs()}
+
+    def predict(self, pairs):
+        if not pairs:
+            return []
+        enc = self._tok([p[0] for p in pairs], [p[1] for p in pairs],
+                        padding=True, truncation=True,
+                        max_length=_RERANK_MAX_LEN, return_tensors="np")
+        feed = {k: v for k, v in enc.items() if k in self._innames}
+        return self._sess.run(None, feed)[0][:, 0]
 
 def _get_reranker():
     global _reranker
@@ -37,8 +74,11 @@ def _get_reranker():
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            from sentence_transformers import CrossEncoder
-            _reranker = CrossEncoder(_RERANKER_MODEL)
+            if _RERANK_ONNX_DIR and os.path.isdir(_RERANK_ONNX_DIR):
+                _reranker = _OnnxReranker(_RERANK_ONNX_DIR)
+            else:
+                from sentence_transformers import CrossEncoder
+                _reranker = CrossEncoder(_RERANKER_MODEL)
     except Exception:
         _reranker = False
     return _reranker if _reranker is not False else None
@@ -1949,7 +1989,7 @@ def handle_recall_gateway(arguments: dict) -> str:
     query = arguments.get("query", "")
     limit = int(arguments.get("limit", 10))
     fetch_args = dict(arguments, limit=limit * _RERANK_FETCH_MUL)
-    raw_str = daemon_call(tool, fetch_args)
+    raw_str = daemon_call(tool, fetch_args, structured=True)
     try:
         raw = json.loads(raw_str)
         results = raw.get("results", [])
