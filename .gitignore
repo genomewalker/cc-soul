@@ -141,3 +141,4 @@ unsloth_compiled_cache/
 
 # Stray in-source CMake configure output (conda host triple)
 /x86_64-conda-linux-gnu/
+chitta/build-cuda/
