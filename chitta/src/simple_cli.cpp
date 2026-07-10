@@ -31,6 +31,7 @@
 #include <chitta/vak_timeout.hpp>
 #include <chitta/hint_yantra.hpp>
 #include <chitta/embed_queue.hpp>
+#include <chitta/ops_log.hpp>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -239,6 +240,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
+    // Readable ops-log for background-cycle summaries (journal is often unreadable).
+    OpsLog::instance().init(mind_path);
+    ops_log("[daemon] started pid=" + std::to_string(getpid())
+            + " interval=" + std::to_string(interval) + "s");
+
 #ifdef __linux__
     // Record binary mtime at startup for self-update detection.
     // /proc/self/exe resolves to the actual binary path even through symlinks.
@@ -406,6 +412,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                 last_sync = now_time;
                 cycle_count++;
 
+                auto cyc_t0 = std::chrono::steady_clock::now();
                 try {
                     auto _lk = handler.acquire_shared_lock();
                     field_store.flush();
@@ -420,8 +427,18 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                     if (verbose_mode) {
                         std::cerr << "[maint] Cycle " << cycle_count << " complete\n";
                     }
+                    // Ops-log only anomalous/active cycles: a healthy flush is <250ms.
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - cyc_t0).count();
+                    if (ms > 250 || demoted > 0 || pruned > 0) {
+                        ops_log("[maint] cycle=" + std::to_string(cycle_count.load())
+                                + " demoted=" + std::to_string(demoted)
+                                + " pruned=" + std::to_string(pruned)
+                                + " elapsed=" + std::to_string(ms) + "ms");
+                    }
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
+                    ops_log(std::string("[maint] cycle failed: ") + e.what());
                 }
             }
         }
@@ -455,6 +472,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
         for (int i = 0; i < 150 && daemon_running; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
+        // Throttle for the runtime delta-sidecar persist below: the delta HNSW is
+        // written at most once per minute (init to now-60s so the first drain persists).
+        auto last_delta_persist =
+            std::chrono::steady_clock::now() - std::chrono::seconds(60);
         while (daemon_running) {
             if (embed_queue) {
                 try {
@@ -468,6 +489,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                             contents.push_back(field_store.get_content(id));
                     }
                     if (!pending.empty()) {
+                        auto bf_t0 = std::chrono::steady_clock::now();
                         std::cerr << "[backfill] Processing " << pending.size() << " memories\n";
                         // Phase 0 (OFF-LOCK): embed the whole chunk. ONNX forward passes touch
                         // no shared state. Backfill runs at nice(10) so the 30s waits never
@@ -507,11 +529,32 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                             field_store.backfill_plan();   // OFF the rpc_mutex — recall unblocked
                             { auto _lk = handler.acquire_lock();
                               field_store.backfill_apply(); }
+                            // Persist the delta HNSW tier once the backlog drains so a
+                            // restart LOADS the delta sidecar instead of cold-reinserting
+                            // it from scratch (single-threaded, ~minutes at 146k+). Runs
+                            // OFF the rpc_mutex (needs only semantic_idx.read()), gated to
+                            // a partial batch (backlog exhausted) and ≤1×/min so it never
+                            // becomes an NFS write storm during a large drain.
+                            auto now = std::chrono::steady_clock::now();
+                            if (pending.size() < 100 &&
+                                now - last_delta_persist > std::chrono::seconds(60)) {
+                                size_t np = field_store.persist_delta_hnsw();
+                                last_delta_persist = now;
+                                if (np > 0)
+                                    ops_log("[backfill] persisted delta.hnsw nodes="
+                                            + std::to_string(np));
+                            }
                         }
+                        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - bf_t0).count();
+                        ops_log("[backfill] embedded=" + std::to_string(bids.size())
+                                + "/" + std::to_string(pending.size())
+                                + " elapsed=" + std::to_string(ms) + "ms");
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode)
                         std::cerr << "[backfill] Error: " << e.what() << "\n";
+                    ops_log(std::string("[backfill] error: ") + e.what());
                 }
             }
             // Wait up to 5s for a write-notify or until shutdown.
@@ -555,11 +598,13 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                         continue;  // Still within cap, skip
                     }
                     std::cerr << "[distill] Busy-skip cap reached, running distillation anyway\n";
+                    ops_log("[distill] busy-skip cap reached — running while daemon busy");
                 }
                 last_busy_skip_start = now_time;
 
                 last_distill = now_time;
 
+                auto distill_t0 = std::chrono::steady_clock::now();
                 try {
                     // Scan transcript directory for pending transcripts
                     std::vector<TranscriptState> transcripts;
@@ -614,8 +659,17 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                         std::cerr << "[distill] Processed " << processed
                                   << " transcript(s), total=" << distill_count << "\n";
                     }
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - distill_t0).count();
+                    if (processed > 0 || ms > 1000) {
+                        ops_log("[distill] processed=" + std::to_string(processed)
+                                + "/" + std::to_string(transcripts.size())
+                                + " total=" + std::to_string(distill_count.load())
+                                + " elapsed=" + std::to_string(ms) + "ms");
+                    }
                 } catch (const std::exception& e) {
                     std::cerr << "[distill] Error: " << e.what() << "\n";
+                    ops_log(std::string("[distill] error: ") + e.what());
                 }
             }
         }
