@@ -41,17 +41,32 @@ def _load_reranker():
     return _reranker
 
 
+_RECALL_TIMEOUT_S = int(os.environ.get("CHITTA_EVAL_RECALL_TIMEOUT", "60"))
+
+
+class RecallFailure(Exception):
+    """Recall did not complete (timeout / crash / bad JSON). Distinct from an
+    empty result set — a failure must NOT be scored as a zero-gold miss, or the
+    metric measures harness load, not retrieval. See finding #5754223735221518410."""
+
+
 def chitta_recall(query: str, limit: int, strategy: str, realm: str | None = None) -> list[dict]:
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
            "--strategy", strategy, "--json"]
     if realm:
         cmd += ["--realm", realm]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        data = json.loads(r.stdout) if r.stdout.strip() else {}
-        return data.get("results", [])
-    except Exception:
-        return []
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=_RECALL_TIMEOUT_S)
+    except subprocess.TimeoutExpired as e:
+        raise RecallFailure(f"timeout {_RECALL_TIMEOUT_S}s: {query[:60]!r}") from e
+    if r.returncode != 0:
+        raise RecallFailure(f"exit {r.returncode}: {query[:60]!r} :: {r.stderr[:120]}")
+    if not r.stdout.strip():
+        raise RecallFailure(f"empty stdout: {query[:60]!r}")
+    try:
+        return json.loads(r.stdout).get("results", [])
+    except json.JSONDecodeError as e:
+        raise RecallFailure(f"bad json: {query[:60]!r}") from e
 
 
 def rerank(query: str, results: list[dict], limit: int) -> list[dict]:
@@ -89,13 +104,22 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
     fetch_limit = limit * _RERANK_FETCH_MUL if use_reranker else limit
     scores_by_type: dict[str, list[float]] = {}
     per_query = []
+    failed = []
 
     for q in queries:
         gold = set(q.get("gold_ids", []))
         qtype = q.get("type", "single_hop")
         realm = q.get("realm")
 
-        results = chitta_recall(q["query"], fetch_limit, strategy, realm)
+        try:
+            results = chitta_recall(q["query"], fetch_limit, strategy, realm)
+        except RecallFailure:
+            try:  # one retry — recall is deterministic; a failure is load/timing, not signal
+                results = chitta_recall(q["query"], fetch_limit, strategy, realm)
+            except RecallFailure as e:
+                failed.append(q["query"])
+                print(f"\033[31m[FAIL-EXCLUDED]\033[0m {e}", file=sys.stderr)
+                continue  # exclude from scoring — do NOT count a harness failure as a miss
         if use_reranker:
             results = rerank(q["query"], results, limit)
         else:
@@ -136,11 +160,16 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
     mean = sum(all_scores) / len(all_scores) if all_scores else 0.0
     ci_lo, ci_hi = bootstrap_ci(all_scores)
 
+    if failed:
+        print(f"\033[33m[warn] {len(failed)} queries EXCLUDED (recall failed, not scored)\033[0m",
+              file=sys.stderr)
+
     return {
         "strategy": strategy,
         "mean_ndcg": round(mean, 3),
         "ci_95": [round(ci_lo, 3), round(ci_hi, 3)],
         "n_queries": len(all_scores),
+        "n_failed_excluded": len(failed),
         "by_type": {k: round(sum(v)/len(v), 3) for k, v in scores_by_type.items() if v},
         "per_query": per_query,
     }

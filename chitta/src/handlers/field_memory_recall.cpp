@@ -616,7 +616,12 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // Hebbian co-occurrence: strengthen associations between co-retrieved
     // memories. After truncation on purpose — only memories actually returned
     // to the caller should co-strengthen, not the whole rescore pool.
-    if (hits.size() >= 2) {
+    // Honor no_learn: recall must not mutate the assoc graph when the caller
+    // asked for a read-only query (the lanes above already thread no_learn;
+    // this Hebbian co-strengthen leaked past it). CHITTA_NO_ASSOC_LEARN freezes
+    // it process-wide for reproducible paired evals on a fixed graph.
+    static const bool assoc_frozen = std::getenv("CHITTA_NO_ASSOC_LEARN") != nullptr;
+    if (!no_learn && !assoc_frozen && hits.size() >= 2) {
         std::vector<uint64_t> ids;
         ids.reserve(hits.size());
         for (const auto& h : hits) ids.push_back(h.memory_id);
