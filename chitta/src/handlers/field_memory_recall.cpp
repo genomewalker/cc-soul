@@ -500,6 +500,115 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         }
     }
 
+    // Tier-2: SOTA Personalized-PageRank injection lane (HippoRAG-style). RRF and
+    // the lexical rescore above can only reorder what the semantic/BM25/HDC lanes
+    // already surfaced; a multi-hop query's bridge memory shares no query terms
+    // and never enters the pool (measured: multihop nDCG@20 0.694 vs single_hop
+    // 0.852). Seed a single PPR pass with the top-S fused hits (weighted by fused
+    // score), walk the association graph (DerivedFrom strong, CoRetrieved
+    // down-weighted), and RRF-merge the stationary ranking back in — INJECTING
+    // graph-reachable memories, not merely boosting in-pool ones. Gated by
+    // CHITTA_PPR_LANE (default on); =0 reproduces the pre-injection ranking
+    // exactly. Injected nodes carry semantic_score 0, so the cosine abstain gate
+    // below (a max over semantic_score) is unmoved. Mirrors store.rs ppr_inject.
+    // Default OFF: the dev ablation (v7 golds, n=161) showed the PPR injection
+    // regresses single_hop nDCG 0.859->0.802 for only a +0.004 (noise) multihop
+    // gain — RRF-merged graph neighbors displace correct single-hop answers from
+    // the top-k rerank pool. Net-negative, so it ships dormant. Enable for
+    // experiments with CHITTA_PPR_LANE=1.
+    bool ppr_on = [] {
+        const char* e = std::getenv("CHITTA_PPR_LANE");
+        return e && std::string(e) == "1";
+    }();
+    if (ppr_on && hits.size() > 1) {
+        auto env_sz = [](const char* k, size_t d) {
+            const char* e = std::getenv(k);
+            if (!e) return d;
+            try { return static_cast<size_t>(std::stoul(e)); } catch (...) { return d; }
+        };
+        auto env_f = [](const char* k, float d) {
+            const char* e = std::getenv(k);
+            if (!e) return d;
+            try { return std::stof(e); } catch (...) { return d; }
+        };
+        const size_t seeds_n = env_sz("CHITTA_PPR_SEEDS", 5);
+        const size_t top_g   = env_sz("CHITTA_PPR_G", 15);
+        const float  lane_w  = env_f("CHITTA_PPR_LANE_W", 1.0f);
+        const float  rel_gate = env_f("CHITTA_PPR_MAX_REL_GATE", 0.55f);
+
+        // Confidence gate (the second-angle fix). The first ablation showed
+        // unconditional injection regresses single_hop 0.859->0.802: RRF-merged
+        // graph neighbors displace correct single-hop answers. Root cause is that
+        // helping multi-hop *requires* an injected node to outrank an original hit
+        // — and for single-hop that original hit is the answer. The only clean
+        // discriminator is query type, proxied here by top semantic relevance:
+        // skip injection when the lane is already confident (strong top cosine =>
+        // single-hop), inject only for uncertain queries (likely multi-hop). Same
+        // Platt calibration as the abstain gate below.
+        float pre_max_rel = 0.0f;
+        for (const auto& h : hits)
+            pre_max_rel = std::max(pre_max_rel,
+                1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f))));
+        if (pre_max_rel < rel_gate) {
+        std::vector<uint64_t> seed_ids;
+        std::vector<float>    seed_w;
+        for (size_t i = 0; i < hits.size() && seed_ids.size() < seeds_n; ++i) {
+            seed_ids.push_back(hits[i].memory_id);
+            seed_w.push_back(std::max(hits[i].score, 1e-6f));
+        }
+        auto lane = field_store_->ppr_lane(seed_ids, seed_w, top_g);
+        if (!lane.empty()) {
+            constexpr float kPPRRRF = 60.0f;
+            std::unordered_map<uint64_t, float>          fused;
+            std::unordered_map<uint64_t, FieldRecallHit> by_id;
+            int rank = 1;
+            for (auto& h : hits) {
+                fused[h.memory_id] += 1.0f / (kPPRRRF + rank++);
+                by_id.emplace(h.memory_id, h);
+            }
+            rank = 1;
+            for (auto& [mid, s] : lane) {
+                (void)s;
+                float contrib = lane_w * (1.0f / (kPPRRRF + rank++));
+                if (by_id.find(mid) != by_id.end()) { fused[mid] += contrib; continue; }
+                // Inject: hydrate the graph-reached memory (semantic_score 0).
+                std::string content = field_store_->get_content(mid);
+                if (content.empty() || content.rfind("[gap]", 0) == 0) continue;
+                FieldRecallHit h;
+                h.memory_id      = mid;
+                h.score          = 0.0f;
+                h.semantic_score = 0.0f;
+                h.content        = std::move(content);
+                try {
+                    auto m = json::parse(field_store_->get_memory_metadata(mid));
+                    h.ts_ms        = m.value("ts_ms", int64_t(0));
+                    h.strength     = m.value("strength", 0.5f);
+                    h.confidence   = m.value("confidence", 0.5f);
+                    h.access_count = m.value("access_count", uint32_t(0));
+                    h.kind         = m.value("kind", "episode");
+                    h.realm        = m.value("realm", "");
+                } catch (...) {}
+                if (!realm.empty() && h.realm != realm) continue;
+                fused[mid] += contrib;
+                by_id.emplace(mid, std::move(h));
+            }
+            std::vector<std::pair<float, uint64_t>> order;
+            order.reserve(fused.size());
+            for (auto& [mid, s] : fused)
+                if (by_id.find(mid) != by_id.end()) order.emplace_back(s, mid);
+            std::sort(order.begin(), order.end(), std::greater<>());
+            std::vector<FieldRecallHit> merged;
+            merged.reserve(order.size());
+            for (auto& [s, mid] : order) {
+                FieldRecallHit h = std::move(by_id[mid]);
+                h.score = s;
+                merged.push_back(std::move(h));
+            }
+            hits = std::move(merged);
+        }
+        }  // end confidence gate (pre_max_rel < rel_gate)
+    }
+
     // Final truncation to the response limit — deliberately after both rescore
     // passes so a deep-pool candidate the rescorers rank highly makes the cut.
     if (hits.size() > limit) hits.resize(limit);

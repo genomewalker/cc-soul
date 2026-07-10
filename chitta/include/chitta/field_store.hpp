@@ -46,6 +46,7 @@ int cf_backfill_stage(struct CfHandle* h, const uint64_t* ids,
     const float* embeddings, size_t n, size_t embed_dim, size_t* out_plan_count);
 int cf_backfill_plan(struct CfHandle* h);
 int cf_backfill_apply(struct CfHandle* h, size_t* out_applied);
+int cf_persist_delta_hnsw(struct CfHandle* h, size_t* out_persisted);
 int cf_purge_orphan_embed_pending(struct CfHandle* h, size_t* out_cleared);
 size_t cf_requeue_ghost_embeddings(const struct CfHandle* h);
 int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
@@ -562,6 +563,14 @@ public:
         cf_checked(cf_backfill_apply(handle_, &applied), __func__);
         return applied;
     }
+    /// Persist the delta HNSW sidecar so a restart LOADS it instead of cold-
+    /// reinserting from scratch. Call WITHOUT acquire_lock() (off-lock safe).
+    /// Returns delta nodes written (0 = nothing to persist / non-fatal failure).
+    size_t persist_delta_hnsw() {
+        size_t persisted = 0;
+        cf_checked(cf_persist_delta_hnsw(handle_, &persisted), __func__);
+        return persisted;
+    }
 
     /// Return IDs of memories waiting for an embedding (embed_pending=true).
     std::vector<uint64_t> pending_embeddings(size_t limit = 100) {
@@ -810,6 +819,28 @@ public:
             buf, MAX_HITS, &written);
         cf_checked(r, __func__);
         return hits_to_results(buf, written);
+    }
+
+    /// Personalized-PageRank injection lane: seed with the top fused hits and
+    /// their weights, return up to top_g graph-reachable (id, score) pairs with
+    /// the seeds excluded (already ranked by the caller).
+    std::vector<std::pair<uint64_t, float>> ppr_lane(
+        const std::vector<uint64_t>& seed_ids,
+        const std::vector<float>&    seed_weights,
+        size_t                       top_g
+    ) {
+        std::vector<std::pair<uint64_t, float>> out;
+        if (seed_ids.empty() || top_g == 0) return out;
+        std::vector<uint64_t> ids(top_g);
+        std::vector<float>    scores(top_g);
+        size_t written = 0;
+        int r = cf_ppr_lane(handle_,
+            seed_ids.data(), seed_weights.data(), seed_ids.size(),
+            top_g, ids.data(), scores.data(), top_g, &written);
+        cf_checked(r, __func__);
+        out.reserve(written);
+        for (size_t i = 0; i < written; ++i) out.emplace_back(ids[i], scores[i]);
+        return out;
     }
 
     /// Add an association edge between memories.
