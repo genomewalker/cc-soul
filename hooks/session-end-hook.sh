@@ -1,0 +1,16 @@
+#!/bin/bash
+# SessionEnd hook: deregister this session so it stops showing as "active" in
+# session_list (msg_* targets, cross-session discovery) after the window closes.
+# Without this, a dead session's registration lingers forever (no TTL on
+# session_list) and looks like a live messaging target.
+
+CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+
+INPUT="$(cat 2>/dev/null || true)"
+SESSION_ID="$(jq -r '.session_id // empty' <<<"$INPUT" 2>/dev/null || true)"
+
+[[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]] && \
+    timeout "$MAX_WAIT" "$CHITTA_BIN" session_deregister --session_id "$SESSION_ID" >/dev/null 2>&1
+
+exit 0
