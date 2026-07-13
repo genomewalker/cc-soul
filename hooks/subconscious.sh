@@ -11,6 +11,14 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 # Binaries are installed to ~/.claude/bin/ by smart-install.sh
 CHITTA_CLI="${HOME}/.claude/bin/chittad"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+
+# The GPU embed server publishes its URL only once it answers, so a present file means live.
+# Exported at file scope so every daemon start path inherits it, and the daemon re-points
+# itself whenever the slurm job lands on a different node. Absent file => CPU fallback.
+EMBED_URL_FILE="${CHITTA_BRIDGE_URL_DIR:-${HOME}/.chitta-bridge/endpoints}/embed-server.url"
+if [[ -z "${CHITTA_EMBED_URL:-}" && -s "$EMBED_URL_FILE" ]]; then
+    export CHITTA_EMBED_URL="$(<"$EMBED_URL_FILE")"
+fi
 MODEL_PATH="${HOME}/.claude/bin/model.onnx"
 VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
