@@ -507,12 +507,30 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         if (!q_toks.empty()) {
             // w=0.4: knee of the GOLDEN_SET v6 offline sweep (0.312→0.385 nDCG@10;
             // higher w keeps climbing but overfits 30 queries / lexical notation).
-            constexpr float kOverlapW = 0.4f;
+            //
+            // That sweep is not evidence. GOLDEN_SET queries were written FROM each
+            // memory's own text, so they echo its vocabulary back — the sweep rewarded a
+            // lexical signal it had itself planted, and w climbed to fit the leak. On
+            // decontaminated gold (gold-v3) the same contamination is gone, and this term
+            // is the only stage in the pipeline with no document-length normalization:
+            // BM25 has b=0.75 (keyword.rs:130) and cosine is length-invariant, but here a
+            // 57k-char episode transcript contains query tokens by accident and harvests
+            // the boost while the short distilled memory that answers gets ~0. Measured:
+            // 49/175 queries have the gold in the candidate pool and ranked >=20.
+            //
+            // Env-tunable so the weight can be ablated and re-fitted against honest gold
+            // without a rebuild+10min store reload per point; per-request override so a
+            // whole dose-response sweep costs one daemon boot instead of one boot per point.
+            static const float kOverlapW = [] {
+                const char* e = std::getenv("CHITTA_OVERLAP_W");
+                return e ? std::strtof(e, nullptr) : 0.4f;
+            }();
+            const float overlap_w = params.value("_overlap_w", kOverlapW);
             for (auto& h : hits) {
                 auto c_toks = tokens(h.content);
                 size_t inter = 0;
                 for (const auto& t : q_toks) inter += c_toks.count(t);
-                h.score += kOverlapW * (static_cast<float>(inter) / q_toks.size());
+                h.score += overlap_w * (static_cast<float>(inter) / q_toks.size());
             }
             std::sort(hits.begin(), hits.end(),
                       [](const FieldRecallHit& a, const FieldRecallHit& b) {
