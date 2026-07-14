@@ -30,6 +30,10 @@ jobs:
       - name: Build chitta-field
         env:
           PYO3_PYTHON: /usr/bin/python3.11
+          # Overrides [build] rustflags in chitta-field/.cargo/config.toml, which pins
+          # x86-64-v4 for our AVX-512 cluster. Released binaries must run anywhere, so
+          # hold them to the x86-64-v2 baseline.
+          RUSTFLAGS: "-C target-cpu=x86-64-v2"
         run: |
           cd chitta-field
           ./build.sh build --release
