@@ -3,6 +3,9 @@
 
 #include "../../include/chitta/rpc/field_handler.hpp"
 
+#include <iomanip>
+#include <sstream>
+
 namespace chitta {
 
 void FieldRpcHandler::register_system_tools() {
@@ -89,6 +92,27 @@ void FieldRpcHandler::register_system_tools() {
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
     handlers_["subconscious_stats"] = [this](const json& p) { return tool_subconscious_stats(p); };
+
+    // Deliberately NOT folded into health_check: this is an O(N) scan of the store, and
+    // health_check is polled by the watchdog (an O(N) scan there is what got the daemon
+    // killed for missing its own ping). Call it on demand.
+    tools_.push_back({{"name","embed_coverage"},{"description","Semantic-index coverage: how many memories SHOULD have a vector vs how many DO. pending_count cannot answer this — the embed queue drains on failure as well as success, so a lost embedding leaves the queue empty."},
+        {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+    });
+    handlers_["embed_coverage"] = [this](const json&) {
+        auto [eligible, embedded] = field_store_->embed_coverage();
+        size_t missing = eligible > embedded ? eligible - embedded : 0;
+        double pct = eligible ? (100.0 * embedded / eligible) : 100.0;
+        std::ostringstream ss;
+        ss << "embeddable memories : " << eligible << "\n"
+           << "  with a vector     : " << embedded << "\n"
+           << "  MISSING (bm25only): " << missing  << "\n"
+           << "  coverage          : " << std::fixed << std::setprecision(1) << pct << "%\n";
+        json out = {{"eligible", eligible}, {"embedded", embedded},
+                    {"missing", missing},   {"coverage_pct", pct},
+                    {"pending", field_store_->raw_pending_count()}};
+        return ToolResult::ok(ss.str(), out);
+    };
 
     tools_.push_back({{"name","pending_embed_ids"},{"description","Return IDs of memories awaiting embedding (stuck embed queue)"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}

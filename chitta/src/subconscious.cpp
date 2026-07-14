@@ -1015,6 +1015,13 @@ void Subconscious::embed_loop() {
     //   embedding indefinitely and embed_pending grows; upgrade: age-based override
     //   that forces a chunk after N deferred cycles.
     static constexpr size_t EMBED_CHUNK = 16;
+    // Bounded retry for embeddings that come back zero. A zero vector is usually TRANSIENT
+    // (llama_decode failed on an oversized/edge-case batch). Retiring the memory on the first
+    // failure — which force_clear_embed_pending() did — dropped it from the queue with no
+    // vector, permanently, and left pending_count reporting 0. Retry, and only give up (loudly)
+    // once the same memory has failed EMBED_MAX_ATTEMPTS times.
+    static constexpr int EMBED_MAX_ATTEMPTS = 5;
+    std::unordered_map<uint64_t, int> embed_attempts;
     while (running_.load()) {
         auto pending = field_store_->pending_embeddings(config_.embedding_batch_size);
         if (!pending.empty()) {
@@ -1048,18 +1055,26 @@ void Subconscious::embed_loop() {
                 if (chunk_ids.empty() || !embedder_ || !embedder_->ready()) continue;
 
                 auto arthas = embedder_->transform_batch(chunk_texts);
-                std::vector<uint64_t> failed;
+                std::vector<uint64_t> exhausted;
                 for (size_t i = 0; i < chunk_ids.size() && i < arthas.size(); ++i) {
                     if (arthas[i].nu.is_zero()) {
                         stats_.embedding_skips++;
-                        failed.push_back(chunk_ids[i]);
+                        // Stay embed_pending so the next pass retries — do NOT clear the flag.
+                        if (++embed_attempts[chunk_ids[i]] >= EMBED_MAX_ATTEMPTS)
+                            exhausted.push_back(chunk_ids[i]);
                         continue;
                     }
+                    embed_attempts.erase(chunk_ids[i]);
                     field_store_->backfill_embedding(chunk_ids[i], arthas[i].nu.data);
                     embedded++;
                 }
-                if (!failed.empty())
-                    field_store_->force_clear_embed_pending(failed);
+                if (!exhausted.empty()) {
+                    // Give up for this daemon lifetime only. Startup reconciliation (field.rs)
+                    // re-queues any memory still lacking an embedding, so this is not permanent.
+                    std::cerr << "[embed] " << exhausted.size() << " memories failed to embed "
+                              << EMBED_MAX_ATTEMPTS << "x — deferred to next restart\n";
+                    field_store_->force_clear_embed_pending(exhausted);
+                }
             }
 
             if (!orphan_ids.empty()) {
