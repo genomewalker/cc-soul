@@ -928,6 +928,18 @@ public:
         return cf_sync_foreign(handle_);
     }
 
+    /// Phase 1 of sync_foreign: read peer ops off shared storage into a pending buffer.
+    /// Blocking disk I/O — call WITHOUT the rpc lock. Returns ops now pending, or -1.
+    int sync_foreign_collect() {
+        return cf_sync_foreign_collect(handle_);
+    }
+
+    /// Phase 2 of sync_foreign: apply the pending ops. In-memory, takes ~40 write guards —
+    /// call WITH the exclusive rpc lock. Returns ops applied, or -1.
+    int sync_foreign_apply() {
+        return cf_sync_foreign_apply(handle_);
+    }
+
     /// Apply outcome feedback for a retrieval episode (route learning).
     void feedback(uint64_t episode_id, float reward) {
         cf_feedback(handle_, episode_id, reward);

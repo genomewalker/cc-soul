@@ -333,20 +333,29 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
             if (!compact_wal_inflight.load(std::memory_order_relaxed) &&
                 (inotify_ready || (now_time - last_foreign_sync >= foreign_sync_interval))) {
                 try {
-                    // EXCLUSIVE rpc lock, not shared: sync_foreign acquires
-                    // ~40 Rust write guards in canonical order, which makes it
-                    // a deadlock partner for ANY tool path holding one lock
-                    // while acquiring an earlier-ordered one (production
-                    // deadlock 2026-06-11: recall CW-refresh Phase A held
-                    // semantic_idx.read wanting states.read while sync held
-                    // states.write wanting semantic_idx readers drained).
-                    // Mutual exclusion with tools removes the multi-holder
-                    // from every such cycle. Batches are small (~ms) outside
-                    // restart storms.
-                    auto _lk = handler.acquire_lock();
-                    int applied = field_store.sync_foreign();
-                    if (verbose_mode && applied > 0) {
-                        std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
+                    // Two phases, and the split is load-bearing.
+                    //
+                    // COLLECT reads peer WAL segments off the mind volume. That volume is a
+                    // HARD-mounted NFS export (hard,timeo=600,retrans=2): when the filer
+                    // stalls, a read retries forever — it never returns an error and the
+                    // thread parks in uninterruptible D state, deaf to SIGTERM. Running it
+                    // under the rpc lock therefore froze every request while the socket kept
+                    // accepting connections: the daemon looked alive and answered nothing
+                    // (2026-07-14). So: no lock here.
+                    int pending = field_store.sync_foreign_collect();
+                    if (pending > 0) {
+                        // APPLY takes ~40 Rust write guards in canonical order, which makes it
+                        // a deadlock partner for ANY tool path holding one lock while acquiring
+                        // an earlier-ordered one (production deadlock 2026-06-11: recall
+                        // CW-refresh Phase A held semantic_idx.read wanting states.read while
+                        // sync held states.write wanting semantic_idx readers drained). The
+                        // EXCLUSIVE rpc lock removes the multi-holder from every such cycle.
+                        // It is safe to hold: apply is pure in-memory, no disk reads.
+                        auto _lk = handler.acquire_lock();
+                        int applied = field_store.sync_foreign_apply();
+                        if (verbose_mode && applied > 0) {
+                            std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
+                        }
                     }
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] sync_foreign failed: " << e.what() << "\n";
@@ -757,8 +766,16 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     std::atomic<size_t> queue_count{0};
     std::atomic<size_t> queue_distill_count{0};  // Separate counter for pre-compact distillations
     std::atomic<size_t> queue_fail_count{0};
+    // Isolation: measurement/scratch daemons must NOT drain the shared global
+    // queue that live hooks+MCP write to, or they ingest the operator's live
+    // transcripts into the scratch store. CHITTA_QUEUE_PATH gives a private queue;
+    // CHITTA_NO_QUEUE skips the processor entirely (frozen store, read-only bench).
     std::string queue_path = "/tmp/chitta-queue.jsonl";
+    if (const char* qp = std::getenv("CHITTA_QUEUE_PATH")) {
+        if (qp[0]) queue_path = qp;
+    }
     std::string failed_queue_path = mind_path + "/.failed_queue.jsonl";
+    const bool no_queue = std::getenv("CHITTA_NO_QUEUE") != nullptr;
 
     // Token-triggered distillation: per-session content accumulators
     std::unordered_map<std::string, int64_t> session_content_accum;
@@ -768,7 +785,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     QueueProcessor queue_proc(field_store, yantra, distill_config, handler,
                               queue_path, failed_queue_path,
                               queue_count, queue_distill_count, queue_fail_count);
-    queue_proc.start();
+    if (!no_queue) queue_proc.start();
 
     // Thread pool for async RPC handling (scales 8-16 workers based on load).
     // The queue cap sheds load with a JSON-RPC error instead of queuing
@@ -797,7 +814,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
     pool.set_escalation_threshold(std::chrono::seconds(30));
 
     std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
-    std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
+    if (no_queue)
+        std::cerr << "[daemon] Queue processor DISABLED (CHITTA_NO_QUEUE) — frozen store\n";
+    else
+        std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
 
     // SadhanaManager init — FieldStore is ready synchronously
     sadhana_manager = std::make_unique<SadhanaManager>(field_store);
