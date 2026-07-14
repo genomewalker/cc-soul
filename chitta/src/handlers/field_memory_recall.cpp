@@ -470,16 +470,37 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 "the", "and", "for", "with", "what", "how", "did", "does", "was",
                 "were", "are", "that", "this", "when", "where", "who", "why"};
             std::unordered_set<std::string> out;
+            auto emit = [&](const std::string& t) {
+                if (t.size() >= 3 && !stop.count(t)) out.insert(t);
+            };
+            // Emit the glued form AND its sub-parts. BM25 splits on every non-alphanumeric
+            // (chitta-field/src/organ/keyword.rs:213); keeping '-'/'_' as word characters here
+            // made the two components disagree about what a token IS. `lca-optimization-revert`
+            // stayed one opaque token, so it never intersected a natural-language query — and
+            // the +0.4 boost below, the largest lever in the ranker, silently contributed 0.0 to
+            // exactly the kebab/snake memories it was written to rescue. Emitting both forms can
+            // only grow the intersection: an exact `ref_id` match still scores, and `lca` now
+            // matches too.
+            auto emit_parts = [&](const std::string& t) {
+                emit(t);
+                if (t.find('-') == std::string::npos && t.find('_') == std::string::npos) return;
+                std::string part;
+                for (char c : t) {
+                    if (c == '-' || c == '_') { emit(part); part.clear(); }
+                    else part.push_back(c);
+                }
+                emit(part);
+            };
             std::string cur;
             for (char c : s) {
                 if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') {
                     cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
                 } else if (!cur.empty()) {
-                    if (cur.size() >= 3 && !stop.count(cur)) out.insert(cur);
+                    emit_parts(cur);
                     cur.clear();
                 }
             }
-            if (cur.size() >= 3 && !stop.count(cur)) out.insert(cur);
+            if (!cur.empty()) emit_parts(cur);
             return out;
         };
         auto q_toks = tokens(query);
@@ -536,20 +557,16 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         const float  lane_w  = env_f("CHITTA_PPR_LANE_W", 1.0f);
         const float  rel_gate = env_f("CHITTA_PPR_MAX_REL_GATE", 0.55f);
 
-        // Confidence gate (the second-angle fix). The first ablation showed
-        // unconditional injection regresses single_hop 0.859->0.802: RRF-merged
-        // graph neighbors displace correct single-hop answers. Root cause is that
-        // helping multi-hop *requires* an injected node to outrank an original hit
-        // — and for single-hop that original hit is the answer. The only clean
-        // discriminator is query type, proxied here by top semantic relevance:
-        // skip injection when the lane is already confident (strong top cosine =>
-        // single-hop), inject only for uncertain queries (likely multi-hop). Same
-        // Platt calibration as the abstain gate below.
-        float pre_max_rel = 0.0f;
+        // Head fence (rank-preserving injection). PPR always runs when ppr_on;
+        // an original hit is "protected" if its own Platt-calibrated relevance
+        // clears rel_gate. The merge emits protected hits first in their incoming
+        // order (single-hop answers, never displaced), then the rest — unprotected
+        // hits + injected graph nodes (semantic_score 0) — sorted fused-descending
+        // below the head. Same Platt calibration as the abstain gate below.
+        std::unordered_set<uint64_t> protected_ids;
         for (const auto& h : hits)
-            pre_max_rel = std::max(pre_max_rel,
-                1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f))));
-        if (pre_max_rel < rel_gate) {
+            if (1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f))) >= rel_gate)
+                protected_ids.insert(h.memory_id);
         std::vector<uint64_t> seed_ids;
         std::vector<float>    seed_w;
         for (size_t i = 0; i < hits.size() && seed_ids.size() < seeds_n; ++i) {
@@ -592,13 +609,22 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 fused[mid] += contrib;
                 by_id.emplace(mid, std::move(h));
             }
+            // Head fence: protected originals first, in incoming order.
+            std::vector<FieldRecallHit> merged;
+            merged.reserve(fused.size());
+            for (auto& h : hits) {
+                if (protected_ids.find(h.memory_id) == protected_ids.end()) continue;
+                FieldRecallHit ph = std::move(by_id[h.memory_id]);
+                ph.score = fused[h.memory_id];
+                merged.push_back(std::move(ph));
+            }
             std::vector<std::pair<float, uint64_t>> order;
             order.reserve(fused.size());
             for (auto& [mid, s] : fused)
-                if (by_id.find(mid) != by_id.end()) order.emplace_back(s, mid);
+                if (by_id.find(mid) != by_id.end() &&
+                    protected_ids.find(mid) == protected_ids.end())
+                    order.emplace_back(s, mid);
             std::sort(order.begin(), order.end(), std::greater<>());
-            std::vector<FieldRecallHit> merged;
-            merged.reserve(order.size());
             for (auto& [s, mid] : order) {
                 FieldRecallHit h = std::move(by_id[mid]);
                 h.score = s;
@@ -606,7 +632,6 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             }
             hits = std::move(merged);
         }
-        }  // end confidence gate (pre_max_rel < rel_gate)
     }
 
     // Final truncation to the response limit — deliberately after both rescore

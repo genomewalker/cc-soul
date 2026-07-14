@@ -36,8 +36,10 @@ def _load_reranker():
             warnings.simplefilter("ignore")
             from sentence_transformers import CrossEncoder
             _reranker = CrossEncoder(_RERANKER_MODEL)
-    except Exception:
-        _reranker = False
+    except Exception as e:
+        # Silently returning False here made --reranker a no-op that still reported
+        # "reranked" numbers. If the caller asked for a reranker, they must get one.
+        raise RuntimeError(f"reranker requested but unavailable: {_RERANKER_MODEL}: {e}") from e
     return _reranker
 
 
@@ -50,7 +52,11 @@ class RecallFailure(Exception):
     metric measures harness load, not retrieval. See finding #5754223735221518410."""
 
 
-def chitta_recall(query: str, limit: int, strategy: str, realm: str | None = None) -> list[dict]:
+def chitta_recall(query: str, limit: int, strategy: str, realm: str | None = None) -> dict:
+    """Returns the whole recall payload, not just `results`.
+
+    The daemon already decides whether to abstain and reports it as a top-level
+    `abstain` flag. Scoring abstention needs that flag, so callers get the payload."""
     cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
            "--strategy", strategy, "--json"]
     if realm:
@@ -64,7 +70,7 @@ def chitta_recall(query: str, limit: int, strategy: str, realm: str | None = Non
     if not r.stdout.strip():
         raise RecallFailure(f"empty stdout: {query[:60]!r}")
     try:
-        return json.loads(r.stdout).get("results", [])
+        return json.loads(r.stdout)
     except json.JSONDecodeError as e:
         raise RecallFailure(f"bad json: {query[:60]!r}") from e
 
@@ -105,6 +111,8 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
     scores_by_type: dict[str, list[float]] = {}
     per_query = []
     failed = []
+    hits_by_type: dict[str, list[float]] = {}
+    lenient_scores: list[float] = []
 
     for q in queries:
         gold = set(q.get("gold_ids", []))
@@ -112,38 +120,52 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
         realm = q.get("realm")
 
         try:
-            results = chitta_recall(q["query"], fetch_limit, strategy, realm)
+            payload = chitta_recall(q["query"], fetch_limit, strategy, realm)
         except RecallFailure:
             try:  # one retry — recall is deterministic; a failure is load/timing, not signal
-                results = chitta_recall(q["query"], fetch_limit, strategy, realm)
+                payload = chitta_recall(q["query"], fetch_limit, strategy, realm)
             except RecallFailure as e:
                 failed.append(q["query"])
                 print(f"\033[31m[FAIL-EXCLUDED]\033[0m {e}", file=sys.stderr)
                 continue  # exclude from scoring — do NOT count a harness failure as a miss
+        results = payload.get("results", [])
+        abstained = bool(payload.get("abstain", False))
+
         if use_reranker:
             results = rerank(q["query"], results, limit)
         else:
             results = results[:limit]
 
-        # Gold IDs may include sig fallback: also check text match
+        # STRICT gold is the declared ids and nothing else. The signature fallback below
+        # widens gold using the *results* — a retrieved item can promote itself to gold —
+        # so it is scored separately and never allowed to inflate the headline number.
+        strict_pos = [i for i, r in enumerate(results[:limit]) if str(r.get("id", "")) in gold]
+        gold_lenient = set(gold)
         sig = q.get("gold_signature", "")
         if sig:
             for r in results:
                 if sig in r.get("text", ""):
-                    gold.add(str(r.get("id", "")))
+                    gold_lenient.add(str(r.get("id", "")))
 
         if qtype == "abstention":
-            # Score = 1 if top result confidence < threshold, else 0
-            # Proxy: if any result has id matching gold (empty set), nDCG=0 is correct
-            score = 1.0  # abstention always "passes" since we have no gold
+            # A negative: nothing in the store should answer it. The daemon already made
+            # this call and reports it as payload["abstain"]. Trust that, not a constant.
+            score = 1.0 if abstained else 0.0
+            hit = 0.0
         else:
-            score = ndcg(gold, results, limit)
+            # A false abstention on a positive is a miss, not a pass.
+            score = 0.0 if abstained else ndcg(gold, results, limit)
+            hit = 1.0 if strict_pos else 0.0
 
-        gold_pos = [i for i, r in enumerate(results[:limit]) if str(r.get("id","")) in gold]
+        gold_pos = strict_pos
         scores_by_type.setdefault(qtype, []).append(score)
+        if qtype != "abstention":
+            hits_by_type.setdefault(qtype, []).append(hit)
+            lenient_scores.append(ndcg(gold_lenient, results, limit))
         per_query.append({
             "query": q["query"], "type": qtype, "label": q.get("label", ""),
-            "ndcg": round(score, 3), "gold_pos": gold_pos,
+            "ndcg": round(score, 3), "hit": hit, "gold_pos": gold_pos,
+            "abstained": abstained,
             "n_gold": len(gold), "n_results": len(results),
         })
 
@@ -160,17 +182,28 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
     mean = sum(all_scores) / len(all_scores) if all_scores else 0.0
     ci_lo, ci_hi = bootstrap_ci(all_scores)
 
+    all_hits = [h for v in hits_by_type.values() for h in v]
+    recall_at_k = sum(all_hits) / len(all_hits) if all_hits else 0.0
+    lenient = sum(lenient_scores) / len(lenient_scores) if lenient_scores else 0.0
+    abstain_scores = scores_by_type.get("abstention", [])
+
     if failed:
         print(f"\033[33m[warn] {len(failed)} queries EXCLUDED (recall failed, not scored)\033[0m",
               file=sys.stderr)
 
     return {
         "strategy": strategy,
+        # recall@k answers "was the gold memory found AT ALL" — the question the old
+        # harness could not ask, because it discarded every query that missed.
+        "recall_at_k": round(recall_at_k, 3),
         "mean_ndcg": round(mean, 3),
+        "mean_ndcg_lenient": round(lenient, 3),  # gold widened by signature match; diagnostic only
+        "abstention_acc": round(sum(abstain_scores) / len(abstain_scores), 3) if abstain_scores else None,
         "ci_95": [round(ci_lo, 3), round(ci_hi, 3)],
         "n_queries": len(all_scores),
         "n_failed_excluded": len(failed),
         "by_type": {k: round(sum(v)/len(v), 3) for k, v in scores_by_type.items() if v},
+        "recall_by_type": {k: round(sum(v)/len(v), 3) for k, v in hits_by_type.items() if v},
         "per_query": per_query,
     }
 
@@ -273,6 +306,10 @@ def main():
                     help="Compare multiple strategies side-by-side")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min", type=float, default=0.7)
+    ap.add_argument("--min-recall", type=float, default=None,
+                    help="Fail if recall@k falls below this. Unset until a true baseline exists — "
+                         "a threshold invented before the first honest measurement is just a "
+                         "number the harness was built to clear.")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-reranker", action="store_true")
     ap.add_argument("--bootstrap", action="store_true",
@@ -316,11 +353,20 @@ def main():
             print("─" * 72)
         results[strat] = grade_strategy(queries, strat, args.limit, use_reranker, args.quiet)
         r = results[strat]
-        print(f"\n\033[1m{'mean nDCG@' + str(args.limit)} = {r['mean_ndcg']:.3f}\033[0m"
+        # recall@k leads. nDCG is a ranking-quality number and it only has meaning for the
+        # queries whose gold was found at all; if recall@k is low, a high nDCG just says
+        # "the few it found, it ranked well" — which is how the old harness looked healthy.
+        print(f"\n\033[1mrecall@{args.limit} = {r['recall_at_k']:.3f}\033[0m"
+              f"   (gold memory retrieved at all)")
+        print(f"\033[1m{'mean nDCG@' + str(args.limit)} = {r['mean_ndcg']:.3f}\033[0m"
               f"  95% CI [{r['ci_95'][0]:.3f}, {r['ci_95'][1]:.3f}]"
               f"  n={r['n_queries']}")
+        if r.get("abstention_acc") is not None:
+            print(f"abstention   = {r['abstention_acc']:.3f}   (declines when the store cannot answer)")
         for qtype, score in r.get("by_type", {}).items():
-            print(f"  {qtype}: {score:.3f}")
+            print(f"  nDCG {qtype}: {score:.3f}")
+        for qtype, score in r.get("recall_by_type", {}).items():
+            print(f"  recall {qtype}: {score:.3f}")
 
     if len(strategies) > 1:
         print("\n\033[1mComparison:\033[0m")
@@ -336,8 +382,15 @@ def main():
                                     indent=2))
     print(f"\nresult: {out_path}")
 
-    mean = results[strategies[0]]["mean_ndcg"]
-    sys.exit(0 if mean >= args.min else 1)
+    r0 = results[strategies[0]]
+    ok = r0["mean_ndcg"] >= args.min
+    # nDCG alone cannot fail this gate on a recall collapse — it is only computed over the
+    # queries whose gold was retrieved. Gate on recall too, or the collapse exits 0.
+    if args.min_recall is not None and r0["recall_at_k"] < args.min_recall:
+        print(f"\033[31mrecall@{args.limit}={r0['recall_at_k']:.3f} < --min-recall {args.min_recall}\033[0m",
+              file=sys.stderr)
+        ok = False
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
