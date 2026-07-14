@@ -30,7 +30,7 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-10}"
 # How long a daemon may take to boot before we treat silence as "stuck" rather than
 # "still loading". Must exceed worst-case snapshot load + WAL replay, or hooks kill the
 # daemon mid-boot on every tool call and it never comes up.
-BOOT_GRACE="${CC_SOUL_BOOT_GRACE:-600}"
+BOOT_GRACE="${CC_SOUL_BOOT_GRACE:-1800}"
 # Seconds to let a SIGTERMed daemon finish its shutdown snapshot before SIGKILL.
 STOP_GRACE="${CC_SOUL_STOP_GRACE:-120}"
 
@@ -110,6 +110,24 @@ is_running() {
         return 0
     fi
 
+    return 1
+}
+
+# True if any listed pid is still doing work: parked in uninterruptible NFS I/O (D), or
+# burning CPU across a 2s sample. Either way it is alive and must not be killed.
+_daemon_progressing() {
+    local pid line state c0 c1
+    for pid in "$@"; do
+        line=$(sed -e 's/^.*) //' "/proc/$pid/stat" 2>/dev/null) || continue
+        [[ -z "$line" ]] && continue
+        state=$(awk '{print $1}' <<<"$line")
+        [[ "$state" == "D" ]] && return 0
+        c0=$(awk '{print $12+$13}' <<<"$line")
+        sleep 2
+        line=$(sed -e 's/^.*) //' "/proc/$pid/stat" 2>/dev/null) || continue
+        c1=$(awk '{print $12+$13}' <<<"$line")
+        [[ -n "$c0" && -n "$c1" ]] && (( c1 > c0 )) && return 0
+    done
     return 1
 }
 
@@ -264,8 +282,21 @@ cmd_start() {
             echo "[subconscious] Daemon booting (${youngest}s of ${BOOT_GRACE}s grace) — leaving it alone" >&2
             return 0
         fi
-        # Past the grace period and still not answering: genuinely stuck. SIGTERM first so
-        # an in-flight snapshot can finish; SIGKILL only if it refuses to go.
+        # Grace expired — but a slow answer is still not death, and conflating the two is
+        # what killed this store. The health_check above gives the daemon 2 seconds; a
+        # daemon that is merely BUSY blows that budget routinely (maint cycles, distill
+        # passes, and reads on the hard-mounted mind volume that park the thread in
+        # uninterruptible D state — simple_cli.cpp:336). SIGTERM is ignored in D state, so
+        # the SIGKILL 30s later lands mid-snapshot and leaves a family with no .pld sidecar
+        # that the loader then refuses (field.rs:584). That is how 2026-07-14 produced 54
+        # daemon starts and 0 clean shutdowns. Liveness must be read from the process, not
+        # from its latency.
+        if _daemon_progressing $existing_pids; then
+            echo "[subconscious] Daemon busy but progressing (D-state or burning CPU) — leaving it alone" >&2
+            return 0
+        fi
+        # Neither answering, nor blocked on the filer, nor burning CPU: genuinely stuck.
+        # SIGTERM first so an in-flight snapshot can finish; SIGKILL only if it refuses.
         echo "[subconscious] Cleaning up stuck daemon(s): $existing_pids" >&2
         kill -TERM $existing_pids 2>/dev/null || true
         for _ in {1..30}; do
