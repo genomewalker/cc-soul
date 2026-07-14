@@ -1,4 +1,9 @@
 #!/bin/bash
+# Headless bridge participant (fusion room, codex_run): nobody is reading this.
+# A one-shot model treats injected advice as instruction and goes exploring —
+# with these live, sol ran 93 tool calls on a room prompt and never finished.
+if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+
 # PreToolUse hook: safety blocks, large-output guards, soul corrections.
 #
 # Stages:

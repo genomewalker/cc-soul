@@ -1,4 +1,7 @@
 #!/bin/bash
+# Headless bridge participant: debugging hints it never asked for.
+if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+
 # PostToolUse hook for Bash: Surface relevant memories on command failure
 #
 # When a command fails, searches for gotchas/corrections related to the command

@@ -1,4 +1,8 @@
 #!/bin/bash
+# Headless bridge participant: nothing to resume, and /recap would hijack the
+# one prompt it exists to answer.
+if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+
 # SessionStart hook for source=resume: Auto-trigger /recap
 #
 # Emits hookSpecificOutput.initialUserMessage to inject "/recap" as the first

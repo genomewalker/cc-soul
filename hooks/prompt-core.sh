@@ -1,4 +1,9 @@
 #!/bin/bash
+# Headless bridge participant: the room supplies its own CONTEXT block, and
+# injecting global soul recall here is the bleed commit 87e915d removed one
+# layer up. Stay quiet.
+if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+
 # UserPromptSubmit hook: Surface relevant memories + detect learning opportunities
 #
 # HIGH PERFORMANCE: Single call with smart routing

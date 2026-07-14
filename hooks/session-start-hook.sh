@@ -1,4 +1,7 @@
 #!/bin/bash
+# Headless bridge participant: no session to restore — it answers once and exits.
+if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+
 # SessionStart hook: Initialize soul context with FULL state restoration
 #
 # LOSSLESS: Restores complete session state after compaction
