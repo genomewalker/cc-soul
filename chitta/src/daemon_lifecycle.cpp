@@ -93,8 +93,14 @@ bool acquire_lock(const std::string& mind_path, DaemonLock& lock) {
 
 void release_lock(DaemonLock& lock) {
     if (lock.fd >= 0) {
+        // Close, never unlink. An fcntl lock lives on the INODE, not the path: deleting the
+        // file lets the next daemon open a fresh inode and lock it successfully while this
+        // one still holds its own — two "exclusive" owners of one store, whose janitors then
+        // prune each other's snapshot sidecars (the 2026-07-14 store loss). The kernel drops
+        // the lock on close and on death, so a leftover lock file is harmless: the next
+        // daemon re-locks the same inode cleanly.
         close(lock.fd);
-        unlink(lock.path.c_str());
+        lock.fd = -1;
     }
 }
 
@@ -146,9 +152,14 @@ bool cleanup_stale_daemon(const std::string& mind_path) {
     }
 
     std::cerr << "[daemon] Cleaning stale files from dead PID " << old_pid << "\n";
+    // Socket and PID file are safe to remove: both are recreated on start, and the socket
+    // MUST be unlinked to rebind. The lock file is NOT — it is the single-writer mutex, and
+    // it is keyed by inode. Unlinking it here (before acquire_lock, simple_cli.cpp:1588) let
+    // a second daemon create a fresh inode, lock that, and run alongside a live daemon that
+    // still holds the old one. Leave the inode alone; fcntl already releases on death.
     unlink(sock_path.c_str());
     unlink(pid_path.c_str());
-    unlink(lk_path.c_str());
+    (void)lk_path;
     return true;
 }
 

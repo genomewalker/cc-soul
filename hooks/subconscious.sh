@@ -27,6 +27,12 @@ INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-10}"
+# How long a daemon may take to boot before we treat silence as "stuck" rather than
+# "still loading". Must exceed worst-case snapshot load + WAL replay, or hooks kill the
+# daemon mid-boot on every tool call and it never comes up.
+BOOT_GRACE="${CC_SOUL_BOOT_GRACE:-600}"
+# Seconds to let a SIGTERMed daemon finish its shutdown snapshot before SIGKILL.
+STOP_GRACE="${CC_SOUL_STOP_GRACE:-120}"
 
 if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD=(timeout "$MAX_WAIT")
@@ -186,8 +192,10 @@ kill_unresponsive() {
         kill -9 "$pid" 2>/dev/null || true
     done
 
-    # Clean up socket/lock/pid files
-    rm -f "$SOCKET_PATH" "$LOCK_FILE" "$PID_FILE" 2>/dev/null || true
+    # Socket and PID only. Never the lock file: it is the single-writer mutex and it is keyed
+    # by inode, so deleting it lets the next daemon lock a fresh inode and run alongside a
+    # live one. fcntl releases the lock on death, so there is nothing here to clean up.
+    rm -f "$SOCKET_PATH" "$PID_FILE" 2>/dev/null || true
 
     sleep 1
     echo "[subconscious] Cleaned up stale daemon" >&2
@@ -242,12 +250,32 @@ cmd_start() {
                 return 0
             fi
         fi
-        # Kill all existing daemons (stale/unresponsive)
-        echo "[subconscious] Cleaning up existing daemon(s): $existing_pids" >&2
+        # An absent socket does NOT mean dead: chittad binds it only after the store is
+        # loaded, and a 650MB snapshot + WAL replay takes minutes. Hooks fire every few
+        # seconds, so killing here restarts the boot forever — and a SIGKILL landing
+        # mid-snapshot leaves a family with no .pld sidecar, which the loader then refuses
+        # (field.rs:584). That livelock is what corrupted the store on 2026-07-14.
+        local youngest=999999 age
         for pid in $existing_pids; do
-            kill -9 "$pid" 2>/dev/null || true
+            age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+            [[ -n "$age" ]] && (( age < youngest )) && youngest=$age
         done
-        rm -f "$SOCKET_PATH" "$PID_FILE" "$LOCK_FILE" 2>/dev/null || true
+        if (( youngest < BOOT_GRACE )); then
+            echo "[subconscious] Daemon booting (${youngest}s of ${BOOT_GRACE}s grace) — leaving it alone" >&2
+            return 0
+        fi
+        # Past the grace period and still not answering: genuinely stuck. SIGTERM first so
+        # an in-flight snapshot can finish; SIGKILL only if it refuses to go.
+        echo "[subconscious] Cleaning up stuck daemon(s): $existing_pids" >&2
+        kill -TERM $existing_pids 2>/dev/null || true
+        for _ in {1..30}; do
+            pgrep -f "chittad daemon.*--path $MIND_PATH" >/dev/null 2>&1 || break
+            sleep 1
+        done
+        for pid in $existing_pids; do
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+        done
+        rm -f "$SOCKET_PATH" "$PID_FILE" 2>/dev/null || true
         sleep 1
     fi
 
@@ -376,7 +404,7 @@ cmd_stop() {
 
     if ! is_running; then
         # Also clean up sockets/files even if not running
-        rm -f "$SOCKET_PATH" "$PID_FILE" "$LOCK_FILE" 2>/dev/null || true
+        rm -f "$SOCKET_PATH" "$PID_FILE" 2>/dev/null || true
         echo "[subconscious] Not running (cleaned up stale files)"
         return 0
     fi
@@ -399,22 +427,24 @@ cmd_stop() {
         kill "$pid" 2>/dev/null || true
     done
 
-    # Wait for graceful shutdown
-    for i in {1..10}; do
+    # Wait for graceful shutdown. Chittad flushes its snapshot on SIGTERM and that takes
+    # 15-20s on a 650MB store — the old 5s budget force-killed it every single time, losing
+    # everything since the last periodic snapshot and leaving a .pld-less family behind.
+    for _ in $(seq 1 "$STOP_GRACE"); do
         if ! is_running; then
             echo "[subconscious] Stopped"
-            rm -f "$PID_FILE" "$SOCKET_PATH" "$LOCK_FILE" 2>/dev/null || true
+            rm -f "$PID_FILE" "$SOCKET_PATH" 2>/dev/null || true
             return 0
         fi
-        sleep 0.5
+        sleep 1
     done
 
     # Force kill any remaining
     for pid in $pids; do
         kill -9 "$pid" 2>/dev/null || true
     done
-    rm -f "$PID_FILE" "$SOCKET_PATH" "$LOCK_FILE" 2>/dev/null || true
-    echo "[subconscious] Force stopped"
+    rm -f "$PID_FILE" "$SOCKET_PATH" 2>/dev/null || true
+    echo "[subconscious] Force stopped after ${STOP_GRACE}s (snapshot may be incomplete)" >&2
 }
 
 cmd_status() {

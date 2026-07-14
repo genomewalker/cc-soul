@@ -649,8 +649,14 @@ def ensure_daemon() -> bool:
         if client.connect():
             return True
 
-    # Still no daemon - try to start it with atomic lock
-    lock_path = socket_path.replace(".sock", ".lock")
+    # Still no daemon - try to start it with atomic lock.
+    # NOT ".lock": that path is the daemon's single-writer mutex, an fcntl lock held on the
+    # INODE for the daemon's whole life. This here is a create/unlink start-mutex — a totally
+    # different protocol. Pointing both at one file meant we deleted a live daemon's mutex as
+    # "stale" (it is always >60s old while healthy), after which the next daemon locked a fresh
+    # inode and ran alongside it. Four concurrent "exclusive" owners is how the store died on
+    # 2026-07-14. Keep the two protocols on separate paths.
+    lock_path = socket_path.replace(".sock", ".startlock")
     lock_fd = None
     we_hold_lock = False
 
