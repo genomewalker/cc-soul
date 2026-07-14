@@ -51,6 +51,7 @@ int cf_purge_orphan_embed_pending(struct CfHandle* h, size_t* out_cleared);
 size_t cf_requeue_ghost_embeddings(const struct CfHandle* h);
 int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
 int cf_embed_coverage(struct CfHandle* h, size_t* out_eligible, size_t* out_embedded);
+size_t cf_get_embedding(struct CfHandle* h, uint64_t id, float* out, size_t cap);
 int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
 int cf_ack_memory(struct CfHandle* h, uint64_t memory_id);
@@ -898,6 +899,11 @@ public:
         size_t n = 0;
         cf_force_clear_embed_pending(handle_, ids.data(), ids.size(), &n);
         return n;
+    }
+
+    // The stored vector, as the index holds it. Returns floats written (0 = no embedding).
+    size_t get_embedding(uint64_t id, float* out, size_t cap) const {
+        return cf_get_embedding(handle_, id, out, cap);
     }
 
     // (eligible, embedded) — memories that should have a vector vs those that do.

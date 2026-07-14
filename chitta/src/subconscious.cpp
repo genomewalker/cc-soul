@@ -989,7 +989,12 @@ bool Subconscious::time_for_background_embedding() const {
 
 // Dedicated embedding thread — runs independently of process_loop, holds no RPC mutex.
 void Subconscious::embed_loop() {
-    const std::string prefix = "search_document: ";
+    // Do NOT prepend "search_document: " here. transform_batch() defaults to
+    // EmbedMode::Document and add_prefix() (vak_llama.hpp:89-91) adds it itself; prepending
+    // again stores "search_document: search_document: …". Verified against live vectors:
+    // ~72% of the corpus was embedded by this loop and reproduces exactly (cosine 1.0000)
+    // from the double-prefixed text. simple_cli.cpp:475 and :1747 already avoid this; this
+    // was the third call site and the one that embeds most of the store.
     // Initial delay: let WAL replay and HNSW load finish.
     for (int i = 0; i < 150 && running_.load(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1050,7 +1055,7 @@ void Subconscious::embed_loop() {
                     auto content = field_store_->get_content(pending[i]);
                     if (content.size() < 20) { orphan_ids.push_back(pending[i]); continue; }
                     chunk_ids.push_back(pending[i]);
-                    chunk_texts.push_back(prefix + chitta::ssl::retrieval_text(content));
+                    chunk_texts.push_back(chitta::ssl::retrieval_text(content));
                 }
                 if (chunk_ids.empty() || !embedder_ || !embedder_->ready()) continue;
 

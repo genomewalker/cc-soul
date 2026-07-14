@@ -114,6 +114,50 @@ void FieldRpcHandler::register_system_tools() {
         return ToolResult::ok(ss.str(), out);
     };
 
+    // Which vector space is this memory's stored vector actually in? Two threads drain the
+    // same pending queue (subconscious.cpp embed_loop and simple_cli.cpp backfill) and they
+    // have historically prefixed the document text differently, so the answer is per-memory
+    // and cannot be inferred from anything the store reports. Re-embed the content both ways
+    // with the daemon's own yantra and see which one the stored vector matches.
+    tools_.push_back({{"name","embed_probe"},{"description","For a memory id: cosine of its STORED vector against a fresh single-prefix embed vs a double-prefix embed of the same content. ~1.0 identifies which vector space the memory actually lives in."},
+        {"inputSchema",{{"type","object"},
+            {"properties",{{"id",{{"type","string"}}}}},
+            {"required",json::array({"id"})}}}
+    });
+    handlers_["embed_probe"] = [this](const json& p) -> ToolResult {
+        uint64_t id = std::stoull(p.at("id").get<std::string>());
+        std::vector<float> stored(EMBED_DIM, 0.0f);
+        size_t n = field_store_->get_embedding(id, stored.data(), stored.size());
+        if (n == 0) return ToolResult::error("memory has no stored vector");
+        std::string content = field_store_->get_content(id);
+        if (content.empty()) return ToolResult::error("memory has no content");
+
+        // transform(EmbedMode::Document) prepends "search_document: " itself.
+        const std::string body = chitta::ssl::retrieval_text(content);
+        auto single = yantra_->transform(body, EmbedMode::Document).nu.data;
+        auto dbl    = yantra_->transform("search_document: " + body, EmbedMode::Document).nu.data;
+        auto query  = yantra_->transform(content, EmbedMode::Query).nu.data;
+
+        auto cos = [&](const std::vector<float>& a) {
+            double d = 0, na = 0, nb = 0;
+            for (size_t i = 0; i < stored.size() && i < a.size(); ++i) {
+                d += double(stored[i]) * a[i]; na += double(a[i]) * a[i];
+                nb += double(stored[i]) * stored[i];
+            }
+            return (na > 0 && nb > 0) ? d / (std::sqrt(na) * std::sqrt(nb)) : 0.0;
+        };
+        double cs = cos(single), cd = cos(dbl), cq = cos(query);
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(4)
+           << "cos(stored, single-prefix) : " << cs << "\n"
+           << "cos(stored, DOUBLE-prefix) : " << cd << "\n"
+           << "cos(stored, query-of-self) : " << cq << "\n"
+           << "space: " << (cd > cs ? "DOUBLE (wrong)" : "single (correct)") << "\n";
+        return ToolResult::ok(ss.str(), {{"id", std::to_string(id)},
+            {"cos_single", cs}, {"cos_double", cd}, {"cos_self_query", cq},
+            {"space", cd > cs ? "double" : "single"}});
+    };
+
     tools_.push_back({{"name","pending_embed_ids"},{"description","Return IDs of memories awaiting embedding (stuck embed queue)"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });

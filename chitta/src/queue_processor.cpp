@@ -388,7 +388,13 @@ void QueueProcessor::run() {
                             queue_fail_count_++;
                             continue;  // skip this queue item
                         }
-                        std::string full_text = title.empty() ? content : title + "\n" + content;
+                        // Callers routinely pass a title that is already content's first line;
+                        // prefixing it again stores the same text twice and doubles its weight
+                        // in both the lexical lane and the embedding.
+                        std::string full_text =
+                            (title.empty() || content.rfind(title, 0) == 0)
+                                ? content
+                                : title + "\n" + content;
                         std::string realm = args.value("realm", "brahman");
                         // Pass empty embedding — backfill thread embeds asynchronously.
                         auto new_id = field_store_.remember(category_to_kind(category), realm,
