@@ -57,8 +57,10 @@ def chitta_recall(query: str, limit: int, strategy: str, realm: str | None = Non
 
     The daemon already decides whether to abstain and reports it as a top-level
     `abstain` flag. Scoring abstention needs that flag, so callers get the payload."""
-    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
-           "--strategy", strategy, "--json"]
+    # `strategy` is NOT passed: simple_cli.cpp parses no --strategy flag, so the daemon
+    # silently dropped it on every run. --compare therefore re-ran one identical config
+    # under different names. Kept in the signature only so --compare still labels its arms.
+    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit), "--json"]
     if realm:
         cmd += ["--realm", realm]
     try:
@@ -311,7 +313,20 @@ def main():
                          "a threshold invented before the first honest measurement is just a "
                          "number the harness was built to clear.")
     ap.add_argument("--quiet", action="store_true")
-    ap.add_argument("--no-reranker", action="store_true")
+    # The reranker used to be ON by default, which meant the harness never measured the
+    # system. It fetches limit*_RERANK_FETCH_MUL, and lane_depth is a function of the
+    # requested limit (min(max(20, 2*limit), 160) — field_memory_recall.cpp:283), so asking
+    # for 80 to rerank down to 20 ALSO widened every retrieval lane from 40 to its 160
+    # ceiling. The harness then ran an ms-marco cross-encoder that tool_recall does not
+    # have. Two divergences from production, both invisible in the reported number, and
+    # every tuning decision in this repo was made against them. Opt-in only now: default =
+    # exactly what tool_recall serves.
+    ap.add_argument("--reranker", action="store_true",
+                    help="Fetch limit*4 and cross-encode down to limit. NOT the production "
+                         "path: it also widens lane_depth to 160. Use to measure the "
+                         "headroom a reranker would buy, never to report recall.")
+    ap.add_argument("--no-reranker", action="store_true",
+                    help="Deprecated no-op — this is the default now.")
     ap.add_argument("--bootstrap", action="store_true",
                     help="Re-verify gold IDs against live daemon")
     ap.add_argument("--include-g0", action="store_true",
@@ -322,7 +337,7 @@ def main():
     args = ap.parse_args()
 
     goldids_path = Path(args.goldids)
-    use_reranker = not args.no_reranker
+    use_reranker = args.reranker
 
     # Load queries
     queries = load_queries(goldids_path)
