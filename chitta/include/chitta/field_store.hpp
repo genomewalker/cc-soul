@@ -52,6 +52,8 @@ size_t cf_requeue_ghost_embeddings(const struct CfHandle* h);
 int cf_force_clear_embed_pending(struct CfHandle* h, const uint64_t* ids, size_t count, size_t* out_cleared);
 int cf_embed_coverage(struct CfHandle* h, size_t* out_eligible, size_t* out_embedded);
 size_t cf_get_embedding(struct CfHandle* h, uint64_t id, float* out, size_t cap);
+int cf_get_retrieval_surface(struct CfHandle* h, uint64_t id, uint8_t* buf, size_t buf_cap, size_t* written);
+int cf_set_retrieval_surface(struct CfHandle* h, uint64_t id, const uint8_t* surface, size_t len);
 int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
 int cf_ack_memory(struct CfHandle* h, uint64_t memory_id);
@@ -874,6 +876,29 @@ public:
                 return std::string(reinterpret_cast<char*>(big.data()), written);
         }
         return "";
+    }
+
+    /// Stage B: the natural-language retrieval surface for a memory, or "" if none
+    /// is stored (caller then embeds the telegraphic content). Mirrors get_content's
+    /// stack-then-heap buffer retry on -2.
+    std::string get_retrieval_surface(uint64_t id) {
+        char buf[65536];
+        size_t written = 0;
+        int r = cf_get_retrieval_surface(handle_, id,
+                                         reinterpret_cast<uint8_t*>(buf), sizeof(buf), &written);
+        if (r == 0) return std::string(buf, written);
+        if (r == -2 && written > 0) {
+            std::vector<uint8_t> big(written + 1);
+            if (cf_get_retrieval_surface(handle_, id, big.data(), big.size(), &written) == 0)
+                return std::string(reinterpret_cast<char*>(big.data()), written);
+        }
+        return "";
+    }
+
+    /// Stage B: set (non-empty) or clear (empty) a memory's retrieval surface.
+    void set_retrieval_surface(uint64_t id, const std::string& surface) {
+        cf_set_retrieval_surface(handle_, id,
+                                 reinterpret_cast<const uint8_t*>(surface.data()), surface.size());
     }
 
     /// Budgeted background competitive-weight refresh (consolidation sweep).

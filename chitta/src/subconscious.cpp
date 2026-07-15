@@ -1055,7 +1055,13 @@ void Subconscious::embed_loop() {
                     auto content = field_store_->get_content(pending[i]);
                     if (content.size() < 20) { orphan_ids.push_back(pending[i]); continue; }
                     chunk_ids.push_back(pending[i]);
-                    chunk_texts.push_back(chitta::ssl::retrieval_text(content));
+                    // Stage B: embed the natural-language retrieval surface when one is
+                    // stored (recall then matches NL queries); the telegraphic content
+                    // stays as display/context. Empty surface → embed retrieval_text(content).
+                    auto surface = field_store_->get_retrieval_surface(pending[i]);
+                    chunk_texts.push_back(surface.empty()
+                                              ? chitta::ssl::retrieval_text(content)
+                                              : surface);
                 }
                 if (chunk_ids.empty() || !embedder_ || !embedder_->ready()) continue;
 
