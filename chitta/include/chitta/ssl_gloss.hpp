@@ -130,6 +130,11 @@ inline std::string to_lower(std::string s) {
 
 // Translate a raw predicate token to NL verb phrase
 inline std::string predicate_to_nl(const std::string& pred) {
+    // Leading '!' encodes negation (SKILL.md: !validate = "does not validate").
+    // Without this the bang falls through untranslated and the gloss embeds next to
+    // the positive predicate, silently inverting every negated memory.
+    if (!pred.empty() && pred.front() == '!')
+        return "does not " + predicate_to_nl(pred.substr(1));
     auto lp = to_lower(pred);
     const auto& m = predicate_nl_map();
     auto it = m.find(lp);
