@@ -7,6 +7,7 @@
 #include <cstring>
 #include <chrono>
 #include <cstdint>
+#include <utility>
 #include <atomic>
 #include <iostream>
 #include <cmath>
@@ -111,6 +112,8 @@ int cf_hopfield_co_retrieval(struct CfHandle* h, const uint64_t* ids, size_t cou
 char* cf_hopfield_stats(const struct CfHandle* h);
 int cf_adapt_vigilance(struct CfHandle* h, float avg_error);
 int cf_chain_head(const struct CfHandle* h, uint8_t* out);
+// One-shot backfill of the artifact (bridge-lane) index from stored payloads.
+int cf_backfill_artifact_refs(const struct CfHandle* h, uint64_t* out_mems, uint64_t* out_assoc);
 // Compiled store vector-space id (model/dim/text-format). Handle-less; used by the
 // self-update gate to detect an incompatible replacement binary before execv.
 uint64_t cf_compiled_vector_space_id(void);
@@ -502,6 +505,14 @@ public:
         char* s = cf_memory_claim_info(handle_, memory_id, now_ms);
         if (!s) { cf_soft(-1, __func__); return "{}"; }
         std::string r(s); cf_free_string(s); return r;
+    }
+
+    /// Backfill the bridge-lane artifact index from stored payloads. Returns
+    /// (memories_touched, associations_created). One-shot bootstrap.
+    std::pair<uint64_t, uint64_t> backfill_artifact_refs() const {
+        uint64_t mems = 0, assoc = 0;
+        cf_backfill_artifact_refs(handle_, &mems, &assoc);
+        return {mems, assoc};
     }
 
     /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.

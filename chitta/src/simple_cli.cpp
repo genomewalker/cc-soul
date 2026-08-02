@@ -425,9 +425,17 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                 try {
                     auto _lk = handler.acquire_shared_lock();
                     field_store.flush();
-                    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count();
-                    auto [demoted, pruned] = field_store.run_demotion(now_ms);
+                    // run_demotion (decay/demote/prune) is hygiene: gate it on the same
+                    // flag as the subconscious path so --no-hygiene suppresses ALL demotion,
+                    // not just sleep-consolidation's. flush() stays unconditional (durability,
+                    // not hygiene). Was ungated → --no-hygiene silently left this loop running.
+                    size_t demoted = 0, pruned = 0;
+                    if (subconscious_config.enable_hygiene) {
+                        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        auto dp = field_store.run_demotion(now_ms);
+                        demoted = dp.first; pruned = dp.second;
+                    }
                     if (verbose_mode && (demoted > 0 || pruned > 0)) {
                         std::cerr << "[maint] Cycle " << cycle_count
                                   << ": demoted=" << demoted
@@ -606,7 +614,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                         }
                         continue;  // Still within cap, skip
                     }
-                    std::cerr << "[distill] Busy-skip cap reached, running distillation anyway\n";
+                    if (verbose_mode) {
+                        std::cerr << "[distill] Busy-skip cap reached, running distillation anyway\n";
+                    }
                     ops_log("[distill] busy-skip cap reached — running while daemon busy");
                 }
                 last_busy_skip_start = now_time;
@@ -1656,6 +1666,14 @@ int main(int argc, char* argv[]) {
     }
 
     FieldStore& field_store = *field_store_ptr;
+    // One-shot bridge-lane index bootstrap for corpora written before write-time
+    // atom derivation existed. Gated: CHITTA_ARTIFACT_BACKFILL=1. Persists on the
+    // next snapshot save.
+    if (const char* bf = std::getenv("CHITTA_ARTIFACT_BACKFILL"); bf && bf[0] == '1') {
+        auto [mems, assoc] = field_store.backfill_artifact_refs();
+        std::cerr << "[daemon] artifact backfill: " << mems << " memories, "
+                  << assoc << " associations\n";
+    }
     // Return pages freed during load-time migration (triplet purge, dedup) back to OS.
 #if defined(__linux__)
     malloc_trim(0);
