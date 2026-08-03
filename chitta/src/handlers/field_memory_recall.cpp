@@ -344,7 +344,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // Lane-0 atom bridge: id -> normalized saturating-IDF weight of a co-atom
     // partner of the recall anchor. Populated in the multi-lane block, consumed
     // as an additive atom-overlap boost in the rescore (identity-evidence analog
-    // of the term-overlap lever). Empty unless CHITTA_BRIDGE_LANE0 is set.
+    // of the term-overlap lever). Populated by default; empty iff CHITTA_BRIDGE_LANE0=0.
     std::unordered_map<uint64_t, float> bridge_boost;
     if (expand && query_has_entities(query)) {
         std::vector<std::string> forms = {query, query}; // original 2× = boosted weight
@@ -384,16 +384,20 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             rrf_lane(window_gate(field_store_->recall_hdc(query, lane_depth, realm)));
         }
 
-        // Lane-0 atom bridge (CHITTA_BRIDGE_LANE0): record the RRF leader's rare
-        // co-atom partners with a normalized saturating-IDF weight. The RRF
-        // position-based fusion above buries a keyword-absent partner under the
-        // keyword-matching crowd; the additive term-overlap rescore below then
-        // finishes the job. So instead of a (negligible) RRF-mass nudge here, we
-        // stash the partner's IDF weight and spend it in that same rescore stage
-        // as an additive atom-overlap boost — the identity-evidence analog of
-        // shared query terms. Never fabricates a hit: the boost only lands on
-        // partners the lanes already surfaced into the pool.
-        if (std::getenv("CHITTA_BRIDGE_LANE0") && !rrf_scores.empty()) {
+        // Lane-0 atom bridge: record the RRF leader's rare co-atom partners with a
+        // normalized saturating-IDF weight. The RRF position-based fusion above
+        // buries a keyword-absent partner under the keyword-matching crowd; the
+        // additive term-overlap rescore below then finishes the job. So instead of
+        // a (negligible) RRF-mass nudge here, we stash the partner's IDF weight and
+        // spend it in that same rescore stage as an additive atom-overlap boost —
+        // the identity-evidence analog of shared query terms. Never fabricates a
+        // hit: the boost only lands on partners the lanes already surfaced.
+        // Default ON since the honest-gold A/B (v7, n=161): single_hop recall+nDCG
+        // +0.02, overall recall 0.950->0.969, no material regression. Kill switch:
+        // CHITTA_BRIDGE_LANE0=0.
+        const char* lane0_env = std::getenv("CHITTA_BRIDGE_LANE0");
+        const bool lane0_on = !lane0_env || lane0_env[0] != '0';
+        if (lane0_on && !rrf_scores.empty()) {
             // Anchor on the top-K fused hits, not just the RRF leader: the leader
             // is often a pure keyword match that carries no rare identity atom,
             // while the memory that DOES (the query's real subject) sits a rank or
@@ -653,9 +657,9 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             // (saturating IDF -> ~0.8) then lifts a keyword-absent partner past the
             // keyword-only crowd but below the genuine query subject (measured on
             // the atombridge A/B: 0.4 -> partner #2, above the crowd, under the
-            // anchor; 0.45 flips it over the anchor). Env/param-tunable so it can be
-            // re-fit on honest gold before the flag's default is ever flipped ON.
-            // bridge_boost is empty unless CHITTA_BRIDGE_LANE0 is set (no-op default).
+            // anchor; 0.45 flips it over the anchor). Env/param-tunable (CHITTA_ATOM_W
+            // / _atom_w) so it can be re-fit on honest gold. bridge_boost is populated
+            // by default now (lane-0 default ON); empty iff CHITTA_BRIDGE_LANE0=0.
             static const float kAtomW = [] {
                 const char* e = std::getenv("CHITTA_ATOM_W");
                 return e ? std::strtof(e, nullptr) : 0.4f;
