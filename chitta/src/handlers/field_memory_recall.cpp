@@ -37,6 +37,61 @@ const char* span_class_label(int c) {
         default: return "atom";
     }
 }
+
+// Tokenizer shared by set_lexical() below — kept identical to the rank-boost
+// tokens() lambda in tool_recall (glued form + '-'/'_' sub-parts, stopwords,
+// >=3 chars) so the displayed lexical overlap and the ranking overlap agree on
+// what a token is.
+std::unordered_set<std::string> lex_tokens(const std::string& s) {
+    static const std::unordered_set<std::string> stop = {
+        "the", "and", "for", "with", "what", "how", "did", "does", "was",
+        "were", "are", "that", "this", "when", "where", "who", "why"};
+    std::unordered_set<std::string> out;
+    auto emit = [&](const std::string& t) {
+        if (t.size() >= 3 && !stop.count(t)) out.insert(t);
+    };
+    auto emit_parts = [&](const std::string& t) {
+        emit(t);
+        if (t.find('-') == std::string::npos && t.find('_') == std::string::npos) return;
+        std::string part;
+        for (char c : t) {
+            if (c == '-' || c == '_') { emit(part); part.clear(); }
+            else part.push_back(c);
+        }
+        emit(part);
+    };
+    std::string cur;
+    for (char c : s) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') {
+            cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        } else if (!cur.empty()) {
+            emit_parts(cur);
+            cur.clear();
+        }
+    }
+    if (!cur.empty()) emit_parts(cur);
+    return out;
+}
+
+// Honest bounded per-hit relevance for DISPLAY. Keyword-only hits carry
+// semantic_score 0, so display_pct would otherwise fall back to the composite
+// activation (>=1 for keyword hits) and clamp to a flat 100% for every result.
+// Sets entry["lexical"] = |q_toks ∩ content_toks| / |q_toks| in [0,1] so
+// display_pct can show max(cosine, lexical). Empty q_toks (query is all short/
+// stopword tokens, e.g. "up") -> 0 for every hit -> honest low confidence.
+void set_lexical(nlohmann::json& results, const std::string& query) {
+    auto q_toks = lex_tokens(query);
+    if (q_toks.empty()) {
+        for (auto& r : results) r["lexical"] = 0.0f;
+        return;
+    }
+    for (auto& r : results) {
+        auto c_toks = lex_tokens(r.value("text", ""));
+        size_t inter = 0;
+        for (const auto& t : q_toks) if (c_toks.count(t)) ++inter;
+        r["lexical"] = static_cast<float>(inter) / static_cast<float>(q_toks.size());
+    }
+}
 } // namespace
 
 namespace chitta {
@@ -530,7 +585,12 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 auto c_toks = tokens(h.content);
                 size_t inter = 0;
                 for (const auto& t : q_toks) inter += c_toks.count(t);
-                h.score += overlap_w * (static_cast<float>(inter) / q_toks.size());
+                const float frac = static_cast<float>(inter) / q_toks.size();
+                h.score += overlap_w * frac;
+                // Remember the raw lexical overlap for the abstain gate: a hit that
+                // literally contains the query's terms is high-confidence even when
+                // its cosine is 0 (keyword/atom-only hit).
+                h.lexical_score = frac;
             }
             std::sort(hits.begin(), hits.end(),
                       [](const FieldRecallHit& a, const FieldRecallHit& b) {
@@ -652,6 +712,71 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         }
     }
 
+    // Optional MMR diversification (separation_mode). The corpus stores the same event
+    // several times, so near-identical siblings fill the page and one cluster crowds out
+    // the rest — the "good cosine, no margin" failure. Greedy re-selection penalizes a
+    // candidate by its max content overlap (token Jaccard) with those already picked, so
+    // one sibling represents its cluster and other clusters get a slot. Content-based on
+    // purpose: cosine over-trusts the very vectors that make siblings look identical.
+    // Gated off by default (the schema has advertised separation_mode all along but nothing
+    // implemented it), so plain recall is byte-identical. Tune mix with CHITTA_MMR_LAMBDA.
+    if (params.value("separation_mode", false) && hits.size() > 1) {
+        auto ctoks = [](const std::string& s) {
+            std::unordered_set<std::string> out;
+            std::string cur;
+            auto flush = [&] { if (cur.size() >= 3) out.insert(cur); cur.clear(); };
+            for (char c : s) {
+                if (std::isalnum(static_cast<unsigned char>(c)))
+                    cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                else flush();
+            }
+            flush();
+            return out;
+        };
+        const float lambda = [] {
+            const char* e = std::getenv("CHITTA_MMR_LAMBDA");
+            return e ? std::strtof(e, nullptr) : 0.7f;
+        }();
+        std::vector<std::unordered_set<std::string>> tok;
+        tok.reserve(hits.size());
+        for (auto& h : hits) tok.push_back(ctoks(h.content));
+        float smax = hits.front().score;
+        if (smax < 1e-6f) smax = 1.0f;
+        std::vector<size_t> cand;
+        cand.reserve(hits.size());
+        for (size_t i = 0; i < hits.size(); ++i) cand.push_back(i);
+        std::vector<FieldRecallHit> selected;
+        std::vector<size_t> sel_idx;
+        while (selected.size() < limit && !cand.empty()) {
+            size_t best_pos = 0;
+            float best_val = -1e30f;
+            for (size_t p = 0; p < cand.size(); ++p) {
+                const size_t i = cand[p];
+                const float rel = hits[i].score / smax;
+                float maxsim = 0.0f;
+                for (size_t j : sel_idx) {
+                    const auto& a = tok[i];
+                    const auto& b = tok[j];
+                    if (a.empty() || b.empty()) continue;
+                    const auto& small = a.size() < b.size() ? a : b;
+                    const auto& big   = a.size() < b.size() ? b : a;
+                    size_t inter = 0;
+                    for (const auto& t : small) inter += big.count(t);
+                    const float uni = static_cast<float>(a.size() + b.size() - inter);
+                    const float jac = uni > 0 ? static_cast<float>(inter) / uni : 0.0f;
+                    if (jac > maxsim) maxsim = jac;
+                }
+                const float val = lambda * rel - (1.0f - lambda) * maxsim;
+                if (val > best_val) { best_val = val; best_pos = p; }
+            }
+            const size_t chosen = cand[best_pos];
+            sel_idx.push_back(chosen);
+            selected.push_back(std::move(hits[chosen]));
+            cand.erase(cand.begin() + static_cast<long>(best_pos));
+        }
+        hits = std::move(selected);
+    }
+
     // Final truncation to the response limit — deliberately after both rescore
     // passes so a deep-pool candidate the rescorers rank highly makes the cut.
     if (hits.size() > limit) hits.resize(limit);
@@ -678,10 +803,18 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // instead of presenting a weak best-of-a-bad-batch as if confident. relevance(cos) =
     // sigma(3.27*cos - 0.85) (the same Platt calibration the Rust scorer uses); tau=0.45 <=>
     // centered cosine 0.20 (~1.85 sigma above the random-pair spread). Room room-f366bf5a.
+    // Per-lane abstain gate: a hit is "known" if EITHER lane is confident — the dense
+    // Platt-calibrated cosine OR the Tier-1 lexical overlap (fraction of query content
+    // tokens literally present). Previously max_rel maxed over semantic_score alone, so
+    // a perfect keyword/atom hit (cosine 0) was capped at sigma(-0.85)~=0.30 and
+    // mislabeled UNKNOWN — which tripped the prompt-hook cross-realm fallback into
+    // injecting off-topic memories. Crediting the lexical lane fixes that class at the
+    // source. (df<=4 exact-atom hard-override is a follow-on; needs atom-df from FFI.)
     float max_rel = 0.0f;
-    for (const auto& h : hits)
-        max_rel = std::max(max_rel,
-                           1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f))));
+    for (const auto& h : hits) {
+        const float dense = 1.0f / (1.0f + std::exp(-(3.27f * h.semantic_score - 0.85f)));
+        max_rel = std::max(max_rel, std::max(dense, h.lexical_score));
+    }
     bool weak = !hits.empty() && max_rel < 0.45f;
 
     std::ostringstream ss;
@@ -694,6 +827,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // C2 self-monitoring (prompt-core.sh) bins this into KNOWN/THIN/UNKNOWN.
     if (!hits.empty()) ss << " (maxrel " << static_cast<int>(max_rel * 100) << "%)";
     ss << ":\n";
+    set_lexical(results_json, query);
     for (auto& r : results_json) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "]";
@@ -868,6 +1002,7 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
 
     std::ostringstream ss;
     ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
+    set_lexical(results_json, query);
     for (const auto& r : results_json) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
@@ -1012,6 +1147,7 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
 
     std::ostringstream ss;
     ss << "Hybrid recall: " << merged.size() << " results\n";
+    set_lexical(merged, query);
     for (const auto& r : merged) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
@@ -1111,6 +1247,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
 
     std::ostringstream ss;
     ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
+    set_lexical(results, query);
     for (const auto& r : results) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
@@ -1313,6 +1450,7 @@ ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     std::ostringstream ss;
     ss << "Found " << final_merged.size() << " results (" << passes_run << " pass"
        << (passes_run > 1 ? "es" : "") << "):\n";
+    set_lexical(final_merged, query);
     for (const auto& r : final_merged) {
         int pct = display_pct(r);
         ss << "[" << pct << "%] [" << r.value("type", "?") << "] "

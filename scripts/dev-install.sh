@@ -41,6 +41,14 @@ if [ -d "$MKT/chitta-mcp" ]; then
   for py in "$REPO"/chitta-mcp/*.py; do
     link_editable "$py" "$MKT/chitta-mcp/$(basename "$py")"
   done
+  # soul_repl/ is a subpackage the top-level *.py glob misses; without this the
+  # marketplace copy drifts stale on a plugin reclone (caused the sandbox.py 100% bug).
+  if [ -d "$REPO/chitta-mcp/soul_repl" ]; then
+    mkdir -p "$MKT/chitta-mcp/soul_repl"
+    for py in "$REPO"/chitta-mcp/soul_repl/*.py; do
+      link_editable "$py" "$MKT/chitta-mcp/soul_repl/$(basename "$py")"
+    done
+  fi
 else
   echo "  WARN: marketplace chitta-mcp dir not found ($MKT/chitta-mcp) — is the plugin installed?"
 fi

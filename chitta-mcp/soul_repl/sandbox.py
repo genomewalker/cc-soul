@@ -165,7 +165,10 @@ class SoulAPI:
                 except:
                     mem_id = 0
 
-            score = m.get("score", m.get("relevance", m.get("similarity", 0)))
+            # Honest display signal: bounded max(cosine, lexical-overlap), mirroring
+            # the C++ display_pct. The composite relevance/score is unbounded (>=1 for
+            # keyword-route hits) and renders as a flat 100% for every junk hit.
+            score = max(float(m.get("similarity") or 0), float(m.get("lexical") or 0))
             content = m.get("content", m.get("text", m.get("summary", "")))
             if score >= threshold:
                 memories.append(Memory(
@@ -200,7 +203,7 @@ class SoulAPI:
             memories.append(Memory(
                 id=mem_id,
                 content=m.get("content", m.get("text", "")),
-                score=m.get("combined_score", m.get("score", m.get("relevance", 0))),
+                score=max(float(m.get("similarity") or 0), float(m.get("lexical") or 0)),
                 tags=m.get("tags", []),
                 created_at=m.get("created_at", "")
             ))

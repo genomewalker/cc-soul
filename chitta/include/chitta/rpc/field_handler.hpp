@@ -602,16 +602,20 @@ private:
         return arr;
     }
 
-    // Human-facing confidence percent. Prefers the raw semantic cosine
-    // ("similarity") — a true 0-1 relevance — and falls back to the composite
-    // "relevance" only for keyword-only hits that carry no cosine. The composite
-    // score is a product of ~20 cognitive factors, so its magnitude caps around
-    // 0.03 even for a cos-0.97 match; displaying it tripped the prompt-injection
-    // confidence gate and dropped every strong semantic hit.
+    // Human-facing confidence percent. The two honest, bounded [0,1] relevance
+    // signals are the raw semantic cosine ("similarity") and the query/content
+    // token overlap ("lexical", set by set_lexical() before each display loop);
+    // the displayed value is their max. The composite "relevance" is DELIBERATELY
+    // not shown: for semantic hits its ~20-factor product caps near 0.03 (a cos-
+    // 0.97 match reads 3%), and for keyword-only hits (semantic_score 0) it is the
+    // ACT-R activation >=1, which clamps to a flat 100% for EVERY keyword-route
+    // result (verified live: query "up" -> 3x [100%] junk, maxrel 1%). Keyword
+    // hits now display their lexical overlap instead; junk short-token queries
+    // (all tokens <3 chars or stopwords) yield 0 overlap -> 0% -> hook-floor drop.
     static int display_pct(const nlohmann::json& r) {
         float sim = r.value("similarity", 0.0f);
-        float rel = r.value("relevance", 0.0f);
-        float v = sim > 0.0f ? sim : rel;
+        float lex = r.value("lexical", 0.0f);
+        float v = std::max(sim, lex);
         if (v < 0.0f) v = 0.0f;
         if (v > 1.0f) v = 1.0f;
         return static_cast<int>(v * 100);
