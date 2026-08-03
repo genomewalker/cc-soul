@@ -341,6 +341,11 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // Multi-lane RRF: original query (2×, weighted) + SSL-shaped variants + BM25
     // Works directly on FieldRecallHit to preserve Hebbian/temporal scoring metadata.
     std::vector<FieldRecallHit> hits;
+    // Lane-0 atom bridge: id -> normalized saturating-IDF weight of a co-atom
+    // partner of the recall anchor. Populated in the multi-lane block, consumed
+    // as an additive atom-overlap boost in the rescore (identity-evidence analog
+    // of the term-overlap lever). Empty unless CHITTA_BRIDGE_LANE0 is set.
+    std::unordered_map<uint64_t, float> bridge_boost;
     if (expand && query_has_entities(query)) {
         std::vector<std::string> forms = {query, query}; // original 2× = boosted weight
         for (auto& v : chitta::ssl::ssl_query_variants(query)) forms.push_back(v);
@@ -377,6 +382,67 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         // HDC lane (skipped when disable_hdc=true for ablation/benchmarking)
         if (!params.value("disable_hdc", false)) {
             rrf_lane(window_gate(field_store_->recall_hdc(query, lane_depth, realm)));
+        }
+
+        // Lane-0 atom bridge (CHITTA_BRIDGE_LANE0): record the RRF leader's rare
+        // co-atom partners with a normalized saturating-IDF weight. The RRF
+        // position-based fusion above buries a keyword-absent partner under the
+        // keyword-matching crowd; the additive term-overlap rescore below then
+        // finishes the job. So instead of a (negligible) RRF-mass nudge here, we
+        // stash the partner's IDF weight and spend it in that same rescore stage
+        // as an additive atom-overlap boost — the identity-evidence analog of
+        // shared query terms. Never fabricates a hit: the boost only lands on
+        // partners the lanes already surfaced into the pool.
+        if (std::getenv("CHITTA_BRIDGE_LANE0") && !rrf_scores.empty()) {
+            // Anchor on the top-K fused hits, not just the RRF leader: the leader
+            // is often a pure keyword match that carries no rare identity atom,
+            // while the memory that DOES (the query's real subject) sits a rank or
+            // two down. Union the co-atom partners of the top-K, keeping the max
+            // saturating-IDF boost per partner.
+            std::vector<std::pair<uint64_t, float>> lead(rrf_scores.begin(), rrf_scores.end());
+            const size_t kAnchors = std::min<size_t>(5, lead.size());
+            std::partial_sort(lead.begin(), lead.begin() + kAnchors, lead.end(),
+                              [](auto& a, auto& b) { return a.second > b.second; });
+            const float norm = std::log(static_cast<float>(field_store_->memory_count()) + 1.0f);
+            for (size_t a = 0; a < kAnchors; ++a) {
+                auto br = field_store_->bridge_lane(lead[a].first, realm, 16);
+                const auto& bids = br.first; const auto& bw = br.second;
+                for (size_t i = 0; i < bids.size(); ++i) {
+                    // Materialize a partner no lane surfaced (keyword-absent,
+                    // cosine-cold): fetch it realm-scoped so it can enter the pool.
+                    // A partner already present keeps its own hit; we only add the
+                    // bridge's vote+boost to it.
+                    if (!best_hit.count(bids[i])) {
+                        std::string content = field_store_->get_content(bids[i]);
+                        if (content.empty()) continue;
+                        FieldRecallHit h;
+                        h.memory_id = bids[i];
+                        h.semantic_score = 0.0f;
+                        h.content = content;
+                        try {
+                            auto m = json::parse(field_store_->get_memory_metadata(bids[i]));
+                            h.ts_ms        = m.value("ts_ms", int64_t(0));
+                            h.strength     = m.value("strength", 0.5f);
+                            h.confidence   = m.value("confidence", 0.5f);
+                            h.access_count = m.value("access_count", uint32_t(0));
+                            h.kind         = m.value("kind", "episode");
+                            h.realm        = m.value("realm", "");
+                        } catch (...) {}
+                        if (!realm.empty() && h.realm != realm) continue;
+                        best_hit[bids[i]] = std::move(h);
+                    }
+                    // Bridge is a first-class RRF lane: partners come weight-sorted,
+                    // so rank i+1 gives the rarest-atom partner a rank-1 vote (same
+                    // magnitude as leading any other lane). Applied whether or not a
+                    // weak dense hit already put the partner in the pool — otherwise
+                    // that tiny natural RRF base can't be lifted by the boost alone.
+                    rrf_scores[bids[i]] += 1.0f / (kRRF + static_cast<float>(i + 1));
+                    float boost = norm > 0.0f ? std::min(1.0f, bw[i] / norm) : 0.0f;
+                    auto it = bridge_boost.find(bids[i]);
+                    if (it == bridge_boost.end() || boost > it->second)
+                        bridge_boost[bids[i]] = boost;
+                }
+            }
         }
 
         // Collect sorted by RRF score, keep original hit metadata
@@ -581,6 +647,20 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 return e ? std::strtof(e, nullptr) : 0.4f;
             }();
             const float overlap_w = params.value("_overlap_w", kOverlapW);
+            // Lane-0 atom-overlap weight: symmetric with the term-overlap default
+            // (0.4) — a rare shared atom is weighted like a full query-term match.
+            // With the bridge RRF vote seeding the base, a maximally-rare atom
+            // (saturating IDF -> ~0.8) then lifts a keyword-absent partner past the
+            // keyword-only crowd but below the genuine query subject (measured on
+            // the atombridge A/B: 0.4 -> partner #2, above the crowd, under the
+            // anchor; 0.45 flips it over the anchor). Env/param-tunable so it can be
+            // re-fit on honest gold before the flag's default is ever flipped ON.
+            // bridge_boost is empty unless CHITTA_BRIDGE_LANE0 is set (no-op default).
+            static const float kAtomW = [] {
+                const char* e = std::getenv("CHITTA_ATOM_W");
+                return e ? std::strtof(e, nullptr) : 0.4f;
+            }();
+            const float atom_w = params.value("_atom_w", kAtomW);
             for (auto& h : hits) {
                 auto c_toks = tokens(h.content);
                 size_t inter = 0;
@@ -591,6 +671,14 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 // literally contains the query's terms is high-confidence even when
                 // its cosine is 0 (keyword/atom-only hit).
                 h.lexical_score = frac;
+                // Atom-overlap boost: a bridge partner sharing the anchor's rare
+                // atom is high-confidence even with zero query-term overlap. The
+                // boost is the same identity evidence the abstain gate trusts, so
+                // fold it into lexical_score too.
+                if (auto it = bridge_boost.find(h.memory_id); it != bridge_boost.end()) {
+                    h.score += atom_w * it->second;
+                    h.lexical_score = std::max(h.lexical_score, it->second);
+                }
             }
             std::sort(hits.begin(), hits.end(),
                       [](const FieldRecallHit& a, const FieldRecallHit& b) {

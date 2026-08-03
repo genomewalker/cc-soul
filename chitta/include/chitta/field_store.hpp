@@ -91,6 +91,13 @@ int cf_recall_field(struct CfHandle* h,
     const char* query_text, const char* realm, size_t k,
     CfRecallHit* buf, size_t buf_cap, size_t* written);
 
+// Lane-0 atom bridge: anchor memory -> saturating-IDF co-atom partner ids +
+// BM25-IDF weights (parallel out arrays, ranked by weight desc). Fused as a
+// first-class RRF lane by the multi-lane recall path.
+int cf_bridge_lane(struct CfHandle* h,
+    uint64_t anchor_memory_id, const char* realm, size_t k,
+    uint64_t* out_ids, float* out_weights, size_t cap, size_t* written);
+
 // Hybrid recall: HNSW + BM25 fused via RRF in Rust (real hybrid path).
 // start_ms/end_ms: optional authored_at_ms window gate (0/0 = disabled).
 int cf_recall_with_fallback(struct CfHandle* h,
@@ -358,6 +365,11 @@ struct FieldRecallHit {
     std::string kind;
     std::string realm;
     std::string content;
+    // Fraction of query content-tokens literally present in this hit (Tier-1 lexical
+    // overlap, field_memory_recall.cpp:533). Lets the abstain gate credit a strong
+    // lexical/exact hit that carries semantic_score 0 — otherwise a perfect keyword
+    // match is capped at sigma(-0.85)~=0.30 and mislabeled UNKNOWN.
+    float       lexical_score    = 0.0f;
     float       semantic_weight  = 0.0f;
     float       status_mul       = 0.0f;
     float       epistemic_mul    = 0.0f;
@@ -747,6 +759,23 @@ public:
         );
         cf_checked(r, __func__);
         return hits_to_results(buf, written);
+    }
+
+    /// Lane-0 atom bridge: co-atom partners of `anchor` with their BM25-IDF
+    /// weights (parallel vectors, ranked by weight desc). Empty when the bridge
+    /// is disabled or the anchor carries no shared atom.
+    std::pair<std::vector<uint64_t>, std::vector<float>>
+    bridge_lane(uint64_t anchor, const std::string& realm, size_t k) {
+        constexpr size_t MAX = 64;
+        uint64_t ids[MAX];
+        float    weights[MAX];
+        size_t   written = 0;
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        int r = cf_bridge_lane(handle_, anchor, realm_ptr, std::min(k, MAX),
+                               ids, weights, MAX, &written);
+        cf_checked(r, __func__);
+        return {std::vector<uint64_t>(ids, ids + written),
+                std::vector<float>(weights, weights + written)};
     }
 
     /// Field-RAG recall — Modern Hopfield / DAM relaxation over HNSW candidates.
