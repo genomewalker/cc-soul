@@ -646,9 +646,20 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             // Env-tunable so the weight can be ablated and re-fitted against honest gold
             // without a rebuild+10min store reload per point; per-request override so a
             // whole dose-response sweep costs one daemon boot instead of one boot per point.
+            // Default 0.4 -> 0.8: dose-response on honest gold (v7, n=161, dev daemon,
+            // env-toggled per boot) is monotone up through 0.8 then plateaus. The
+            // non-artifact win — multihop bridge golds pulled INTO top-10 — saturates
+            // exactly at 0.8: multihop recall 0.818->0.909 and recall@k 0.969->0.975
+            // both hit their ceiling there and never move for higher w. multihop nDCG
+            // 0.515->0.635 (+0.120); single_hop 0.879->0.898; mean 0.854->0.880. Above
+            // 0.8 only single_hop/mean keep creeping (0.907/0.889 at w=1.4) with no
+            // further recall gain — that tail is the contamination this comment warns
+            // about (gold queries written from the memory's own text reward lexical
+            // weight without bound), so we stop at the recall-saturation point, not the
+            // eval max. Still env/param-tunable for re-fit against future honest gold.
             static const float kOverlapW = [] {
                 const char* e = std::getenv("CHITTA_OVERLAP_W");
-                return e ? std::strtof(e, nullptr) : 0.4f;
+                return e ? std::strtof(e, nullptr) : 0.8f;
             }();
             const float overlap_w = params.value("_overlap_w", kOverlapW);
             // Lane-0 atom-overlap weight: symmetric with the term-overlap default
@@ -665,6 +676,15 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
                 return e ? std::strtof(e, nullptr) : 0.4f;
             }();
             const float atom_w = params.value("_atom_w", kAtomW);
+            // NB: `frac` below is query-token COVERAGE with no doc-length normalization —
+            // the one rescore stage that lacks it. A BM25-style length penalty
+            // (frac / (1-b + b*dl/L0), b=0.75 L0=120) was A/B'd against honest gold
+            // (v7, n=161) on the hypothesis that long transcripts steal the +0.4 boost
+            // from short distilled answers: it REGRESSED (mean nDCG 0.854->0.846,
+            // multihop 0.515->0.498, single_hop 0.879->0.871; recall@k flat). Demoting
+            // long docs did not promote golds — recall@k unchanged means golds stay
+            // in-pool, so the reshuffle only hurt the head; the effect shrinks toward 0
+            // as L0 rises, never positive. Hypothesis falsified; not re-attempted.
             for (auto& h : hits) {
                 auto c_toks = tokens(h.content);
                 size_t inter = 0;
@@ -707,6 +727,13 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // gain — RRF-merged graph neighbors displace correct single-hop answers from
     // the top-k rerank pool. Net-negative, so it ships dormant. Enable for
     // experiments with CHITTA_PPR_LANE=1.
+    // RE-MEASURED 2026-08 WITH the head fence below (v7, n=161): the fence cut the
+    // single_hop damage (nDCG 0.879->0.872 at gate 0.55) but there was never a real
+    // multihop gain to protect — multihop nDCG 0.515->0.519 (+0.004, inside CI), and
+    // injection still knocks golds out of the top-10 (recall@k 0.969->0.950). Raising
+    // the gate to 0.70 (fewer protected heads -> more injection) is uniformly worse
+    // (single_hop -0.028, multihop -0.017); lowering it converges back to baseline.
+    // No operating point lifts multihop without single_hop/recall cost. Stays dormant.
     bool ppr_on = [] {
         const char* e = std::getenv("CHITTA_PPR_LANE");
         return e && std::string(e) == "1";
