@@ -34,6 +34,15 @@ void FieldRpcHandler::register_system_tools() {
     });
     handlers_["trim_realm_names"] = [this](const json& p) { return tool_trim_realm_names(p); };
 
+    tools_.push_back({{"name","remap_realms"},{"description","Bulk-remap realms per {old:new} mapping (mapping_file=path or mapping=object; dry_run defaults true)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"mapping_file",{{"type","string"}}},
+            {"mapping",{{"type","object"}}},
+            {"dry_run",{{"type","boolean"}}}
+        }}}}
+    });
+    handlers_["remap_realms"] = [this](const json& p) { return tool_remap_realms(p); };
+
     tools_.push_back({{"name","save_spectral_snapshot"},{"description","Save spectral stats snapshot for drift tracking"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });

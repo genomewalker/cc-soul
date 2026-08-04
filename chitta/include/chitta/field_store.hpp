@@ -306,6 +306,8 @@ int cf_add_triplet_with_source(struct CfHandle* h,
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
 int64_t cf_trim_realm_names(struct CfHandle* h);
+int cf_remap_realms(struct CfHandle* h, const char* mapping_json, bool dry_run,
+    uint8_t* buf, size_t buf_cap, size_t* written);
 
 // Contradiction detection FFI
 char* cf_detect_contradictions(const struct CfHandle* h, uint64_t memory_id, const char* realm);
@@ -2167,6 +2169,16 @@ public:
     /// Trim trailing whitespace from realm names. Returns count fixed.
     int64_t trim_realm_names() {
         return cf_trim_realm_names(handle_);
+    }
+
+    /// Bulk-remap realms per a JSON {old:new} object. dry_run = census only.
+    std::string remap_realms(const std::string& mapping_json, bool dry_run) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_remap_realms(handle_, mapping_json.c_str(), dry_run,
+                                buf.data(), buf.size(), &written);
+        if (!cf_soft(r, __func__)) return "{}";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
     /// Save spectral snapshot for drift tracking.

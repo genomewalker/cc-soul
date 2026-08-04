@@ -31,6 +31,7 @@
     ToolResult tool_memory_provenance(const json& params);
     ToolResult tool_memory_status(const json& params);
     ToolResult tool_trim_realm_names(const json&);
+    ToolResult tool_remap_realms(const json&);
     ToolResult tool_save_spectral_snapshot(const json&);
     ToolResult tool_spectral_drift(const json&);
     ToolResult tool_compact_wal(const json&);

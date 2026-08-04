@@ -3,6 +3,9 @@
 
 #include "../../include/chitta/rpc/field_handler.hpp"
 
+#include <fstream>
+#include <sstream>
+
 namespace chitta {
 
 namespace {
@@ -1076,6 +1079,29 @@ ToolResult FieldRpcHandler::tool_trim_realm_names(const json&) {
     auto count = field_store_->trim_realm_names();
     std::string msg = "Trimmed " + std::to_string(count) + " realm name(s)";
     return ToolResult::ok(msg, {{"trimmed", count}});
+}
+
+ToolResult FieldRpcHandler::tool_remap_realms(const json& p) {
+    if (!field_store_) return ToolResult::error("field store unavailable");
+    std::string mapping_json;
+    if (p.contains("mapping_file")) {
+        std::ifstream f(p["mapping_file"].get<std::string>());
+        if (!f) return ToolResult::error("cannot open mapping_file");
+        std::stringstream ss; ss << f.rdbuf(); mapping_json = ss.str();
+    } else if (p.contains("mapping")) {
+        mapping_json = p["mapping"].is_string()
+            ? p["mapping"].get<std::string>() : p["mapping"].dump();
+    } else {
+        return ToolResult::error("require 'mapping' (object) or 'mapping_file' (path)");
+    }
+    bool dry_run = p.value("dry_run", true);  // safe default: never mutate unless asked
+    std::string res = field_store_->remap_realms(mapping_json, dry_run);
+    json data = json::parse(res, nullptr, false);
+    if (data.is_discarded()) return ToolResult::error("remap returned invalid JSON");
+    std::string msg = (dry_run ? "[dry-run] would move " : "moved ")
+        + std::to_string(data.value("moved", 0)) + " memories -> "
+        + std::to_string(data.value("final_realms", 0)) + " realms";
+    return ToolResult::ok(msg, data);
 }
 
 ToolResult FieldRpcHandler::tool_save_spectral_snapshot(const json&) {
