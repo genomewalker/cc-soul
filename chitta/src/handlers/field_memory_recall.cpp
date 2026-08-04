@@ -1314,7 +1314,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     std::string route_name = route < 6 ? route_names[route] : "hybrid";
 
     if (route == 1) {  // Keyword
-        auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+        auto kw_hits = field_store_->recall_keyword(eq.lex, limit, realm);
         apply_drift_smart(kw_hits);
         results = hits_to_results_json(kw_hits);
     } else if (route == 2) {  // Temporal
@@ -1327,7 +1327,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
         auto embedding = embed_query(eq.vec);
         if (embedding.empty()) {
             // Fallback to keyword if embedding fails
-            auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+            auto kw_hits = field_store_->recall_keyword(eq.lex, limit, realm);
             apply_drift_smart(kw_hits);
             results = hits_to_results_json(kw_hits);
             field_store_->route_feedback(episode_id, -0.1f);  // slight penalty for forced fallback
@@ -1342,7 +1342,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
                 apply_drift_smart(sem_hits);
                 results = hits_to_results_json(sem_hits);
             } else {  // Hybrid / Full
-                auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+                auto kw_hits = field_store_->recall_keyword(eq.lex, limit, realm);
                 apply_drift_smart(sem_hits);
                 apply_drift_smart(kw_hits);
                 results = merge_results(hits_to_results_json(sem_hits), hits_to_results_json(kw_hits));
