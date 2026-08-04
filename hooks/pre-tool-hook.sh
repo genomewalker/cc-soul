@@ -126,6 +126,27 @@ safety_check() {
         echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"dd writing to raw disk device"}}'
         return 2
     fi
+    # Glob/bulk-delete guard. Incident 2026-07-30: an agent ran
+    # `rm -f chunk_*.sorted.fq` in the repo cwd, deleting 204 untracked files.
+    # Blocks wildcard rm, find -delete/-exec rm, xargs rm, and git clean -f
+    # UNLESS a scratch/temp path (/tmp|/dev/shm|/scratch) appears in the same
+    # command segment. Explicit single-path deletes and git-clean dry-runs pass.
+    # Command is split on ; & | so a scratch path in one segment can't unlock a
+    # destructive delete in another. Bypass: prefix CC_SOUL_ALLOW_GLOB_RM=1.
+    if [[ "${CC_SOUL_ALLOW_GLOB_RM:-0}" != "1" ]] && ! grep -qF 'CC_SOUL_ALLOW_GLOB_RM=1' <<<"$cmd"; then
+        local _seg _danger=0
+        while IFS= read -r _seg; do
+            [[ -z "$_seg" ]] && continue
+            grep -qE '(^|[^[:alnum:]_.-])(rm(dir)?[[:space:]][^|;&]*[][*?]|find[[:space:]][^|;&]*(-delete([[:space:]]|$)|-exec(dir)?[[:space:]]+rm)|xargs\b[^|]*[[:space:]]rm([[:space:]]|$)|git[[:space:]]+clean[[:space:]][^|;&]*-[[:alnum:]]*f)' <<<"$_seg" || continue
+            grep -qE '(/tmp/|/dev/shm/|/scratch/)' <<<"$_seg" && continue
+            grep -qE 'git[[:space:]]+clean[^|;&]*(--dry-run|-[[:alnum:]]*n)' <<<"$_seg" && continue
+            _danger=1; break
+        done < <(tr ';&|\n' '\n' <<<"$cmd")
+        if [[ $_danger -eq 1 ]]; then
+            echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bulk/glob delete outside a scratch path blocked (incident 2026-07-30: rm -f chunk_*.sorted.fq deleted 204 untracked files). Delete explicit paths, scope to /tmp|/scratch|/dev/shm, or prefix the command with CC_SOUL_ALLOW_GLOB_RM=1 if intentional."}}'
+            return 3
+        fi
+    fi
     return 0
 }
 
@@ -223,6 +244,11 @@ case "$MATCHER" in
         if [[ $safety_rc -eq 2 ]]; then
             echo "$safety_result"
             exit 2
+        elif [[ $safety_rc -eq 3 ]]; then
+            # Structured deny (permissionDecision:"deny") — echo JSON, exit 0 so the
+            # reason is surfaced (same idiom as find_strategy's strict-mode deny).
+            echo "$safety_result"
+            exit 0
         fi
 
         # Stage 1b: find — memory-first search strategy

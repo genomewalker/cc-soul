@@ -176,9 +176,16 @@ map_category() {
 }
 
 # Transcript helpers: support both JSON array transcripts and Codex JSONL.
+# The three transcript_* extractors below are called 9 times between them, each
+# re-parsing the whole transcript in a fresh python3. Every call site sits inside
+# $( ), so a shell-variable cache would die with the subshell — memoize on disk.
+# ceiling: assumes TRANSCRIPT_PATH does not change while the hook runs.
+_TCACHE=$(mktemp -d)
+trap 'rm -rf "$_TCACHE"' EXIT
+
 transcript_role_text() {
-    local role="$1"
-    python3 - "$TRANSCRIPT_PATH" "$role" <<'PY'
+    local role="$1" _cf="$_TCACHE/role.$role"
+    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" "$role" <<'PY' > "$_cf"
 import json, sys
 p, role = sys.argv[1], sys.argv[2]
 def text_from_content(content):
@@ -226,10 +233,12 @@ with open(p, "r", encoding="utf-8", errors="ignore") as f:
                 continue
             emit(pl.get("role",""), pl.get("content",[]))
 PY
+    cat "$_cf"
 }
 
 transcript_tool_names() {
-    python3 - "$TRANSCRIPT_PATH" <<'PY'
+    local _cf="$_TCACHE/tool_names"
+    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" <<'PY' > "$_cf"
 import json, sys
 p=sys.argv[1]
 seen=set(); out=[]
@@ -252,16 +261,26 @@ with open(p, "r", encoding="utf-8", errors="ignore") as f:
             if not line: continue
             try: d=json.loads(line)
             except Exception: continue
-            if d.get("type")!="response_item": continue
+            t=d.get("type","")
+            # Claude Code format: type="assistant", tool_use blocks in message.content
+            if t=="assistant":
+                for b in d.get("message",{}).get("content",[]) or []:
+                    if isinstance(b, dict) and b.get("type")=="tool_use":
+                        add_tool(b.get("name",""))
+                continue
+            # Codex format: type="response_item" with payload.type="function_call"
+            if t!="response_item": continue
             pl=d.get("payload",{})
             if pl.get("type")!="function_call": continue
             add_tool(pl.get("name",""))
 print("\n".join(out))
 PY
+    cat "$_cf"
 }
 
 transcript_tool_files_json() {
-    python3 - "$TRANSCRIPT_PATH" <<'PY'
+    local _cf="$_TCACHE/tool_files"
+    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" <<'PY' > "$_cf"
 import json, sys
 p=sys.argv[1]
 seen=[]; seen_set=set()
@@ -286,7 +305,17 @@ with open(p, "r", encoding="utf-8", errors="ignore") as f:
             if not line: continue
             try: d=json.loads(line)
             except Exception: continue
-            if d.get("type")!="response_item": continue
+            t=d.get("type","")
+            # Claude Code format: type="assistant", tool_use blocks in message.content
+            if t=="assistant":
+                for b in d.get("message",{}).get("content",[]) or []:
+                    if isinstance(b, dict) and b.get("type")=="tool_use":
+                        inp=b.get("input",{})
+                        if not isinstance(inp, dict): inp={}
+                        add_path(inp.get("file_path")); add_path(inp.get("path"))
+                continue
+            # Codex format: type="response_item" with payload.type="function_call"
+            if t!="response_item": continue
             pl=d.get("payload",{})
             if pl.get("type")!="function_call": continue
             args=pl.get("arguments")
@@ -297,6 +326,7 @@ with open(p, "r", encoding="utf-8", errors="ignore") as f:
             add_path(args.get("file_path")); add_path(args.get("path"))
 print(json.dumps(seen))
 PY
+    cat "$_cf"
 }
 
 transcript_role_count() {

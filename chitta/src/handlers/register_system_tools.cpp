@@ -167,6 +167,33 @@ void FieldRpcHandler::register_system_tools() {
             {"space", cd > cs ? "double" : "single"}});
     };
 
+    tools_.push_back({{"name","stageb_set_surface"},{"description","Stage B: set a memory's natural-language retrieval surface and re-embed from it (keeps telegraphic content as display). Pass surface='' to clear and re-embed from content. Returns the id and embedded flag."},
+        {"inputSchema",{{"type","object"},
+            {"properties",{{"id",{{"type","string"}}},{"surface",{{"type","string"}}}}},
+            {"required",json::array({"id","surface"})}}}
+    });
+    handlers_["stageb_set_surface"] = [this](const json& p) -> ToolResult {
+        uint64_t id = std::stoull(p.at("id").get<std::string>());
+        std::string surface = p.value("surface", std::string());
+        field_store_->set_retrieval_surface(id, surface);
+        // Re-embed from the surface when set, else from the telegraphic content —
+        // mirrors embed_loop's selection so the stored vector matches the live path.
+        std::string text = surface;
+        if (text.empty()) {
+            std::string content = field_store_->get_content(id);
+            if (content.empty()) return ToolResult::error("memory has no content and no surface");
+            text = chitta::ssl::retrieval_text(content);
+        }
+        if (!yantra_) return ToolResult::error("embedder unavailable");
+        auto vec = yantra_->transform(text, EmbedMode::Document).nu.data;
+        bool embedded = false;
+        bool zero = true;
+        for (float f : vec) { if (f != 0.0f) { zero = false; break; } }
+        if (!zero) { field_store_->backfill_embedding(id, vec); embedded = true; }
+        return ToolResult::ok(embedded ? "surface set + re-embedded" : "surface set (embed failed/zero)",
+            {{"id", std::to_string(id)}, {"embedded", embedded}, {"surface_len", surface.size()}});
+    };
+
     tools_.push_back({{"name","pending_embed_ids"},{"description","Return IDs of memories awaiting embedding (stuck embed queue)"},
         {"inputSchema",{{"type","object"},{"properties",json::object()}}}
     });
