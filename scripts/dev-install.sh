@@ -11,6 +11,15 @@
 #   binaries  -> deliberately NOT symlinked. chitta/chittad use `build -> install`
 #                (atomic rename) to avoid ETXTBSY on the running daemon (see CLAUDE.md).
 #                Rebuild + install is the correct flow for those.
+#
+# Ownership (single sync owner, see repo CLAUDE.md "Dev install"): this script
+# owns ~/.claude/hooks/*.sh and the marketplace chitta-mcp/*.py via symlink —
+# scripts/sync-installed-hooks.sh must never overwrite either with a copy, and
+# skips them for that reason. This script does NOT touch Claude's versioned
+# plugin cache or the Codex cache (no symlink target makes sense there — the
+# cache path is version-pinned, and Codex reads from its own cache dir); it
+# calls sync-installed-hooks.sh at the end so those stay owned by, and
+# refreshed via, that script in the same step.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,6 +62,7 @@ else
   echo "  WARN: marketplace chitta-mcp dir not found ($MKT/chitta-mcp) — is the plugin installed?"
 fi
 
+echo "[dev-install] owner: ~/.claude/hooks/*.sh + marketplace chitta-mcp/*.py (this script, via symlink)"
 echo "[dev-install] hooks (repo -> ~/.claude/hooks), repairing any drifted copies:"
 mkdir -p "$HOOKS_DST"
 for h in "$REPO"/hooks/*.sh; do
@@ -64,6 +74,9 @@ echo "[dev-install] restarting MCP (respawns on next tool call):"
 # space pattern silently matched nothing, so MCP python edits never went live.
 # [c] bracket keeps this pkill from matching its own shell.
 pkill -f "chitta-m[c]p" 2>/dev/null || true
+
+echo "[dev-install] refreshing plugin cache + Codex cache (owner: sync-installed-hooks.sh):"
+"$REPO/scripts/sync-installed-hooks.sh"
 
 echo "[dev-install] DONE. Live plugin now loads from $REPO."
 echo "[dev-install] Binaries unchanged — rebuild+install them via the CLAUDE.md flow."

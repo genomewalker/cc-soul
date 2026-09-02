@@ -472,6 +472,9 @@ if(CHITTA_BUILD_TESTS)
     add_executable(mdl_gate_test src/mdl_gate_test.cpp)
     target_link_libraries(mdl_gate_test PRIVATE ZLIB::ZLIB)
     add_test(NAME mdl_gate_test COMMAND mdl_gate_test)
+    add_executable(prefilter_keep_test src/prefilter_keep_test.cpp)
+    add_test(NAME prefilter_keep_test COMMAND prefilter_keep_test)
+    add_test(NAME prefilter_keep_sync COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/src/prefilter_keep_sync.sh)
 endif()
 
 # RPATH configuration for runtime library discovery

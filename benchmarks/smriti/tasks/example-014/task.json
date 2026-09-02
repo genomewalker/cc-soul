@@ -1,0 +1,15 @@
+{
+  "id": "example-014",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement build_parser() in cli.py: an argparse CLI with subcommands add, list, remove (no need to implement their behavior, just register them). Register them in the order this project actually requires -- don't just default to alphabetical because that's the usual convention.",
+  "check_cmd": "python3 -m unittest test_cli -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] cli.py's subcommands must be registered, and so appear in --help, in the order list, add, remove -- not alphabetical. scripts/generate-docs.py greps the --help output positionally to build the ops runbook's command table; reordering the subparsers silently scrambles that table with no error anywhere.",
+      "realm": "smriti-example-014",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "cli", "convention"],
+  "expected_tokens_budget": 3000
+}

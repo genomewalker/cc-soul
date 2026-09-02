@@ -60,6 +60,9 @@ void FieldRpcHandler::register_memory_core_tools() {
                 {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
                 {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
                 {"separation_mode", {{"type", "boolean"}, {"description", "Diverse results via MMR (default: false)"}}},
+                {"strategy", {{"type", "string"}, {"description", "Retrieval lane: fused (default), keyword (BM25 only, realm-scoped), field (Hopfield/DAM)"}}},
+                {"pool", {{"type", "integer"}, {"description", "Candidate pool depth before the recall-biased pre-filter (default 60, max 160; env CHITTA_RECALL_POOL)"}}},
+                {"prefilter", {{"type", "boolean"}, {"description", "Recall-biased pre-filter (default true; false or CHITTA_RECALL_PREFILTER=0 restores the narrow-pool path)"}}},
                 {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode (default: false)"}}},
                 {"explain", {{"type", "boolean"}, {"description", "Include score decomposition per hit (default: false)"}}}
             }}, {"required", {"query"}}
@@ -88,6 +91,7 @@ void FieldRpcHandler::register_memory_core_tools() {
         {"inputSchema",{{"type","object"},{"properties",{
             {"query",{{"type","string"},{"description","Search query"}}},
             {"limit",{{"type","integer"},{"description","Max results (default 10)"}}},
+            {"realm",{{"type","string"},{"description","Filter by realm (empty = all visible)"}}},
             {"explain",{{"type","boolean"},{"description","Include score decomposition per hit (default: false)"}}}
         }},{"required",{"query"}}}}
     });

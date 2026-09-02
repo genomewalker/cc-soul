@@ -1,0 +1,15 @@
+{
+  "id": "example-015",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement call_with_retry(fn) in retry.py: call fn() with no arguments, retrying on any exception it raises, using this project's specific retry/backoff policy rather than a generic one -- a plausible-looking default retry count or exponential backoff is not what the downstream service actually expects.",
+  "check_cmd": "python3 -m unittest test_retry -v",
+  "planted_memories": [
+    {
+      "content": "[correction] call_with_retry() must make exactly 5 total attempts (4 retries) with linear backoff: sleep(0.2 * attempt_number) seconds between attempts, never exponential -- the downstream rate limiter enforces a linear cooldown and flags an exponential-backoff burst pattern as abuse, which trips a temporary IP ban.",
+      "realm": "smriti-example-015",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "retry-policy", "convention"],
+  "expected_tokens_budget": 3000
+}

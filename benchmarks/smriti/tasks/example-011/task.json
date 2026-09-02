@@ -1,0 +1,15 @@
+{
+  "id": "example-011",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement the handler for the 'ping' event in handlers.py: it must take no arguments and return the string 'pong'. This project's plugin loader (registry.py, not in this fixture) discovers event handlers automatically by inspecting this module -- name the function however the loader actually expects it to find it, not however seems most conventional.",
+  "check_cmd": "python3 -m unittest test_handlers -v",
+  "planted_memories": [
+    {
+      "content": "[correction] This project's plugin loader discovers event handlers purely by name: an event named '<x>' maps to a module-level function named exactly 'evt_<x>' (e.g. the 'ping' event needs 'evt_ping') -- a function named 'handle_ping' or 'on_ping' is invisible to the loader and silently never runs, no import error, no warning.",
+      "realm": "smriti-example-011",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "naming-convention", "plugin-loader"],
+  "expected_tokens_budget": 3000
+}

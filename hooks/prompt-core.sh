@@ -18,6 +18,11 @@ CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+# The hyb lane always requests this many results, so a header count that HITS
+# it (N == HYB_LANE_LIMIT) tells us nothing about the realm's actual size —
+# only a count strictly BELOW it means the query's candidate pool was
+# genuinely exhausted. The C2 small-realm relaxation (below) relies on this.
+HYB_LANE_LIMIT=5
 
 # Source shared library
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -299,6 +304,12 @@ timeout 0.5 "$CHITTA_BIN" log_event --tool "user_prompt" \
 # Standard mode: Use structured_recall (three-lens: facts/context/temporal)
 RLM_MODE="${CC_SOUL_RLM_MODE:-}"
 
+# Lane ablation (CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr — comma list),
+# defined here (not inside the lane block below) so it is always callable —
+# including from the cross-realm fallback, which runs even in RLM_MODE.
+_ABLATE_LANES=",${CC_SOUL_ABLATE_LANES:-},"
+_lane_ablated() { [[ "$_ABLATE_LANES" == *",$1,"* ]]; }
+
 if [[ -n "$RLM_MODE" ]]; then
     # RLM-style exploration via Python soul_repl.
     # Query passed via env, never interpolated into Python source — the raw
@@ -319,13 +330,29 @@ else
     # captures the output inside the subshell and loses it — wait collects exit
     # status, not variables — so lanes must hand results back through the filesystem.
     _ld=$(mktemp -d "${TMPDIR:-/tmp}/ccsoul-lanes.XXXXXX")
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" >"$_ld/sem" 2>/dev/null || true ) &
-    _sem_pid=$!
+    # Lane ablation: a listed lane's recall call is skipped and its file stays
+    # empty, exactly like a real timeout, so every downstream consumer (merge,
+    # C2, admit accounting) already treats it as "no signal" with no separate
+    # code path. `_lane_ablated`/`_ABLATE_LANES` are defined once, above the
+    # RLM_MODE branch. Pre-touch every non-conditional lane file so
+    # `$(<"$_ld/<lane>")` below never hits a missing-file error when a lane is
+    # skipped. `corrk` isn't ablatable — it's the deterministic correction
+    # probe, not one of the fuzzy recall lanes the env targets; `xr` is gated
+    # further down, at the cross-realm fallback itself.
+    touch "$_ld/sem" "$_ld/hyb" "$_ld/kw" "$_ld/corr" "$_ld/corrk"
+    _sem_pid=""
+    if ! _lane_ablated sem; then
+        ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" >"$_ld/sem" 2>/dev/null || true ) &
+        _sem_pid=$!
+    fi
     # Hybrid gets +1s: it carries the C2 maxrel and the fused hits, and a cold
     # query-embed takes ~3.7s (measured 2026-09-01) vs ~0.4s warm. Losing it
     # drops C2 to none and silences every lane.
-    ( timeout "$((MAX_WAIT + 1))" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
-    _hyb_pid=$!
+    _hyb_pid=""
+    if ! _lane_ablated hyb; then
+        ( timeout "$((MAX_WAIT + 1))" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit "$HYB_LANE_LIMIT" --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
+        _hyb_pid=$!
+    fi
     # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
     # regardless of semantic similarity. Plain format (NOT --toon): the daemon's
     # TOON results[] schema is variable (an optional `affect` key) and its `atoms`
@@ -333,28 +360,36 @@ else
     # positional-sed parser → the kw lane silently emitted zero lines every turn.
     # The plain format prints the same `[NN%] [type] text` shape as the hyb lane,
     # so it merges via the identical `[kw]`-prefix idiom below with no CSV parse.
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
-              --limit 3 --realm "$REALM" >"$_ld/kw" 2>/dev/null || true ) &
-    _kw_pid=$!
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true >"$_ld/corr" 2>/dev/null || true ) &
-    _corr_pid=$!
+    _kw_pid=""
+    if ! _lane_ablated kw; then
+        ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
+                  --limit 3 --realm "$REALM" >"$_ld/kw" 2>/dev/null || true ) &
+        _kw_pid=$!
+    fi
+    _corr_pid=""
+    if ! _lane_ablated corr; then
+        ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --tag "correction" --limit 3 --include-global true >"$_ld/corr" 2>/dev/null || true ) &
+        _corr_pid=$!
+    fi
     # DETERMINISTIC correction lane (capability #2). Unlike the fuzzy --tag lane
     # above (which ranks corrections by cosine and drops the right one ~99% of
     # the time), correction_check is an exact-key bigram probe: if this turn
     # re-states a corrected mistake, its correction FIRES regardless of ranking.
-    # Its result is promoted to systemMessage below on a RESERVED slot.
+    # Its result is promoted to systemMessage below on a RESERVED slot. Not
+    # ablatable — it isn't one of the fuzzy recall lanes the env targets.
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" correction_check --text "$QUERY" >"$_ld/corrk" 2>/dev/null || true ) &
     _corrk_pid=$!
     # Context lane (step 1): semantic recall against the recency-weighted thread
     # bag, NOT the literal turn. Recruits the memory the current thread is about
     # even when the latest message is anaphoric ("do it properly"). Empty file
-    # when CTX_QUERY is unset (lane disabled or first turn).
+    # when CTX_QUERY is unset (lane disabled, first turn, or ablated).
     _ctx_pid=""
-    if [[ -n "$CTX_QUERY" ]]; then
+    if [[ -n "$CTX_QUERY" ]] && ! _lane_ablated ctx; then
         ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$CTX_QUERY" --limit 4 --realm "$REALM" >"$_ld/ctx" 2>/dev/null || true ) &
         _ctx_pid=$!
     fi
-    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" "$_corr_pid" "$_corrk_pid" ${_ctx_pid:+"$_ctx_pid"} 2>/dev/null || true
+    wait ${_sem_pid:+"$_sem_pid"} ${_hyb_pid:+"$_hyb_pid"} ${_kw_pid:+"$_kw_pid"} \
+         ${_corr_pid:+"$_corr_pid"} "$_corrk_pid" ${_ctx_pid:+"$_ctx_pid"} 2>/dev/null || true
     _sem_out=$(<"$_ld/sem"); _hyb_out=$(<"$_ld/hyb"); _kw_out=$(<"$_ld/kw"); _corr_out=$(<"$_ld/corr"); _corrk_out=$(<"$_ld/corrk")
     _ctx_out=""; [[ -f "$_ld/ctx" ]] && _ctx_out=$(<"$_ld/ctx")
     rm -rf "$_ld"
@@ -380,8 +415,12 @@ else
     # stays unset and the tag honestly omits (no signal beats a wrong signal).
     # Only retry while there is budget: this fires precisely when the daemon is
     # congested, and the comment above already accepts an omitted tag as the
-    # honest degrade ("no signal beats a wrong signal").
-    if [[ -z "${_c2_pct:-}" ]] && budget_left; then
+    # honest degrade ("no signal beats a wrong signal"). Also skipped when hyb
+    # is deliberately ablated — a standalone hybrid call here would silently
+    # defeat CC_SOUL_ABLATE_LANES=hyb by fetching the exact scalar the ablation
+    # was asked to withhold. Unset _c2_pct then correctly means "not measured",
+    # which the UNKNOWN-silence gate below already treats as no signal, not UNKNOWN.
+    if [[ -z "${_c2_pct:-}" ]] && budget_left && ! _lane_ablated hyb; then
         _c2_deg=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" \
                   --strategy hybrid --limit 1 --realm "$REALM" 2>/dev/null || true)
         _c2_pct=$(printf '%s\n' "$_c2_deg" | grep -oP '^Found .*\(maxrel \K[0-9]+(?=%\))' | head -1)
@@ -389,6 +428,48 @@ else
            printf '%s' "$_c2_deg" | grep -qE '^(No (memories|messages|results) found|Found 0 results)'; then
             _c2_pct=0
         fi
+    fi
+
+    # C2 small-realm relaxation setup (capability #3, default via
+    # CC_SOUL_C2_SMALL_REALM). A scoped realm that is genuinely small can return
+    # a confident top hit (hyb display_pct) while the calibrated maxrel still
+    # reads UNKNOWN — the calibration was fit on the larger cross-project store,
+    # not on a thin project realm. Parse the hyb header's `Found N results in
+    # realm 'X'` once; the per-line admission loop below only consults the flag.
+    #
+    # N alone doesn't say "small realm": the hyb lane always asks for
+    # HYB_LANE_LIMIT results, so N==HYB_LANE_LIMIT means the page was filled
+    # and the realm could hold far more — that's NOT evidence of a thin store.
+    # Only N < HYB_LANE_LIMIT (the query's candidate pool was exhausted before
+    # filling the page) is real smallness evidence; _C2_SR_MAXN is then a
+    # secondary, tighter absolute cap on top of that.
+    _hyb_realm_n=""; _hyb_realm_name=""
+    if [[ -n "$_hyb_out" ]] && \
+       [[ "$(printf '%s\n' "$_hyb_out" | head -1)" =~ ^Found\ ([0-9]+)\ results\ in\ realm\ \'([^\']+)\' ]]; then
+        _hyb_realm_n="${BASH_REMATCH[1]}"; _hyb_realm_name="${BASH_REMATCH[2]}"
+    fi
+    _hyb_top_pct=$(printf '%s\n' "$_hyb_out" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
+    _C2_SR_MAXN="${CC_SOUL_C2_SMALL_REALM_MAXN:-3}"
+    _C2_SR_MINPCT="${CC_SOUL_C2_SMALL_REALM_MINPCT:-50}"
+    _c2_small_realm_relax=0
+    if [[ "${CC_SOUL_C2_SMALL_REALM:-1}" == "1" && -n "$_hyb_realm_n" && "$_hyb_realm_name" != "brahman" \
+          && "$_hyb_realm_n" -lt "$HYB_LANE_LIMIT" && "$_hyb_realm_n" -le "$_C2_SR_MAXN" \
+          && -n "$_hyb_top_pct" && "$_hyb_top_pct" -ge "$_C2_SR_MINPCT" ]]; then
+        _c2_small_realm_relax=1
+    fi
+
+    # smart_recall keyword-route retagging (capability #2): the daemon's route
+    # learner sometimes routes the sem-lane smart_recall call to BM25 ("Smart
+    # recall (keyword, ep=N)"); that route's [NN%] is raw BM25 scale (5-11%),
+    # which the sem lane's MIN_CONFIDENCE=30 floor drops wholesale. Until the
+    # daemon normalizes route pct onto one scale, re-tag those result lines as
+    # [kw] here so the BM25 confidence floor and the kw token-share UNKNOWN rule
+    # apply instead — the same relief already given to the dedicated kw lane.
+    # Semantic/hybrid/temporal/etc. routes are unaffected: only an exact
+    # "keyword" header match retags.
+    _sem_fmt="$_sem_out"
+    if printf '%s\n' "$_sem_out" | head -1 | grep -qE '^Smart recall \(keyword,'; then
+        _sem_fmt=$(printf '%s\n' "$_sem_out" | grep -E '\[[0-9]+%\]' | sed 's/^/[kw]/')
     fi
 
     # Keyword lane (plain format): keep only the per-result header lines
@@ -413,7 +494,7 @@ else
     # corr were silently dead until 2026-09-01. Header lines carry no `[NN%]`
     # and are dropped by the filter loop below.
     # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
-    memories=$(printf '%s\n' "$_sem_out"; \
+    memories=$(printf '%s\n' "$_sem_fmt"; \
                printf '%s\n' "$_ctx_out" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[ctx]/'; \
                printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[hyb]/'; \
                printf '%s\n' "$_kw_fmt"; \
@@ -428,7 +509,7 @@ fi
 # Cross-realm fallback: if scoped recall found nothing, retry without realm.
 # Lets project:geodesic/environment memories surface in foreign-realm sessions.
 # Cost: one extra hybrid call (~0.3s). Only fires when scoped recall was empty.
-if [[ -z "$memories" ]] && [[ "$REALM" != "brahman" ]] && budget_left; then
+if [[ -z "$memories" ]] && [[ "$REALM" != "brahman" ]] && budget_left && ! _lane_ablated xr; then
     _fallback=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid \
                 --limit 5 2>/dev/null || true)
     if [[ -n "$_fallback" && "$_fallback" != *"No memories"* ]]; then
@@ -490,9 +571,10 @@ while IFS= read -r line; do
     # Extract confidence from anywhere in line
     conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
     # CC_SOUL_ADMIT_DEBUG=1: one stderr line per candidate (lane, conf, C2,
-    # query-token count) — the only way to see why a memory was not admitted.
+    # query-token count, small-realm-relax flag) — the only way to see why a
+    # memory was not admitted.
     [[ -n "${CC_SOUL_ADMIT_DEBUG:-}" ]] && \
-        printf '[admit-debug] lane=%s conf=%s c2=%s qtok=%s | %s\n' "$reason" "${conf:-none}" "${_c2_pct:-none}" "${_QTOK_N:-0}" "${line:0:90}" >&2
+        printf '[admit-debug] lane=%s conf=%s c2=%s qtok=%s sr=%s | %s\n' "$reason" "${conf:-none}" "${_c2_pct:-none}" "${_QTOK_N:-0}" "${_c2_small_realm_relax:-0}" "${line:0:90}" >&2
     [[ -z "$conf" ]] && continue
 
     # BM25-backed lanes (hyb/kw) surface literal tokens (filenames, IDs, paths)
@@ -516,20 +598,35 @@ while IFS= read -r line; do
     # is handled separately below and remains available. Only fires when
     # _c2_pct is actually measured (empty = hybrid timeout = no signal, don't gate).
     # Reversible via CC_SOUL_UNKNOWN_SILENCE=0.
+    #
+    # Small-realm relaxation (capability #3, default via CC_SOUL_C2_SMALL_REALM):
+    # the cross-project maxrel calibration under-scores a genuinely small scoped
+    # realm — a handful of on-topic memories can pin the calibrated band below 81
+    # even though the top hybrid hit is a strong match. _c2_small_realm_relax was
+    # set once above (hyb header: few results, in a non-brahman realm, confident
+    # top hit). When it's set, extend the SAME token-share rule already applied
+    # to kw/hyb/xr to sem/ctx too, instead of dropping them outright. corr stays
+    # unconditionally silenced — the fuzzy correction lane's false-positive risk
+    # (nack-worthy wrong corrections) isn't offset by a small-realm hit.
     if [[ "${CC_SOUL_UNKNOWN_SILENCE:-1}" == "1" && -n "${_c2_pct:-}" && "$_c2_pct" -lt 81 ]]; then
-        if [[ "$reason" == "sem" || "$reason" == "ctx" || "$reason" == "corr" ]]; then
-            ((++_drop_unk)); continue
-        fi
-        if [[ "$reason" == "kw" || "$reason" == "hyb" || "$reason" == "xr" ]]; then
-            _unk_shares=0
-            if [[ "${_QTOK_N:-0}" -gt 0 ]]; then
-                _unk_ctok=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | \
-                             grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
-                if [[ -n "$_unk_ctok" ]] && \
-                   comm -12 <(printf '%s\n' "$_QTOK") <(printf '%s\n' "$_unk_ctok") | grep -q .; then
-                    _unk_shares=1
-                fi
+        _unk_shares=0
+        if [[ "${_QTOK_N:-0}" -gt 0 ]]; then
+            _unk_ctok=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | \
+                         grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
+            if [[ -n "$_unk_ctok" ]] && \
+               comm -12 <(printf '%s\n' "$_QTOK") <(printf '%s\n' "$_unk_ctok") | grep -q .; then
+                _unk_shares=1
             fi
+        fi
+        if [[ "$reason" == "sem" || "$reason" == "ctx" ]]; then
+            if [[ "$_c2_small_realm_relax" -eq 1 && "$_unk_shares" -eq 1 ]]; then
+                :  # small-realm relaxation: shares a distinctive token, let it through
+            else
+                ((++_drop_unk)); continue
+            fi
+        elif [[ "$reason" == "corr" ]]; then
+            ((++_drop_unk)); continue
+        elif [[ "$reason" == "kw" || "$reason" == "hyb" || "$reason" == "xr" ]]; then
             [[ "$_unk_shares" -eq 0 ]] && { ((++_drop_unk)); continue; }
         fi
     fi
@@ -745,7 +842,8 @@ if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap + _drop
     [[ $_drop_meta -gt 0 ]] && _out="$_out meta:$_drop_meta"
     [[ $_drop_cap  -gt 0 ]] && _out="$_out cap:$_drop_cap"
     [[ $_drop_unk  -gt 0 ]] && _out="$_out unk:$_drop_unk"
-    ADMIT_LINE="[admit]${_c2_tag:+ C2:$_c2_tag($_c2_cal%)}${_in:- none} | drop${_out:- none}${_c2_phrase}"
+    _sr_tag=""; [[ "${_c2_small_realm_relax:-0}" -eq 1 ]] && _sr_tag=" sr:on"
+    ADMIT_LINE="[admit]${CC_SOUL_ABLATE_LANES:+ abl:$CC_SOUL_ABLATE_LANES}${_c2_tag:+ C2:$_c2_tag($_c2_cal%)}${_sr_tag}${_in:- none} | drop${_out:- none}${_c2_phrase}"
 fi
 
 # ===========================================

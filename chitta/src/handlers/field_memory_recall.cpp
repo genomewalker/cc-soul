@@ -92,6 +92,76 @@ void set_lexical(nlohmann::json& results, const std::string& query) {
         r["lexical"] = static_cast<float>(inter) / static_cast<float>(q_toks.size());
     }
 }
+
+// ── Recall-biased pre-filter (EMem, arXiv:2511.17208) ───────────────────────
+// Evidence (GOLDEN_SET 2026-09-01, n=30, reranker off): nDCG@20 = 0.425 with a
+// pool of 20 and many golds simply ABSENT from the returned page; at pool 60 the
+// same retriever scores 0.503 with 29/30 golds in-pool — observed gold union
+// ranks 27, 35, 38, 43, 51, 52, 57. A cross-encoder over the pool-20 head buys
+// only +0.016. So the top-20 CUT loses golds the retriever already found;
+// ranking precision is not the bottleneck. EMem reports the same shape: a cheap
+// recall-biased over-selecting filter ahead of precision reranking beats graph
+// machinery.
+//
+// Contract: fetch a WIDE pool (CHITTA_RECALL_POOL, default 60), then over-select
+// down to a rerank budget (CHITTA_RERANK_BUDGET, default 24) with scalar-only
+// rules — no embeddings, no per-candidate store round-trips, O(pool). A
+// candidate survives if ANY rule fires; that asymmetry is the point.
+// PREFILTER_BEGIN — self-contained (scalars + <vector>/<string> only) so the
+// keep-rule check can compile this block verbatim without the daemon.
+struct PrefilterCand {
+    float       score;     // fused score after the term-overlap rescore
+    bool        has_lex;   // >=1 distinctive query token literally present
+    bool        neighbor;  // 1-hop assoc neighbour of a top-3 hit
+    std::string realm;
+    std::string kind;
+};
+
+// `c` is in RANK order (the order the caller would return). Keep rules:
+//   (a) rank < limit                       — never drop what we'd have returned
+//   (b) has_lex                            — literal query-term evidence
+//   (c) realm+kind of a top-5 hit AND score >= 0.5 * max   — same answer class
+//   (d) neighbor                           — graph-adjacent to the head
+// The budget caps the survivor count; because we walk in rank order the ones
+// dropped at the cap are the lowest-ranked survivors. budget is floored at
+// `limit` so the filter can never return fewer hits than the response limit.
+std::vector<char> prefilter_keep(const std::vector<PrefilterCand>& c,
+                                 size_t limit, size_t budget) {
+    std::vector<char> keep(c.size(), 0);
+    if (c.empty()) return keep;
+    if (budget < limit) budget = limit;
+
+    float max_score = c[0].score;
+    for (const auto& x : c) max_score = std::max(max_score, x.score);
+    const float half = 0.5f * max_score;
+
+    std::vector<std::pair<std::string, std::string>> head_class;
+    for (size_t i = 0; i < c.size() && i < 5; ++i) {
+        std::pair<std::string, std::string> k{c[i].realm, c[i].kind};
+        bool seen = false;
+        for (const auto& h : head_class) if (h == k) { seen = true; break; }
+        if (!seen) head_class.push_back(std::move(k));
+    }
+    auto in_head_class = [&](const PrefilterCand& x) {
+        for (const auto& h : head_class)
+            if (h.first == x.realm && h.second == x.kind) return true;
+        return false;
+    };
+
+    size_t kept = 0;
+    for (size_t i = 0; i < c.size(); ++i) {
+        const bool hit = (i < limit)
+                      || c[i].has_lex
+                      || c[i].neighbor
+                      || (max_score > 0.0f && c[i].score >= half && in_head_class(c[i]));
+        if (!hit) continue;
+        if (kept >= budget) break;
+        keep[i] = 1;
+        ++kept;
+    }
+    return keep;
+}
+// PREFILTER_END
 } // namespace
 
 namespace chitta {
@@ -336,6 +406,30 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // (GOLDEN_SET v6: 4/30 misses attributed to exactly this). Capped at 160
     // to bound HNSW/BM25 cost per lane.
     size_t lane_depth = std::min(std::max((size_t)20, 2 * limit), (size_t)160);
+
+    // Recall-biased pre-filter (see prefilter_keep above). ON by default;
+    // CHITTA_RECALL_PREFILTER=0 (or "prefilter":false) restores the exact prior
+    // path — pool width, filter, and all — so the golden eval can A/B in place.
+    static const bool kPrefilterEnv = [] {
+        const char* e = std::getenv("CHITTA_RECALL_PREFILTER");
+        return !e || e[0] != '0';
+    }();
+    auto env_pos = [](const char* k, size_t d) {
+        const char* e = std::getenv(k);
+        if (!e) return d;
+        try { size_t v = static_cast<size_t>(std::stoul(e)); return v ? v : d; }
+        catch (...) { return d; }
+    };
+    static const size_t kPoolDefault   = env_pos("CHITTA_RECALL_POOL", 60);
+    static const size_t kRerankBudget  = env_pos("CHITTA_RERANK_BUDGET", 24);
+    const bool   prefilter_on = kPrefilterEnv && params.value("prefilter", true);
+    const size_t want_pool    = std::min(
+        static_cast<size_t>(params.value("pool", static_cast<int>(kPoolDefault))), (size_t)160);
+
+    // With the pre-filter on, the lanes must fetch at least as deep as the pool
+    // we intend to over-select from — a gold at union rank 43 is unreachable if
+    // no lane ever returned 43 rows. Still capped at 160 to bound HNSW/BM25 cost.
+    if (prefilter_on) lane_depth = std::min(std::max(lane_depth, want_pool), (size_t)160);
     size_t pool_limit = std::max(fetch_limit, lane_depth);
 
     // Multi-lane RRF: original query (2×, weighted) + SSL-shaped variants + BM25
@@ -346,7 +440,13 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // as an additive atom-overlap boost in the rescore (identity-evidence analog
     // of the term-overlap lever). Populated by default; empty iff CHITTA_BRIDGE_LANE0=0.
     std::unordered_map<uint64_t, float> bridge_boost;
-    if (expand && query_has_entities(query)) {
+    // strategy="keyword": BM25 only, realm-scoped. Previously this string fell
+    // through to the fused path and the flag was a silent no-op, so callers who
+    // asked for the keyword lane got whatever the fused path did — including,
+    // when pre-embed missed, the unscoped fallback below (the cross-realm leak).
+    if (strategy == "keyword") {
+        hits = window_gate(field_store_->recall_keyword(query, pool_limit, realm, no_learn));
+    } else if (expand && query_has_entities(query)) {
         std::vector<std::string> forms = {query, query}; // original 2× = boosted weight
         for (auto& v : chitta::ssl::ssl_query_variants(query)) forms.push_back(v);
 
@@ -477,7 +577,12 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
             auto emb = params["_preembedding"].get<std::vector<float>>();
             hits = window_gate(field_store_->recall(emb, pool_limit, realm, no_learn));
         } else {
-            hits = window_gate(field_store_->recall_keyword(query, pool_limit, "", no_learn));
+            // Realm scoping: this is the pre-embed-miss fallback (embed_queue
+            // timed out at 50ms, so no _preembedding), which fires for ordinary
+            // recalls, not just diagnostics. It passed "" for realm, so every
+            // cold-cache recall silently returned cross-realm memories while the
+            // semantic leg two branches up was correctly scoped. Same `realm`.
+            hits = window_gate(field_store_->recall_keyword(query, pool_limit, realm, no_learn));
         }
     }
 
@@ -831,6 +936,41 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
         }
     }
 
+    // ── Recall-biased pre-filter: wide pool → cheap over-selection ──────────
+    // Runs AFTER every scoring stage and BEFORE the MMR/limit truncation (and
+    // before the MCP's cross-encoder, which reranks whatever this returns), so
+    // the reranker sees a budget of recall-biased survivors instead of the
+    // arbitrary top-`limit` slice. See prefilter_keep() for the rules/evidence.
+    if (prefilter_on && hits.size() > std::max(limit, kRerankBudget)) {
+        // Rule (d) adjacency: ONE FFI call for the top-3 hits' 1-hop neighbours,
+        // not one per candidate. Keeps the stage O(pool) with no embedding work.
+        std::unordered_set<uint64_t> nbr;
+        {
+            std::vector<uint64_t> seeds;
+            for (size_t i = 0; i < hits.size() && i < 3; ++i) seeds.push_back(hits[i].memory_id);
+            for (const auto& n : field_store_->expand_associations(seeds, 1, 32))
+                nbr.insert(n.memory_id);
+        }
+        auto q_toks = lex_tokens(query);
+        std::vector<PrefilterCand> cands;
+        cands.reserve(hits.size());
+        for (const auto& h : hits) {
+            bool has_lex = false;
+            if (!q_toks.empty()) {
+                auto c_toks = lex_tokens(h.content);
+                for (const auto& t : q_toks)
+                    if (c_toks.count(t)) { has_lex = true; break; }
+            }
+            cands.push_back({h.score, has_lex, nbr.count(h.memory_id) != 0, h.realm, h.kind});
+        }
+        auto keep = prefilter_keep(cands, limit, kRerankBudget);
+        std::vector<FieldRecallHit> kept;
+        kept.reserve(std::max(limit, kRerankBudget));
+        for (size_t i = 0; i < hits.size(); ++i)
+            if (keep[i]) kept.push_back(std::move(hits[i]));
+        hits = std::move(kept);
+    }
+
     // Optional MMR diversification (separation_mode). The corpus stores the same event
     // several times, so near-identical siblings fill the page and one cluster crowds out
     // the rest — the "good cosine, no margin" failure. Greedy re-selection penalizes a
@@ -1117,13 +1257,22 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
     std::string query = params.value("query", "");
     if (query.empty()) return ToolResult::error("query is required");
     size_t k = static_cast<size_t>(params.value("limit", 10));
+    // Realm scoping: the BM25 leg took no realm at all, so this tool (and any
+    // caller routed to it) returned memories from every realm on the box while
+    // the semantic tools were scoped. field_store_->recall_keyword() has always
+    // accepted a realm — it was simply never passed. Empty realm = all visible,
+    // matching tool_recall.
+    std::string realm = params.value("realm", "");
+    bool no_learn = params.value("no_learn", false) || !params.value("strengthen", true);
 
-    auto hits = field_store_->recall_keyword(query, k);
+    auto hits = field_store_->recall_keyword(query, k, realm, no_learn);
     bool explain = params.value("explain", false);
     json results_json = hits_to_results_json(hits, explain);
 
     std::ostringstream ss;
-    ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
+    ss << "Found " << hits.size() << " keyword results for '" << query << "'";
+    if (!realm.empty()) ss << " in realm '" << realm << "'";
+    ss << ":\n";
     set_lexical(results_json, query);
     for (const auto& r : results_json) {
         int pct = display_pct(r);
@@ -1315,6 +1464,10 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     json results;
     static const char* route_names[] = {"semantic","keyword","temporal","artifact","hybrid","full"};
     std::string route_name = route < 6 ? route_names[route] : "hybrid";
+    // True when the results below came from the BM25 leg ALONE (route 1, or the
+    // embed-failure fallback, which keeps the learner's route_name). Drives the
+    // display normalization at the bottom — see the header contract there.
+    bool keyword_lane = (route == 1);
 
     if (route == 1) {  // Keyword
         auto kw_hits = field_store_->recall_keyword(eq.lex, limit, realm);
@@ -1333,6 +1486,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
             auto kw_hits = field_store_->recall_keyword(eq.lex, limit, realm);
             apply_drift_smart(kw_hits);
             results = hits_to_results_json(kw_hits);
+            keyword_lane = true;  // BM25-only page, whatever the learner's route_name says
             field_store_->route_feedback(episode_id, -0.1f);  // slight penalty for forced fallback
             episode_id = 0;  // skip normal feedback
         } else {
@@ -1367,11 +1521,30 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
         }
     }
 
+    // ── Header/line contract (parsed by hooks/prompt-core.sh) ──────────────
+    // Header: `Smart recall (<route>, ep=<episode_id>): <n> results`
+    //   <route> ∈ semantic|keyword|temporal|artifact|hybrid|full — the route the
+    //   learner picked; ep=<id> is the bandit episode for route_feedback.
+    // Lines:  `#<id> [<pct>%] [<type>] <text>`
+    //   The hook applies MIN_CONFIDENCE=30 to <pct>. That threshold assumes the
+    //   number is comparable ACROSS routes, and it was not: semantic hits print
+    //   a cosine (70-100%) while the keyword lane printed raw query-token
+    //   coverage (5-11%), so every keyword-routed page was dropped wholesale
+    //   before the reasoner saw it. Max-normalize the keyword lane the same way
+    //   the hybrid path max-normalizes RRF: the best BM25 hit on the page reads
+    //   100% and the rest are relative to it. Raw `lexical`/`relevance` stay
+    //   untouched in the JSON; `display_pct` records what was printed.
     std::ostringstream ss;
     ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
     set_lexical(results, query);
-    for (const auto& r : results) {
+    float lex_max = 0.0f;
+    if (keyword_lane)
+        for (const auto& r : results) lex_max = std::max(lex_max, r.value("lexical", 0.0f));
+    for (auto& r : results) {
         int pct = display_pct(r);
+        if (keyword_lane && lex_max > 0.0f)
+            pct = static_cast<int>(100.0f * r.value("lexical", 0.0f) / lex_max);
+        r["display_pct"] = pct;
         ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "] "
            << r.value("text", "").substr(0, 400) << "\n";
     }

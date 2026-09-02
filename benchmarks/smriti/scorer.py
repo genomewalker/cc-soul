@@ -2,8 +2,11 @@
 """SMRITI-Bench scorer: reads a results JSONL and computes headline metrics.
 
 Per condition: success rate with a Wilson 95% interval, mean tokens.
-Headline: ΔSR (on - off), ΔT (on - off tokens), MUI (memory utility index),
-and per-lane ablation deltas when ablate:<lane> conditions are present.
+Headline: ΔSR (on - off), ΔT (on - off tokens), MUI (ledger-grounded
+memory-utility credit — see mui_credit), echo_rate (the old surface-echo
+MUI proxy, kept for reference), per-lane ablation deltas when
+ablate:<lane> conditions are present, and ablate_all_vs_off_sr_gap as a
+sanity check when an ablate:all condition is present.
 """
 
 import argparse
@@ -29,16 +32,51 @@ def load_records(path):
 
 
 def memory_was_used(record) -> bool:
-    """Proxy for "the agent drew on a planted memory": does a prefix of the
-    memory's content appear verbatim in the transcript? Weak — see README
-    Threats to Validity (a good agent may apply a convention without quoting
-    it; a bad one may quote it and still get the fix wrong)."""
+    """Old surface-echo proxy for "the agent drew on a planted memory": does
+    a prefix of the memory's content appear verbatim in the transcript?
+    Reported as `echo_rate` — kept for reference, not the headline MUI.
+    Reads 0.0 across results/a1aa8c0f.jsonl's whole 27-win on-condition:
+    planted text is never literally echoed back by a real agent (README
+    "MUI: what 'used' means and why it's weak"). See mui_credit for the
+    ledger-grounded replacement."""
     transcript = record.get("transcript", "").lower()
     for content in record.get("planted_memory_contents", []):
         needle = content.lower()[:40]
         if needle and needle in transcript:
             return True
     return False
+
+
+def mui_credit(on_record, paired_off_records):
+    """Ledger-grounded MUI credit for one memory-on run: does this run give
+    demonstrable, outcome-level evidence that the planted memory changed
+    something, rather than evidence it was merely quoted?
+
+    Credit requires all of:
+      1. injected_confirmed — the memory actually reached the child session
+         (not just planted and never delivered — README "Unconfirmed
+         injection").
+      2. the run passed.
+      3. at least one paired memory-off trial for the same task (same
+         trial number when present, else every off trial recorded for
+         that task_id — see score()) either FAILED (sr_lift: memory
+         changed the outcome) or used >=1.5x this run's tokens (cost:
+         memory changed the cost, even though off still passed the same
+         way exploration-solvable tasks did in the first pilot).
+
+    Returns (sr_lift: bool, cost: bool) rather than a single bool so
+    score() can report the two components separately — sr_lift and cost
+    are mutually exclusive here (cost is only checked when no paired off
+    trial failed), so sr_lift_credit + cost_credit == mui exactly."""
+    if not on_record.get("injected_confirmed") or not on_record["passed"]:
+        return False, False
+    if not paired_off_records:
+        return False, False
+    if any(not o["passed"] for o in paired_off_records):
+        return True, False
+    on_tokens = on_record["tokens_used"]
+    cost_credit = any(o["tokens_used"] >= 1.5 * on_tokens for o in paired_off_records)
+    return False, cost_credit
 
 
 def score(records):
@@ -81,10 +119,40 @@ def score(records):
         headline["delta_sr"] = per_condition["on"]["success_rate"] - per_condition["off"]["success_rate"]
         headline["delta_tokens"] = per_condition["on"]["mean_tokens"] - per_condition["off"]["mean_tokens"]
 
-        on_wins = [r for r in by_condition["on"] if r["passed"]]
+        # MUI v2 (ledger-grounded, replaces the echo proxy as the headline
+        # number — see mui_credit). Pair each on-run with the off-run(s)
+        # for the same task: prefer the exact same trial number (that's
+        # how run_all interleaves conditions, so it's a true 1:1 pair for
+        # a normal run); fall back to every off-run recorded for that
+        # task_id when the exact trial is missing (a --resume'd or
+        # partially-skipped run can leave that gap).
+        off_by_task_trial = defaultdict(list)
+        off_by_task = defaultdict(list)
+        for r in by_condition.get("off", []):
+            off_by_task_trial[(r["task_id"], r["trial"])].append(r)
+            off_by_task[r["task_id"]].append(r)
+
+        on_records = by_condition["on"]
+        sr_lift_n = 0
+        cost_n = 0
+        for r in on_records:
+            paired = (off_by_task_trial.get((r["task_id"], r["trial"]))
+                      or off_by_task.get(r["task_id"], []))
+            sr_lift, cost = mui_credit(r, paired)
+            sr_lift_n += sr_lift
+            cost_n += cost
+        headline["mui"] = (sr_lift_n + cost_n) / len(on_records) if on_records else None
+        headline["sr_lift_credit"] = sr_lift_n / len(on_records) if on_records else None
+        headline["cost_credit"] = cost_n / len(on_records) if on_records else None
+        headline["mui_n"] = len(on_records)
+
+        # Old surface-echo proxy, kept for reference (README "MUI: what
+        # 'used' means and why it's weak") — not the headline number.
+        on_wins = [r for r in on_records if r["passed"]]
         used = sum(1 for r in on_wins if memory_was_used(r))
-        headline["mui"] = used / len(on_wins) if on_wins else None
-        headline["mui_n_wins"] = len(on_wins)
+        headline["echo_rate"] = used / len(on_wins) if on_wins else None
+        headline["echo_rate_n_wins"] = len(on_wins)
+
         # Surface this at headline level too: a low rate here calls delta_sr
         # itself into question, not just the per-condition detail.
         headline["on_injection_confirmation_rate"] = per_condition["on"]["injection_confirmation_rate"]
@@ -95,6 +163,15 @@ def score(records):
             headline.setdefault("ablation_delta_sr", {})[lane] = (
                 per_condition["on"]["success_rate"] - per_condition[label]["success_rate"]
             )
+
+    # Sanity check on the ablation wiring itself (runner.ABLATE_ALL_LANES):
+    # disabling every lane should behave like memory=off. A gap far from 0
+    # here means CC_SOUL_ABLATE_LANES isn't actually reaching/working in
+    # every hook, not that ablation "found" a memory effect.
+    if "ablate:all" in per_condition and "off" in per_condition:
+        headline["ablate_all_vs_off_sr_gap"] = (
+            per_condition["ablate:all"]["success_rate"] - per_condition["off"]["success_rate"]
+        )
 
     return {"per_condition": per_condition, "headline": headline}
 

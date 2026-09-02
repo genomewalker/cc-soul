@@ -360,6 +360,11 @@ def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
     # --no-learn so routine grading never mutates the store it measures.
     if os.environ.get("CC_GRADE_LEARN") != "1":
         cmd.insert(-1, "--no-learn")
+    # CC_GRADE_EXTRA_ARGS="--prefilter false" etc.: A/B a per-request daemon
+    # knob against the same running daemon instead of restarting it per arm.
+    extra = os.environ.get("CC_GRADE_EXTRA_ARGS", "").split()
+    if extra:
+        cmd[-1:-1] = extra
     if strategy:
         cmd += ["--strategy", strategy]
     try:

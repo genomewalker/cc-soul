@@ -88,6 +88,7 @@ void NativeDistiller::log_mdl_shadow(const std::string& mem_id, const std::strin
             {"id", mem_id},
             {"accept", v.accept},
             {"saving", v.saving},
+            {"evidence_bytes", evidence.size()},
             {"title_head", content.substr(0, 80)},
             {"source", "native"},
         };

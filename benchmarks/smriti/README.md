@@ -1,6 +1,43 @@
 # SMRITI-Bench
 
-*Status as of 2026-09-02: first full matrix run (`results/a1aa8c0f.jsonl`):
+*Status as of 2026-09-02: v2 -- MUI replaced with a ledger-grounded metric
+(`scorer.mui_credit`), 6 more non-deducible-convention tasks
+(`example-010`..`example-015`, corpus now 15), ablation wired for real, and
+`--resume`. **MUI v2**: for each memory-on run, credit requires
+`injected_confirmed` AND the run passed AND (a paired memory-off trial for
+the same task FAILED -- `sr_lift_credit` -- OR used ≥1.5× the tokens --
+`cost_credit`); `mui` = fraction of on-runs credited, `sr_lift_credit` +
+`cost_credit` sum to it. The old surface-echo check survives as
+`echo_rate`, kept for reference. Recomputed on the existing full matrix
+(`results/a1aa8c0f.jsonl`, unchanged data, just rescored): `mui=0.630`
+(17/27), `sr_lift_credit=0.148` (4/27 -- exactly the 4 off-failures, so it
+reproduces ΔSR's own signal from the ledger rather than an echo),
+`cost_credit=0.481` (13/27 -- on-runs where memory was confirmed injected,
+passed, off *also* passed, but off cost ≥1.5× more), `echo_rate=0.0`
+still, confirming the old proxy was measuring nothing. **New tasks**:
+`example-010` mandated file header, `011` mandated handler-function
+prefix, `012` mandated credential env-var name, `013` mandated log-line
+format, `014` mandated CLI-subcommand order, `015` mandated retry
+count/backoff constant -- each a convention with no way to deduce the
+"right" answer from the fixture alone, the same shape as `005`/`009` in
+the first matrix, the only two tasks that showed a real `off`-failure
+gap. **Ablation**: real now, not skipped -- `ablate:<lane>` sets
+`CC_SOUL_ABLATE_LANES=<short-lane-name>` on the agent subprocess
+(`runner.ABLATE_LANE_ALIASES` maps semantic/keyword/graph/hybrid/context/
+corrections to chitta's own sem/kw/hyb/ctx/corr hook-lane names; short
+names also accepted directly, plus `xr`), consumed by
+`hooks/prompt-core.sh` (landed by a parallel agent this same session --
+see "Ablation matrix" below for the mechanism and `ablate:all`'s sanity
+check). **`--resume <results.jsonl>`**: an interrupted `run_all` continues
+from what's recorded, skipping any task×condition×trial already in the
+file and appending the rest to it (same `run_id`). `--trials` is still
+required, still no default. Not yet done: a real (non-dry-run,
+non-`echo`) matrix over the ablation conditions or the 6 new tasks -- see
+"Running" below; this status entry is scaffold + a re-score of existing
+data, not a new empirical result.*
+
+*Status as of 2026-09-02 (earlier same day): first full matrix run
+(`results/a1aa8c0f.jsonl`):
 9 tasks × off/on × 3 trials, injection confirmed 27/27. Memory-off 23/27 pass,
 memory-on 27/27 (ΔSR +14.8 pp); paired token ratio on/off median 0.52
 (ΔT −2,137 tokens/task). The off-failures were exactly the non-deducible
@@ -201,53 +238,83 @@ elsewhere.
 
 ## Ablation matrix
 
-Conditions are a flat string (`off`, `on`, `ablate:<lane>`) parsed by
-`runner.parse_condition`, resolving to a `MemoryAdapter`. This defines the
-*interface*; the concrete lane names below are chitta's actual recall paths
-(`chitta/src/handlers/field_memory_recall.cpp`, `rpc_server.cpp`'s
-`routed_recall` lane list).
+Conditions are a flat string (`off`, `on`, `ablate:<lane>`, `ablate:all`)
+parsed by `runner.parse_condition`, resolving to a `MemoryAdapter`.
 
-**Ablation is not wired daemon-side yet.** chittad has no `--ablate-lane`
-flag or env var to disable a lane process-wide. Rather than have
-`ChittaAdapter` silently fall back to full recall and mislabel the result as
-an ablation, `runner.run_one` detects `ablate:<lane>` conditions and skips
-the trial before either adapter does anything, printing
-`[SKIP] ... ablation not wired ...` and dropping it from the run's records
-(the run still completes and writes results for the trials it did score —
-see `tests/test_scaffold.py`'s `test_ablate_condition_is_skipped_not_faked`).
-Until the daemon flag exists, don't pass `--condition ablate:<lane>`
-expecting a scored result.
+**Wired via env, not a daemon flag.** chittad still has no `--ablate-lane`
+RPC flag, but it doesn't need one: `ChittaAdapter.agent_env` sets
+`CC_SOUL_ABLATE_LANES=<comma-list>` on the `claude -p` subprocess, and
+`hooks/prompt-core.sh`'s recall call skips any lane named there before
+issuing it — the ablation happens in the hook that would have made the
+recall call, not in chittad itself. `runner.ABLATE_LANE_ALIASES` maps a
+benchmark-facing lane name to chitta's own short hook-lane name; the short
+name also works directly. `ablate:all` sets every lane at once
+(`CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr`) and should behave like
+`off` in effect — `scorer.py` reports the gap between them as
+`ablate_all_vs_off_sr_gap`, a sanity check on the wiring itself rather
+than a memory-effect number: a gap far from 0 there means the env var
+isn't reaching every injection path, not that ablation "found" something.
+An unrecognized lane name raises `ValueError` immediately from
+`parse_condition`, before any subprocess runs.
 
-| Condition | What's disabled | Isolates |
-|---|---|---|
-| `off` | all memory | baseline — can the agent solve it cold |
-| `on` | nothing | full system upper bound |
-| `ablate:semantic` | embedding/ANN recall | value of fuzzy semantic match |
-| `ablate:keyword` | BM25 lane | value of exact term overlap |
-| `ablate:graph` | triplet/PageRank traversal | value of multi-hop entity linking |
-| `ablate:span` | verbatim transcript atoms | value of exact prior-conversation quotes |
-| `ablate:corrections` | `[correction]`-kind deterministic lookup | value of the durable-correction fast path |
+| Condition | Benchmark lane name(s) | `CC_SOUL_ABLATE_LANES` value | What's disabled | Isolates |
+|---|---|---|---|---|
+| `off` | — | (unset; `CC_SOUL_HEADLESS=1` instead) | all memory | baseline — can the agent solve it cold |
+| `on` | — | (unset) | nothing | full system upper bound |
+| `ablate:semantic` | `semantic` / `sem` | `sem` | embedding/ANN recall | value of fuzzy semantic match |
+| `ablate:keyword` | `keyword` / `kw` | `kw` | BM25 lane | value of exact term overlap |
+| `ablate:graph` / `ablate:hybrid` | `graph`, `hybrid` / `hyb` | `hyb` | hybrid/triplet recall path | value of multi-hop + fused retrieval |
+| `ablate:context` | `context` / `ctx` | `ctx` | recency-weighted thread-context recall | value of conversational continuity |
+| `ablate:corrections` | `corrections` / `corr` | `corr` | `[correction]`-kind deterministic lookup | value of the durable-correction fast path |
+| `ablate:xr` | `xr` | `xr` | cross-realm recall | value of cross-project retrieval |
+| `ablate:all` | — | `sem,ctx,hyb,kw,corr,xr` | every lane | sanity check: should ≈ `off` |
 
-Each ablation keeps every other lane on, so its ΔSR is a marginal
-contribution, not that lane's total value (lanes overlap — see Threats to
-Validity).
+`graph` and `hybrid` are both aliases for chitta's single `hyb` hook lane
+— there is no separate triplet/PageRank lane distinct from the hybrid
+path (this differs from the original design sketch, which assumed one).
+Each single-lane ablation keeps every other lane on, so its ΔSR is a
+marginal contribution, not that lane's total value (lanes overlap — see
+Threats to Validity).
 
-## MUI: what "used" means and why it's weak
+## MUI: what "used" means
 
-`scorer.memory_was_used` checks whether the first 40 characters of a planted
-memory's content appear (case-insensitively) in the agent's transcript. This
-is a **surface-form echo proxy**, not a causal-use detector:
+`scorer.mui_credit` is the headline metric as of v2, replacing the v1
+surface-echo proxy. For each memory-on run, credit = 1 iff all of:
 
-- False positive: the agent quotes the memory in its reasoning but the fix
-  it ships doesn't actually depend on it (would have passed anyway).
-- False negative: the agent internalizes the convention and applies it
-  without repeating the memory's wording (e.g. writes `_`-joined output
-  without saying "per the convention memory").
+1. `injected_confirmed` — the planted memory actually reached the child
+   session, not just was planted (README "Unconfirmed injection" below).
+2. the run passed.
+3. at least one paired memory-off trial for the same task (matched by
+   trial number when the exact trial exists in the results, else every
+   off trial recorded for that `task_id` — see `scorer.score`) either
+   **failed** (`sr_lift_credit`: memory changed the outcome) or used
+   **≥1.5× this run's tokens** (`cost_credit`: memory changed the cost,
+   even on a task exploration alone can already solve — see the first
+   pilot's finding that memory's first measurable effect was cost, not
+   success, on exploration-solvable tasks).
 
-A more faithful MUI would ablate the specific planted memory (not the whole
-lane) per task and diff outcomes — expensive (task_count × memory_count
-extra runs) and left as a v1 follow-up, tracked as an open design question
-below.
+`mui` = fraction of on-runs credited (`sr_lift_credit` + `cost_credit`,
+which are mutually exclusive as computed — cost is only checked when no
+paired off trial failed — so they sum exactly to `mui`); `mui_n` is the
+denominator (total on-runs, not just on-wins). This directly measures
+what the benchmark cares about — did memory demonstrably change the
+outcome or its cost — rather than whether the agent quoted the memory's
+wording, so it doesn't share the old proxy's failure modes (a quoted-but-
+irrelevant memory scoring as "used"; an internalized-but-unquoted one
+scoring as "unused").
+
+`scorer.memory_was_used` (the v1 proxy: does the first 40 characters of a
+planted memory's content appear, case-insensitively, in the transcript)
+is kept and reported as `echo_rate`, for reference only. It reads 0.0
+across every on-condition win in `results/a1aa8c0f.jsonl` — real agents
+apply a planted convention without repeating its exact wording, so the
+echo check was never going to register anything on real data.
+
+A more faithful MUI still would ablate the *specific* planted memory (not
+a whole lane) per task and diff outcomes — expensive (task_count ×
+memory_count extra runs) and still a v2+ follow-up (open design question
+below); `mui_credit`'s lane-level pairing is the practical middle ground
+for now.
 
 ## Threats to validity
 
@@ -371,7 +438,7 @@ below.
 | `schema/task.json` | JSON Schema for a task |
 | `runner.py` | orchestrates task × condition × trial runs, stdlib only |
 | `scorer.py` | reads `results/*.jsonl`, prints metrics, stdlib only |
-| `tasks/example-001/` .. `example-009/` | 9 tasks, each `repo_fixture/` (broken stub, no convention-revealing test) + `task.json` + `hidden/` (the convention-revealing test, applied only at check time) + `solution/` (the fix) |
+| `tasks/example-001/` .. `example-015/` | 15 tasks, each `repo_fixture/` (broken stub, no convention-revealing test) + `task.json` + `hidden/` (the convention-revealing test, applied only at check time) + `solution/` (the fix) |
 | `tests/test_scaffold.py` | schema validation, `hidden/`+`solution/` presence, no-visible-leak grep (`LEAK_CHECK_TERMS`), no-visible-test-defines-a-test, `check_cmd` fail-before/pass-after-`solution/` (with `hidden/` applied) for every task, `EchoAdapter`+real-`ChittaAdapter` end-to-end plumbing (incl. `injected_confirmed`), ablation-skip check, `--dry-run` smoke check, `--trials`-required check |
 | `results/` | `runner.py` output, one JSONL per invocation |
 
@@ -393,6 +460,18 @@ python3 runner.py --task example-001 --agent echo --trials 3
 python3 runner.py --agent claude-code --trials 5 --timeout 600
 python3 scorer.py results/<run_id>.jsonl
 
+# Include ablation conditions (now real, scored runs -- see "Ablation matrix").
+python3 runner.py --agent claude-code --trials 5 \
+    --condition off --condition on \
+    --condition ablate:semantic --condition ablate:keyword \
+    --condition ablate:graph --condition ablate:context \
+    --condition ablate:corrections --condition ablate:all
+
+# An interrupted run (killed, timed out, node died) can be continued without
+# redoing already-recorded task x condition x trials -- appends to the same
+# file, same run_id.
+python3 runner.py --agent claude-code --trials 5 --resume results/<run_id>.jsonl
+
 # Print the exact chitta/claude commands every task x condition would run,
 # without executing any of them (no daemon calls, no LLM calls, no results file).
 python3 runner.py --agent claude-code --trials 1 --dry-run
@@ -402,27 +481,40 @@ python3 -m unittest tests/test_scaffold.py -v
 
 ## Open design questions
 
-1. **Ablation env vars — still open.** `ChittaAdapter.ablate_lane` still
-   needs a real binding — either a `chitta recall --ablate-lane <lane>` flag
-   (new daemon-side work) or an env var chittad reads at startup to disable
-   a lane process-wide (the latter means an ablation run needs its own
-   daemon instance). Until then `ablate:<lane>` conditions are skipped, not
-   scored (see "Ablation matrix").
-2. **Per-memory MUI vs per-lane MUI — decided for v1: per-lane.**
+1. **Ablation env vars — resolved for v2: `CC_SOUL_ABLATE_LANES`.**
+   `ChittaAdapter.agent_env` sets it directly on the agent subprocess;
+   `hooks/prompt-core.sh` reads it and skips any named lane's recall call.
+   No daemon-side `--ablate-lane` flag was needed after all — the ablation
+   happens at the hook that would have issued the recall, not inside
+   chittad (see "Ablation matrix"). Still open: a real (non-`echo`,
+   non-`dry-run`) matrix with ablation conditions included hasn't been
+   run yet — only the wiring itself has been exercised
+   (`tests.test_scaffold.TestAblationWiring`, a `--dry-run` smoke check).
+2. **Per-memory MUI vs per-lane MUI — still per-lane for v2.**
    `scorer.py`'s `ablation_delta_sr` is per-lane (`on` SR minus
-   `ablate:<lane>` SR for each lane present in the results). Per-memory MUI
-   (ablate one specific planted memory per task, not a whole lane) would be
-   more faithful but costs task_count × memory_count extra runs — deferred
-   past v1; blocked on #1 either way (both need the daemon-side ablation
-   binding).
-3. **Task corpus size and sourcing — resolved for v1: 9 hand-authored
-   tasks.** `example-001`..`example-009`, one convention type each (naming,
-   forbidden dependency, error-handling pattern, config location, CLI flag
-   default, output format, a fake tool's documented gotcha, an algorithmic-
-   complexity constraint, an exit-code contract), all Python + stdlib
-   `unittest`. Mining tasks from real "convention changed" commit pairs
-   remains a future extension — harder to guarantee the solvable-without-
-   memory invariant against real history than to hand-author it.
+   `ablate:<lane>` SR for each lane present in the results); `mui_credit`
+   (the new headline MUI) is also lane-agnostic — it credits a run based
+   on paired off-trial outcome/cost, not on which lane surfaced the
+   memory. Per-memory MUI (ablate one specific planted memory per task,
+   not a whole lane) would be more faithful but costs task_count ×
+   memory_count extra runs — still deferred, no longer blocked on #1 now
+   that ablation itself is wired.
+3. **Task corpus size and sourcing — updated for v2: 15 hand-authored
+   tasks.** `example-001`..`example-009` (v1: naming, forbidden dependency,
+   error-handling pattern, config location, CLI flag default, output
+   format, a fake tool's documented gotcha, an algorithmic-complexity
+   constraint, an exit-code contract) plus `example-010`..`example-015`
+   (v2, all non-deducible institutional conventions: a mandated
+   generated-file header, a mandated handler-function name prefix, a
+   mandated credential env-var name, a mandated log-line format, a
+   mandated CLI-subcommand registration order, a mandated retry
+   count/backoff constant), all Python + stdlib `unittest`. In the first
+   full matrix, only the two arbitrary-convention tasks that existed
+   then (`005`, `009`) showed a real `off`-failure gap — the six new
+   tasks are built the same way, to give ΔSR more surface to move on.
+   Mining tasks from real "convention changed" commit pairs remains a
+   future extension — harder to guarantee the solvable-without-memory
+   invariant against real history than to hand-author it.
 4. **`ClaudeCodeAdapter` usage/tokens — resolved.** `tokens_used` =
    `input_tokens + output_tokens`, deliberately excluding
    `cache_read_input_tokens` (verified live against the real `claude -p

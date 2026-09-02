@@ -2003,6 +2003,7 @@ def handle_recall_gateway(arguments: dict) -> str:
         "hybrid": "hybrid_recall",
         "smart": "smart_recall",
         "field": "recall_field",
+        "keyword": "recall_keyword",
     }
     tool = tool_map.get(strategy, "recall")
 

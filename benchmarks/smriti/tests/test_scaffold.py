@@ -146,16 +146,19 @@ class TestScaffoldEndToEnd(unittest.TestCase):
         self.assertIn("delta_sr", report["headline"])
         self.assertIn("delta_tokens", report["headline"])
         self.assertIn("mui", report["headline"])
+        self.assertIn("sr_lift_credit", report["headline"])
+        self.assertIn("cost_credit", report["headline"])
+        self.assertIn("echo_rate", report["headline"])
 
         # EchoAdapter edits nothing, so the fixture's own failing test still fails
         # under both conditions -- this is expected, not a benchmark result.
         self.assertTrue(all(r["passed"] is False for r in records))
 
-    def test_ablate_condition_is_skipped_not_faked(self):
-        """chittad has no --ablate-lane flag yet -- run_one must refuse to
-        score it, not silently fall back to full recall (README 'Open design
-        questions' #1). The run still completes and writes a (here, empty)
-        results file -- only the unscored trial itself is dropped."""
+    def test_ablate_condition_is_now_a_real_scored_run(self):
+        """Ablation is wired via CC_SOUL_ABLATE_LANES (an env var read by
+        hooks/prompt-core.sh, not a chittad daemon flag) -- ablate:<lane>
+        is a real, scored condition, not the earlier skip-and-drop
+        placeholder."""
         out_path = runner.run_all(
             tasks_dir=SMRITI_DIR / "tasks",
             task_ids=["example-001"],
@@ -164,7 +167,67 @@ class TestScaffoldEndToEnd(unittest.TestCase):
             output_dir=self.output_dir,
             trials=1,
         )
-        self.assertEqual(scorer.load_records(out_path), [])
+        records = scorer.load_records(out_path)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["condition"], "ablate:semantic")
+        self.assertIn("passed", records[0])
+
+    def test_resume_skips_recorded_trials_and_appends_the_rest(self):
+        first = runner.run_all(
+            tasks_dir=SMRITI_DIR / "tasks",
+            task_ids=["example-001"],
+            conditions=["off", "on"],
+            agent=runner.EchoAdapter(),
+            output_dir=self.output_dir,
+            trials=2,
+        )
+        before = scorer.load_records(first)
+        self.assertEqual(len(before), 4)  # 2 conditions x 2 trials
+        run_id = before[0]["run_id"]
+
+        second = runner.run_all(
+            tasks_dir=SMRITI_DIR / "tasks",
+            task_ids=["example-001"],
+            conditions=["off", "on"],
+            agent=runner.EchoAdapter(),
+            output_dir=self.output_dir,
+            trials=3,  # one more trial than the first run
+            resume_path=first,
+        )
+        self.assertEqual(second, first)  # same file, appended in place
+        after = scorer.load_records(second)
+        self.assertEqual(len(after), 6)  # 4 kept + 2 new (trial 2, off+on)
+        self.assertTrue(all(r["run_id"] == run_id for r in after))
+        seen = {(r["task_id"], r["condition"], r["trial"]) for r in after}
+        self.assertEqual(
+            seen,
+            {("example-001", c, t) for c in ("off", "on") for t in (0, 1, 2)},
+        )
+
+    def test_resume_with_nothing_new_leaves_the_file_untouched(self):
+        out_path = runner.run_all(
+            tasks_dir=SMRITI_DIR / "tasks",
+            task_ids=["example-001"],
+            conditions=["off"],
+            agent=runner.EchoAdapter(),
+            output_dir=self.output_dir,
+            trials=1,
+        )
+        before_mtime = out_path.stat().st_mtime_ns
+        before_records = scorer.load_records(out_path)
+
+        result = runner.run_all(
+            tasks_dir=SMRITI_DIR / "tasks",
+            task_ids=["example-001"],
+            conditions=["off"],
+            agent=runner.EchoAdapter(),
+            output_dir=self.output_dir,
+            trials=1,
+            resume_path=out_path,
+        )
+        self.assertEqual(result, out_path)
+        self.assertEqual(out_path.stat().st_mtime_ns, before_mtime)
+        self.assertEqual(scorer.load_records(out_path), before_records)
 
 
 # Per-task terms that would reveal the planted convention's actual answer if
@@ -182,6 +245,12 @@ LEAK_CHECK_TERMS = {
     "example-007": ["known bug", "silently drops", "cap the parallel", "always cap"],
     "example-008": ["100k+", "batch job", "o(n)", "o(n^2)", "o(n²)"],
     "example-009": ["exit code 3", "monitoring dashboard", "pages differently", "on-call"],
+    "example-010": ["generated-by: forge-cli", "forge-cli v2", "artifact scanner"],
+    "example-011": ["evt_ping", "evt_<x>", "handle_ping", "on_ping"],
+    "example-012": ["forge_api_token"],
+    "example-013": ["evt|", "pipe-delimited", "log-shipper's regex"],
+    "example-014": ["list, add, remove", "generate-docs", "runbook"],
+    "example-015": ["0.2 * attempt", "5 total attempts", "linear backoff", "rate limiter enforces"],
 }
 
 
@@ -349,6 +418,117 @@ class TestRunnerRefusesSilentSingleTrial(unittest.TestCase):
                 output_dir=Path(tempfile.mkdtemp(prefix="smriti-test-zerotrials-")),
                 trials=0,
             )
+
+
+class TestAblationWiring(unittest.TestCase):
+    """No daemon/subprocess calls -- parse_condition and agent_env are pure
+    (dry_run=True short-circuits the only network-touching bits, plant/
+    context_for, neither of which agent_env calls)."""
+
+    def test_benchmark_lane_names_map_to_the_hook_short_names(self):
+        cases = {
+            "semantic": "sem",
+            "keyword": "kw",
+            "graph": "hyb",
+            "hybrid": "hyb",
+            "context": "ctx",
+            "corrections": "corr",
+        }
+        for benchmark_name, hook_name in cases.items():
+            memory, _ = runner.parse_condition(f"ablate:{benchmark_name}", dry_run=True)
+            env = memory.agent_env("project:smriti-test")
+            self.assertEqual(env["CC_SOUL_ABLATE_LANES"], hook_name)
+
+    def test_hook_short_names_pass_through_unchanged(self):
+        for hook_name in ("sem", "kw", "hyb", "ctx", "corr", "xr"):
+            memory, _ = runner.parse_condition(f"ablate:{hook_name}", dry_run=True)
+            env = memory.agent_env("project:smriti-test")
+            self.assertEqual(env["CC_SOUL_ABLATE_LANES"], hook_name)
+
+    def test_ablate_all_disables_every_lane(self):
+        memory, _ = runner.parse_condition("ablate:all", dry_run=True)
+        env = memory.agent_env("project:smriti-test")
+        self.assertEqual(env["CC_SOUL_ABLATE_LANES"], "sem,ctx,hyb,kw,corr,xr")
+
+    def test_unknown_lane_is_rejected(self):
+        with self.assertRaises(ValueError):
+            runner.parse_condition("ablate:nonsense")
+
+    def test_off_and_on_set_no_ablate_lanes_env(self):
+        off_memory, _ = runner.parse_condition("off")
+        on_memory, _ = runner.parse_condition("on", dry_run=True)
+        self.assertNotIn("CC_SOUL_ABLATE_LANES", off_memory.agent_env("project:smriti-test"))
+        self.assertNotIn("CC_SOUL_ABLATE_LANES", on_memory.agent_env("project:smriti-test"))
+
+
+class TestMUI(unittest.TestCase):
+    """scorer.mui_credit / scorer.score's MUI section -- synthetic records,
+    no daemon calls."""
+
+    @staticmethod
+    def _rec(task_id, condition, trial, passed, tokens, injected_confirmed):
+        return {
+            "task_id": task_id,
+            "condition": condition,
+            "trial": trial,
+            "passed": passed,
+            "tokens_used": tokens,
+            "injected_confirmed": injected_confirmed,
+            "transcript": "",
+            "planted_memory_contents": [],
+        }
+
+    def test_credit_requires_confirmed_injection_and_a_pass(self):
+        paired_off = [self._rec("t", "off", 0, False, 100, None)]
+        unconfirmed = self._rec("t", "on", 0, True, 50, False)
+        self.assertEqual(scorer.mui_credit(unconfirmed, paired_off), (False, False))
+
+        failed_on = self._rec("t", "on", 0, False, 50, True)
+        self.assertEqual(scorer.mui_credit(failed_on, paired_off), (False, False))
+
+    def test_sr_lift_credit_when_a_paired_off_trial_failed(self):
+        on = self._rec("t", "on", 0, True, 800, True)
+        paired_off = [self._rec("t", "off", 0, False, 1000, None)]
+        self.assertEqual(scorer.mui_credit(on, paired_off), (True, False))
+
+    def test_cost_credit_when_paired_off_used_1_5x_tokens_and_still_passed(self):
+        on = self._rec("t", "on", 0, True, 900, True)
+        paired_off = [self._rec("t", "off", 0, True, 2000, None)]
+        self.assertEqual(scorer.mui_credit(on, paired_off), (False, True))
+
+    def test_no_credit_when_off_passed_and_tokens_are_close(self):
+        on = self._rec("t", "on", 0, True, 900, True)
+        paired_off = [self._rec("t", "off", 0, True, 1000, None)]  # only 1.11x
+        self.assertEqual(scorer.mui_credit(on, paired_off), (False, False))
+
+    def test_score_pairs_by_matching_trial_and_reports_the_two_components(self):
+        records = [
+            self._rec("t1", "off", 0, False, 1000, None),
+            self._rec("t1", "on", 0, True, 800, True),      # sr_lift
+            self._rec("t1", "off", 1, True, 2000, None),
+            self._rec("t1", "on", 1, True, 900, True),       # cost (2000 >= 1.5*900)
+            self._rec("t2", "off", 0, False, 500, None),
+            self._rec("t2", "on", 0, True, 400, False),      # unconfirmed -> no credit
+            self._rec("t3", "off", 0, True, 500, None),
+            self._rec("t3", "on", 0, False, 400, True),      # on failed -> no credit
+        ]
+        report = scorer.score(records)
+        headline = report["headline"]
+        self.assertEqual(headline["mui_n"], 4)
+        self.assertAlmostEqual(headline["mui"], 0.5)
+        self.assertAlmostEqual(headline["sr_lift_credit"], 0.25)
+        self.assertAlmostEqual(headline["cost_credit"], 0.25)
+        self.assertIn("echo_rate", headline)  # old proxy still reported, for reference
+
+    def test_ablate_all_vs_off_sr_gap_present_when_ablate_all_in_results(self):
+        records = [
+            self._rec("t1", "off", 0, True, 100, None),
+            self._rec("t1", "on", 0, True, 100, True),
+            self._rec("t1", "ablate:all", 0, True, 100, True),
+        ]
+        report = scorer.score(records)
+        self.assertIn("ablate_all_vs_off_sr_gap", report["headline"])
+        self.assertAlmostEqual(report["headline"]["ablate_all_vs_off_sr_gap"], 0.0)
 
 
 if __name__ == "__main__":

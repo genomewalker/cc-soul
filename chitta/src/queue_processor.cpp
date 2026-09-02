@@ -38,6 +38,48 @@ QueueProcessor::QueueProcessor(FieldStore& field_store,
     , attempts_path_(queue_path + ".slow.attempts")
 {}
 
+// A triplet is worth far more to the analogy lane when it names the memory it
+// came from: chitta-field's analogy_snapshot() keys the structural signature
+// index on `source_memory_id`, and a fact carrying none contributes no
+// hypervector. The `connect` and `store_claim` queue schemas have no id field,
+// but callers routinely put one in the payload, and both tools are also used
+// with a memory id AS a node (the convention native_distiller.cpp and
+// ingester.cpp already follow). Returns the first id that both parses and
+// resolves to a live memory, or 0 — which is exactly what add_triplet's
+// default 5th argument already means (unattributed).
+static uint64_t triplet_source_memory_id(FieldStore& fs, const json& args) {
+    auto as_id = [](const json& v) -> uint64_t {
+        if (v.is_number_unsigned()) return v.get<uint64_t>();
+        if (v.is_string()) {
+            const std::string& s = v.get_ref<const std::string&>();
+            if (!s.empty() && s.find_first_not_of("0123456789") == std::string::npos) {
+                try { return std::stoull(s); } catch (...) {}
+            }
+        }
+        return 0;
+    };
+    // Explicit attribution wins and is trusted without a lookup: the caller
+    // named the memory this fact came from, and that memory need not itself be
+    // one of the triplet's nodes.
+    for (const char* k : {"source_memory_id", "memory_id", "memory-id"}) {
+        auto it = args.find(k);
+        if (it != args.end()) {
+            uint64_t id = as_id(*it);
+            if (id) return id;
+        }
+    }
+    // Otherwise a node may itself BE a memory. Only accept one that resolves to
+    // stored content, so an entity that merely looks numeric ("2024") is never
+    // misattributed. Subject first — it is the side both existing conventions
+    // use for the source memory.
+    for (const char* k : {"subject", "object"}) {
+        auto it = args.find(k);
+        uint64_t id = (it != args.end()) ? as_id(*it) : 0;
+        if (id && !fs.get_content(id).empty()) return id;
+    }
+    return 0;
+}
+
 // POISON-PILL: durable per-session distill attempt counter. Bump persists the new
 // count before the distill runs, so a crash mid-distill leaves it incremented and
 // the next restart sees the elevated count. ceiling: rename is atomic but not
@@ -489,7 +531,8 @@ void QueueProcessor::run() {
                     std::string pred = args.value("predicate", "");
                     std::string obj = args.value("object", "");
                     if (!subj.empty() && !pred.empty() && !obj.empty()) {
-                        field_store_.add_triplet(subj, pred, obj);
+                        field_store_.add_triplet(subj, pred, obj, 1.0f,
+                                                 triplet_source_memory_id(field_store_, args));
                         queue_count_++;
                     }
                 } else if (tool == "curiosity_note_gap") {
@@ -517,7 +560,8 @@ void QueueProcessor::run() {
                     std::string predicate = args.value("predicate", "");
                     std::string object_norm = args.value("object", "");
                     if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
-                        field_store_.add_triplet(subject, predicate, object_norm);
+                        field_store_.add_triplet(subject, predicate, object_norm, 1.0f,
+                                                 triplet_source_memory_id(field_store_, args));
                         queue_count_++;
                     }
                 } else if (tool == "learn_outcome") {

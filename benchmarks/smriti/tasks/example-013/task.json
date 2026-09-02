@@ -1,0 +1,15 @@
+{
+  "id": "example-013",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement log_event(name, status) in audit.py: it must print one line per call to stdout, in the exact format this project's downstream log-shipper expects -- don't assume a readable 'name: status' line or JSON is fine just because it's the obvious choice.",
+  "check_cmd": "python3 -m unittest test_audit -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] audit.py's log_event() must print pipe-delimited lines in the exact form 'EVT|<name>|<status>' -- the log-shipper's regex only matches that literal EVT| prefix with pipe delimiters; a JSON line or a colon-separated 'name: status' line is silently dropped by the shipper, never even logged as a parse error.",
+      "realm": "smriti-example-013",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "log-format", "convention"],
+  "expected_tokens_budget": 3000
+}

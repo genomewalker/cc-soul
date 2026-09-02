@@ -52,10 +52,16 @@ ablation) with a hand-rolled proxy of it.
 
 Ablation
 --------
-chittad has no --ablate-lane flag yet (README "Open design questions" #1).
-Rather than silently falling back to full recall and mislabeling the
-result as an ablation, run_one() detects ablate:<lane> conditions and skips
-the trial before either adapter does anything -- see run_one().
+Wired via env, not a daemon flag: ablate:<lane> sets
+CC_SOUL_ABLATE_LANES=<short-lane-name> on the agent subprocess
+(ChittaAdapter.agent_env); hooks/prompt-core.sh's recall call skips any
+lane named there. ablate:all disables every lane at once
+(CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr) -- in effect this should
+match `off`, and scorer.py reports the gap as ablate_all_vs_off_sr_gap as
+a sanity check on the wiring itself. ABLATE_LANE_ALIASES maps
+benchmark-facing lane names (semantic, keyword, graph, hybrid, context,
+corrections) to chitta's short hook-lane names (sem, kw, hyb, ctx, corr)
+-- see parse_condition().
 """
 
 import argparse
@@ -73,6 +79,23 @@ from pathlib import Path
 from typing import Optional
 
 SCRATCH_ROOT = os.environ.get("SMRITI_SCRATCH", "/projects/caeg/scratch/kbd606/tmp")
+
+# Benchmark-facing ablation lane name -> chitta's short hook-lane name
+# (hooks/prompt-core.sh's CC_SOUL_ABLATE_LANES contract). graph and hybrid
+# both land on "hyb" -- chitta has no separate triplet/graph lane distinct
+# from the hybrid-recall path (see README "Ablation matrix"). Passing a
+# short name directly (sem/kw/hyb/ctx/corr/xr) also works -- see
+# parse_condition().
+ABLATE_LANE_ALIASES = {
+    "semantic": "sem",
+    "keyword": "kw",
+    "graph": "hyb",
+    "hybrid": "hyb",
+    "context": "ctx",
+    "corrections": "corr",
+}
+ABLATE_ALL_LANES = "sem,ctx,hyb,kw,corr,xr"
+ABLATE_SHORT_LANES = set(ABLATE_ALL_LANES.split(","))
 
 
 # ---- task loading + minimal schema validation (stdlib only) ----
@@ -199,7 +222,12 @@ class ChittaAdapter(MemoryAdapter):
         return "\n".join(r.get("text", "") for r in results)
 
     def agent_env(self, realm_prefix):
-        return {"CHITTA_REALM": realm_prefix}
+        env = {"CHITTA_REALM": realm_prefix}
+        if self.ablate_lane == "all":
+            env["CC_SOUL_ABLATE_LANES"] = ABLATE_ALL_LANES
+        elif self.ablate_lane:
+            env["CC_SOUL_ABLATE_LANES"] = self.ablate_lane
+        return env
 
     def teardown(self, realm_prefix, planted_ids):
         for mem_id in planted_ids:
@@ -302,14 +330,29 @@ AGENT_ADAPTERS = {"echo": EchoAdapter, "claude-code": ClaudeCodeAdapter}
 # ---- run orchestration ----
 
 def parse_condition(condition: str, dry_run: bool = False):
-    """'off' | 'on' | 'ablate:<lane>' -> (memory_adapter, label)."""
+    """'off' | 'on' | 'ablate:<lane>' | 'ablate:all' -> (memory_adapter, label).
+
+    <lane> accepts either a benchmark-facing name (semantic, keyword,
+    graph, hybrid, context, corrections -- see ABLATE_LANE_ALIASES) or one
+    of chitta's own short hook-lane names directly (sem, kw, hyb, ctx,
+    corr, xr). 'all' disables every lane -- see ABLATE_ALL_LANES and
+    scorer.py's ablate_all_vs_off_sr_gap."""
     if condition == "off":
         return NullAdapter(), condition
     if condition == "on":
         return ChittaAdapter(dry_run=dry_run), condition
     if condition.startswith("ablate:"):
         lane = condition.split(":", 1)[1]
-        return ChittaAdapter(ablate_lane=lane, dry_run=dry_run), condition
+        if lane == "all":
+            return ChittaAdapter(ablate_lane="all", dry_run=dry_run), condition
+        short = ABLATE_LANE_ALIASES.get(lane, lane)
+        if short not in ABLATE_SHORT_LANES:
+            raise ValueError(
+                f"unknown ablation lane: {lane!r} -- known benchmark names: "
+                f"{sorted(ABLATE_LANE_ALIASES)}, known hook names: "
+                f"{sorted(ABLATE_SHORT_LANES)}, or 'all'"
+            )
+        return ChittaAdapter(ablate_lane=short, dry_run=dry_run), condition
     raise ValueError(f"unknown condition: {condition}")
 
 
@@ -385,16 +428,10 @@ def read_injected_ids_in_window(start_ms: int, end_ms: int) -> set:
 
 def run_one(task: dict, task_dir: Path, condition: str, agent: AgentAdapter, run_id: str,
             trial: int, dry_run: bool = False) -> Optional[dict]:
-    """Runs one task x condition x trial. Returns None (and prints why) when
-    the trial isn't scored: an ablate:<lane> condition today (ablation isn't
-    wired -- see module docstring), never a real pass/fail outcome."""
+    """Runs one task x condition x trial and returns its scored record.
+    ablate:<lane> is a real, scored condition -- see module docstring's
+    "Ablation" section."""
     memory, label = parse_condition(condition, dry_run=dry_run)
-
-    if isinstance(memory, ChittaAdapter) and memory.ablate_lane:
-        print(f"[SKIP] {task['id']} [{label}] trial {trial}: ablation not wired -- "
-              f"chittad has no --ablate-lane flag yet (README 'Open design questions' #1). "
-              f"Refusing to fake it; not scored.")
-        return None
 
     # Canonical `project:*` shape -- required, not cosmetic. detect_realm()
     # (chitta/src/rpc_server.cpp:1416) only ever produces `project:<repo>` or
@@ -453,19 +490,40 @@ def run_one(task: dict, task_dir: Path, condition: str, agent: AgentAdapter, run
     }
 
 
+def load_resume_state(resume_path: Optional[Path]):
+    """Reads an existing results/<run_id>.jsonl (if given and present) and
+    returns (run_id_to_reuse_or_None, {(task_id, condition, trial) already
+    recorded}). Used by run_all to skip work an earlier, interrupted
+    invocation already did and to keep appending to the same run_id/file
+    rather than starting a fresh one."""
+    if resume_path is None or not resume_path.exists():
+        return None, set()
+    with open(resume_path) as f:
+        existing = [json.loads(line) for line in f if line.strip()]
+    done = {(r["task_id"], r["condition"], r["trial"]) for r in existing}
+    run_id = existing[0]["run_id"] if existing else None
+    return run_id, done
+
+
 def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapter,
-            output_dir: Path, trials: int, dry_run: bool = False) -> Optional[Path]:
+            output_dir: Path, trials: int, dry_run: bool = False,
+            resume_path: Optional[Path] = None) -> Optional[Path]:
     if trials < 1:
         raise ValueError("trials must be >= 1 -- a single trial is a coin flip, not a result "
                           "(README 'Threats to validity': repeated-trial default)")
 
-    run_id = uuid.uuid4().hex[:8]
+    resumed_run_id, done = load_resume_state(resume_path)
+    run_id = resumed_run_id or uuid.uuid4().hex[:8]
     records = []
     for trial in range(trials):
         for task_id in task_ids:
             task_dir = tasks_dir / task_id
             task = load_task(task_dir)
             for condition in conditions:
+                if (task_id, condition, trial) in done:
+                    print(f"{task_id} [{condition}] trial {trial}: SKIP "
+                          f"(already in {resume_path})")
+                    continue
                 record = run_one(task, task_dir, condition, agent, run_id, trial, dry_run=dry_run)
                 if record is None:
                     continue
@@ -481,10 +539,11 @@ def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapt
         return None
 
     os.makedirs(output_dir, exist_ok=True)
-    out_path = output_dir / f"{run_id}.jsonl"
-    with open(out_path, "w") as f:
-        for record in records:
-            f.write(json.dumps(record) + "\n")
+    out_path = resume_path if resumed_run_id else output_dir / f"{run_id}.jsonl"
+    if records:
+        with open(out_path, "a" if resumed_run_id else "w") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
     return out_path
 
 
@@ -505,6 +564,11 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                          help="print the chitta/claude commands each trial would run, without "
                               "executing them or the daemon-mutating chitta calls; writes no results file")
+    parser.add_argument("--resume", default=None,
+                         help="path to an existing results/<run_id>.jsonl -- skip any "
+                              "task x condition x trial already present in it and append "
+                              "the rest to the same file (same run_id), instead of starting "
+                              "a fresh run from scratch")
     args = parser.parse_args()
 
     if args.trials < 1:
@@ -520,7 +584,8 @@ def main():
         agent = AGENT_ADAPTERS[args.agent]()
 
     out_path = run_all(tasks_dir, task_ids, conditions, agent, Path(args.output),
-                        trials=args.trials, dry_run=args.dry_run)
+                        trials=args.trials, dry_run=args.dry_run,
+                        resume_path=Path(args.resume) if args.resume else None)
     if out_path:
         print(f"results: {out_path}")
 

@@ -14,12 +14,25 @@ pkill -f "chitta-m[c]p" 2>/dev/null; sleep 1   # process is `chitta-mcp` (hyphen
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.
 
 ## Dev install (editable — repo IS the live plugin)
+> Status as of 2026-09-02: single sync owner — `dev-install.sh` symlinks own
+> `~/.claude/hooks/*.sh` and the marketplace `chitta-mcp/*.py`;
+> `sync-installed-hooks.sh` owns the versioned plugin cache and the Codex
+> cache. `sync-installed-hooks.sh` never overwrites a destination that is
+> already a symlink resolving into this repo — it detects and skips those
+> (`[owner:symlink] ... not copying`), so it can no longer silently turn a
+> dev symlink back into a stale copy. Always run `dev-install.sh` after
+> editing hooks or MCP python: it symlinks, then calls
+> `sync-installed-hooks.sh` itself so the plugin cache is refreshed in the
+> same step — a bare `sync-installed-hooks.sh` alone only backstops
+> non-symlinked (plugin-disabled) installs and the cache/Codex destinations.
+
 The live plugin loads **hooks + MCP python from `~/.claude/hooks/*` and
 `~/.claude/plugins/marketplaces/genomewalker-cc-soul/chitta-mcp/*`** — NOT from
 this repo directly. `scripts/dev-install.sh` symlinks those live paths back at
 this repo so `edit repo → restart service → live`, one source of truth, no drift.
 ```bash
-bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; restarts MCP
+bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; refreshes
+                               # plugin cache + Codex cache; restarts MCP
 ```
 - Hooks are live immediately (bash re-reads per invocation). MCP python needs the
   MCP restart (the script does `pkill -f "chitta-m[c]p"`).
@@ -28,6 +41,10 @@ bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; restarts
 - ⚠️ The marketplace is a **git checkout** that a plugin update can re-clone,
   replacing the symlinks with a stale copy (this is what caused the
   `server.py` dual-copy drift). Re-run `dev-install.sh` after any plugin update.
+- `scripts/sync-installed-hooks.sh --check` reports drift without writing
+  anything; it still catches real plugin-cache/Codex drift (it only skips
+  destinations that are dev-install symlinks, where drift is structurally
+  impossible) — safe to run any time, including mid-edit.
 
 ## Release
 `./scripts/release.sh patch|minor|major -y`

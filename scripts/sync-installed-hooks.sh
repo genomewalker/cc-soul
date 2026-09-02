@@ -13,9 +13,24 @@ CHECK_ONLY=false
     exit 1
 }
 
+# Ownership rule (single sync owner, see repo CLAUDE.md "Dev install"): dev-
+# install.sh SYMLINKS ~/.claude/hooks/*.sh and the marketplace chitta-mcp/*.py
+# straight at this repo — that live path is dev-install's, not ours. Never
+# overwrite a destination that is already such a symlink with a copy; skip it
+# and say so. Every other destination this script touches (the plugin cache
+# under installed_plugins.json's installPath, and the Codex cache) has no
+# symlink alternative and is owned by this script alone.
 drift=0
 sync_one() {
     local source="$1" target="$2" mode="${3:-0755}"
+    if [[ -L "$target" ]]; then
+        local resolved
+        resolved="$(readlink -f "$target" 2>/dev/null || true)"
+        if [[ -n "$resolved" && "$resolved" == "$ROOT_DIR"/* ]]; then
+            echo "[owner:symlink] $target -> repo (dev-install.sh owns this destination; not copying)"
+            return 0
+        fi
+    fi
     if [[ -f "$target" ]] && cmp -s "$source" "$target"; then
         return 0
     fi
@@ -28,11 +43,13 @@ sync_one() {
     local stage="$(dirname "$target")/.$(basename "$target").cc-soul-sync"
     install -m "$mode" "$source" "$stage"
     mv -f "$stage" "$target"
-    echo "[sync] $target"
+    echo "[sync] $target (sync-installed-hooks.sh owns this destination)"
 }
 
 # User-level fallback hooks. These are removed from settings when the plugin is
 # enabled, but keeping the files synchronized supports plugin-disabled installs.
+# Skips any file dev-install.sh already symlinked straight at the repo.
+echo "[cc-soul] owner: ~/.claude/hooks/* (dev-install.sh symlinks these when run; this script only backstops non-symlinked installs)"
 while IFS= read -r script; do
     [[ -z "$script" || "$script" == \#* ]] && continue
     sync_one "$HOOKS_SRC/$script" "$HOME/.claude/hooks/$script"
@@ -40,6 +57,8 @@ done < "$HOOK_MANIFEST"
 
 # Claude executes hooks from its versioned plugin cache. During local
 # development, refresh that exact active install without guessing the version.
+# This destination is never symlinked by dev-install.sh — sync-installed-
+# hooks.sh owns it outright.
 installed_json="$HOME/.claude/plugins/installed_plugins.json"
 claude_root=""
 if [[ -f "$installed_json" ]]; then
@@ -49,6 +68,7 @@ if [[ -f "$installed_json" ]]; then
     ' "$installed_json" | tail -1)
 fi
 if [[ -n "$claude_root" && -d "$claude_root" ]]; then
+    echo "[cc-soul] owner: $claude_root/{hooks,chitta-mcp}/* (plugin cache — sync-installed-hooks.sh owns this outright)"
     while IFS= read -r script; do
         [[ -z "$script" || "$script" == \#* ]] && continue
         sync_one "$HOOKS_SRC/$script" "$claude_root/hooks/$script"
@@ -63,8 +83,10 @@ fi
 
 # Codex hook commands point at ROOT_DIR, while its cached skills need their own
 # refresh so both frontends follow the same recap/resume ownership protocol.
+# Also never symlinked by dev-install.sh — sync-installed-hooks.sh owns it.
 codex_root="$HOME/.codex/plugins/cache/local/cc-soul/local"
 if [[ -d "$codex_root" ]]; then
+    echo "[cc-soul] owner: $codex_root/skills/* (Codex cache — sync-installed-hooks.sh owns this outright)"
     for skill in recap resume; do
         sync_one "$ROOT_DIR/codex-plugin/skills/$skill/SKILL.md" \
                  "$codex_root/skills/$skill/SKILL.md" 0644

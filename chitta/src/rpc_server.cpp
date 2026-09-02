@@ -183,7 +183,10 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"query", "Search query", true, nullptr},
       {"limit", "Max results", false, "10"},
       {"tag", "Filter by tag", false, nullptr},
-      {"realm", "Filter by realm (empty = all visible)", false, nullptr}}},
+      {"realm", "Filter by realm (empty = all visible)", false, nullptr},
+      {"strategy", "Retrieval lane: fused (default), keyword (BM25 only, realm-scoped), field", false, nullptr},
+      {"pool", "Candidate pool depth before the recall-biased pre-filter (max 160)", false, "60"},
+      {"prefilter", "Recall-biased pre-filter (false = narrow-pool legacy path)", false, "true"}}},
 
     {"correction_check", "Deterministic durable-correction check (capability #2): does a stored [correction] trigger recur in this turn? Exact keyed bigram probe — reserves an injection slot, bypasses fuzzy recall.",
      {{"text", "Turn/context text to scan for a recurring corrected mistake", true, nullptr}}},
