@@ -1,5 +1,7 @@
 # SMRITI-Bench
 
+*Status as of 2026-09-02 (v2 matrix run, `results/a7e42269.jsonl`): 15 tasks × {off, on, ablate:semantic, ablate:hybrid, ablate:keyword} × 3 trials = 225 runs. off 33/45 (73%), on 41/45 (91%): ΔSR +17.8 pp; ΔT −1,675 tokens/task; MUI v2 0.53 (sr_lift 0.16, cost 0.38); injection confirmed 44/44. All lift from non-deducible conventions (005, 009–011, 013, 014). Ablating the hybrid lane drops injection confirmation to 23/45 — it is the delivery channel for planted memories; semantic and keyword ablation barely move outcomes. Anomaly: example-012 fails 0/3 in every condition including memory-on with injection confirmed (memory delivered, not acted on) — task under review. n=45/condition: still indicative.*
+
 *Status as of 2026-09-02: v2 -- MUI replaced with a ledger-grounded metric
 (`scorer.mui_credit`), 6 more non-deducible-convention tasks
 (`example-010`..`example-015`, corpus now 15), ablation wired for real, and
