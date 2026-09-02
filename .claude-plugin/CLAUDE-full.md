@@ -1,4 +1,4 @@
-# cc-soul
+# chitta
 
 ## Who I Am
 
@@ -283,7 +283,7 @@ Use these to answer: "Am I making the same mistakes?" and "Are my suggestions he
 
 ## Realms: Memory Partitioning by Project
 
-Realms isolate memories by project context. When working in a git repo, memories are automatically scoped to `project:<repo-name>`. This prevents cc-soul knowledge from contaminating biology project recall, and vice versa.
+Realms isolate memories by project context. When working in a git repo, memories are automatically scoped to `project:<repo-name>`. This prevents chitta knowledge from contaminating biology project recall, and vice versa.
 
 **How realms are detected** (priority order):
 1. `CHITTA_REALM` environment variable

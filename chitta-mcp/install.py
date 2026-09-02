@@ -8,7 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLUGIN_NAME = "cc-soul"
+PLUGIN_NAME = "chitta"
+# Pre-rename (2026-09-02, see docs/RENAME.md) plugin/cache name. Uninstall and
+# hook-command detection still recognize it so an upgrade-in-place install
+# doesn't leave orphaned entries behind.
+LEGACY_PLUGIN_NAME = "cc-soul"
 MARKETPLACE = "local"
 HOOKS_DIR = Path(__file__).resolve().parent.parent / "hooks"
 
@@ -112,7 +116,7 @@ def _uninstall_claude_code():
 # ── Codex CLI ────────────────────────────────────────────────────────
 
 def _generate_codex_hooks(hooks_dir: Path) -> dict:
-    """Translate cc-soul hooks.json to Codex hooks format.
+    """Translate chitta hooks.json to Codex hooks format.
 
     Codex supports: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop.
     Matchers in Codex are regex strings ("startup", "resume", ".*", "Bash").
@@ -124,10 +128,10 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
     cc_hooks = json.loads(source.read_text())["hooks"]
     codex_hooks: dict[str, list] = {}
 
-    # Event mapping: which cc-soul events map to Codex
+    # Event mapping: which chitta events map to Codex
     # Codex hook schema compatibility:
     # PreToolUse payload contracts differ from Claude's and currently reject
-    # some cc-soul outputs (e.g. additionalContext), so we do not install that
+    # some chitta outputs (e.g. additionalContext), so we do not install that
     # event for Codex until a dedicated Codex-safe pre-tool hook is provided.
     supported_events = {
         "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"
@@ -140,7 +144,7 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
         codex_matchers = []
         for matcher_block in matchers:
             cc_matcher = matcher_block["matcher"]
-            # Convert cc-soul glob "*" to Codex regex ".*"
+            # Convert chitta glob "*" to Codex regex ".*"
             codex_matcher = ".*" if cc_matcher == "*" else cc_matcher
 
             codex_hook_list = []
@@ -191,14 +195,17 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
 
 
 def _is_cc_soul_hook_command(cmd: str, hooks_dir: Path) -> bool:
-    """Return True when a hook command belongs to cc-soul.
+    """Return True when a hook command belongs to chitta.
 
     Matches current install path and legacy Claude plugin-cache paths that may
     have been merged into Codex hooks.json by older installers.
     """
     if str(hooks_dir) in cmd:
         return True
-    return "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" in cmd
+    return (
+        "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" in cmd
+        or "/.claude/plugins/cache/genomewalker-chitta/chitta/" in cmd
+    )
 
 
 def _install_codex():
@@ -262,7 +269,7 @@ def _install_codex():
         # Merge with existing hooks if present
         if hooks_file.is_file():
             existing = json.loads(hooks_file.read_text())
-            # First remove all existing cc-soul hook matchers across all events
+            # First remove all existing chitta hook matchers across all events
             # (including events not regenerated in this install pass).
             for event in list(existing.get("hooks", {}).keys()):
                 kept = [
@@ -279,7 +286,7 @@ def _install_codex():
                 if event not in existing.get("hooks", {}):
                     existing.setdefault("hooks", {})[event] = matchers
                 else:
-                    # Remove existing cc-soul matchers (current + legacy cache paths),
+                    # Remove existing chitta matchers (current + legacy cache paths),
                     # then append fresh ones — preserves third-party hooks.
                     kept = [
                         m for m in existing["hooks"][event]
@@ -305,6 +312,11 @@ def _uninstall_codex():
         print(f"  Codex: removed {dest}")
     else:
         print("  Codex: not installed")
+
+    legacy_dest = _codex_home() / "plugins" / "cache" / MARKETPLACE / LEGACY_PLUGIN_NAME / "local"
+    if legacy_dest.is_dir():
+        shutil.rmtree(legacy_dest)
+        print(f"  Codex: removed legacy install {legacy_dest}")
 
     # Remove hooks that reference our hook scripts
     hooks_file = _codex_hooks_file()
@@ -340,11 +352,13 @@ def _uninstall_codex():
     config = _codex_config()
     if config.is_file():
         text = config.read_text()
-        if f"{PLUGIN_NAME}@{MARKETPLACE}" in text:
+        for name in (PLUGIN_NAME, LEGACY_PLUGIN_NAME):
+            if f"{name}@{MARKETPLACE}" not in text:
+                continue
             lines = text.split("\n")
             out, skip = [], False
             for line in lines:
-                if f'plugins."{PLUGIN_NAME}@{MARKETPLACE}"' in line:
+                if f'plugins."{name}@{MARKETPLACE}"' in line:
                     skip = True
                     continue
                 if skip and (line.startswith("[") or not line.strip()):
@@ -354,8 +368,9 @@ def _uninstall_codex():
                 if skip:
                     continue
                 out.append(line)
-            config.write_text("\n".join(out))
+            text = "\n".join(out)
             print("  Codex: removed config entry")
+        config.write_text(text)
     return True
 
 

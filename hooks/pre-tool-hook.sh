@@ -2,7 +2,7 @@
 # Headless bridge participant (fusion room, codex_run): nobody is reading this.
 # A one-shot model treats injected advice as instruction and goes exploring —
 # with these live, sol ran 93 tool calls on a room prompt and never finished.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 
 # PreToolUse hook: safety blocks, large-output guards, soul corrections.
 #
@@ -30,7 +30,7 @@ json_escape() {
 }
 
 _strict_mode_enabled() {
-    case "${CC_SOUL_STRICT_MODE:-}" in
+    case "${CHITTA_STRICT_MODE:-${CC_SOUL_STRICT_MODE:-}}" in
         1) return 0 ;;
         0) return 1 ;;
     esac
@@ -42,13 +42,14 @@ _strict_mode_enabled() {
 # Phase 1 (initial): log what the hook WOULD do without changing behavior.
 # Phase 2 (auto):    once shadow log has ≥100 entries AND is ≥3 days old, the
 #                    hook flips to enforce mode automatically. No env var needed.
-#                    Explicit CC_SOUL_HOOK_ENFORCE=0 disables; =1 forces on early.
-# Escape hatch:      CC_SOUL_ALLOW_READ=1 bypasses per env.
+#                    Explicit CHITTA_HOOK_ENFORCE=0 disables; =1 forces on early
+#                    (CC_SOUL_HOOK_ENFORCE still honored).
+# Escape hatch:      CHITTA_ALLOW_READ=1 bypasses per env (CC_SOUL_ALLOW_READ too).
 #                    Also honoured if ~/.claude/mind/.allow_read_<session_id> exists
 #                    (use when env var can't persist across hook invocations).
 _should_enforce() {
     # Explicit override wins
-    case "${CC_SOUL_HOOK_ENFORCE:-}" in
+    case "${CHITTA_HOOK_ENFORCE:-${CC_SOUL_HOOK_ENFORCE:-}}" in
         1) return 0 ;;
         0) return 1 ;;
     esac
@@ -132,8 +133,9 @@ safety_check() {
     # UNLESS a scratch/temp path (/tmp|/dev/shm|/scratch) appears in the same
     # command segment. Explicit single-path deletes and git-clean dry-runs pass.
     # Command is split on ; & | so a scratch path in one segment can't unlock a
-    # destructive delete in another. Bypass: prefix CC_SOUL_ALLOW_GLOB_RM=1.
-    if [[ "${CC_SOUL_ALLOW_GLOB_RM:-0}" != "1" ]] && ! grep -qF 'CC_SOUL_ALLOW_GLOB_RM=1' <<<"$cmd"; then
+    # destructive delete in another. Bypass: prefix CHITTA_ALLOW_GLOB_RM=1
+    # (CC_SOUL_ALLOW_GLOB_RM=1 still honored).
+    if [[ "${CHITTA_ALLOW_GLOB_RM:-${CC_SOUL_ALLOW_GLOB_RM:-0}}" != "1" ]] && ! grep -qE '(^|[[:space:]])(CHITTA|CC_SOUL)_ALLOW_GLOB_RM=1([[:space:]]|$)' <<<"$cmd"; then
         local _seg _danger=0
         while IFS= read -r _seg; do
             [[ -z "$_seg" ]] && continue
@@ -143,7 +145,7 @@ safety_check() {
             _danger=1; break
         done < <(tr ';&|\n' '\n' <<<"$cmd")
         if [[ $_danger -eq 1 ]]; then
-            echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bulk/glob delete outside a scratch path blocked (incident 2026-07-30: rm -f chunk_*.sorted.fq deleted 204 untracked files). Delete explicit paths, scope to /tmp|/scratch|/dev/shm, or prefix the command with CC_SOUL_ALLOW_GLOB_RM=1 if intentional."}}'
+            echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bulk/glob delete outside a scratch path blocked (incident 2026-07-30: rm -f chunk_*.sorted.fq deleted 204 untracked files). Delete explicit paths, scope to /tmp|/scratch|/dev/shm, or prefix the command with CHITTA_ALLOW_GLOB_RM=1 if intentional."}}'
             return 3
         fi
     fi
@@ -155,7 +157,7 @@ safety_check() {
 # 1. chitta recall  → if known, deny + show path
 # 2. folder in mem  → rewrite find root to mem dir, maxdepth 3
 # 3. cwd            → rewrite to find . -maxdepth 3
-# 4. expand         → allow if CC_SOUL_DEEP_SEARCH=1
+# 4. expand         → allow if CHITTA_DEEP_SEARCH=1
 find_strategy() {
     local cmd="$1"
     # Only when find is invoked as a command (start of line or after ; | && &).
@@ -163,18 +165,18 @@ find_strategy() {
     # .find( / "find" — the entire command got replaced by the fallback.
     echo "$cmd" | grep -qE '(^|[;&|][[:space:]]*)find[[:space:]]' || return 1
     echo "$cmd" | grep -qE '\-maxdepth\s+[0-3]\b' && return 1
-    [[ "${CC_SOUL_DEEP_SEARCH:-0}" == "1" ]] && return 1
-    # Inline env var: CC_SOUL_DEEP_SEARCH=1 find ... — not exported to hook env.
-    echo "$cmd" | grep -qE '(^|\s)CC_SOUL_DEEP_SEARCH=1(\s|$)' && return 1
+    [[ "${CHITTA_DEEP_SEARCH:-${CC_SOUL_DEEP_SEARCH:-0}}" == "1" ]] && return 1
+    # Inline env var: CHITTA_DEEP_SEARCH=1 find ... — not exported to hook env.
+    echo "$cmd" | grep -qE '(^|\s)(CHITTA|CC_SOUL)_DEEP_SEARCH=1(\s|$)' && return 1
     # Explicit non-root absolute path: find /maps/... or find /home/... — let through.
     local _target
     _target=$(echo "$cmd" | sed -nE 's/.*\bfind\s+([^[:space:]]+).*/\1/p' | head -1)
     [[ "$_target" == /* && "$_target" != "/" ]] && return 1
 
     # In strict mode, hard-deny explicit root scans.
-    if [[ "${CC_SOUL_STRICT_MODE:-0}" == "1" ]] && echo "$cmd" | grep -qE '^[[:space:]]*find[[:space:]]+/([[:space:]]|$)'; then
+    if [[ "${CHITTA_STRICT_MODE:-${CC_SOUL_STRICT_MODE:-0}}" == "1" ]] && echo "$cmd" | grep -qE '^[[:space:]]*find[[:space:]]+/([[:space:]]|$)'; then
         local deny_msg
-        deny_msg=$(jq -Rn '"[strict] Root-wide find is blocked. Scope to project/cwd (e.g., find . -maxdepth 3 ...) or set CC_SOUL_DEEP_SEARCH=1 when intentional."')
+        deny_msg=$(jq -Rn '"[strict] Root-wide find is blocked. Scope to project/cwd (e.g., find . -maxdepth 3 ...) or set CHITTA_DEEP_SEARCH=1 when intentional."')
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' "$deny_msg"
         return 0
     fi
@@ -205,7 +207,7 @@ find_strategy() {
             if [[ -n "$sym_dir" && -d "$sym_dir" ]]; then
                 local new_cmd ctx new_cmd_json
                 new_cmd=$(_rewrite_find_root "$cmd" "$sym_dir")
-                ctx=$(jq -Rn --arg d "$sym_dir" '"[memory-first] No exact match but memory hints at \($d). Scoped find there (maxdepth 3). CC_SOUL_DEEP_SEARCH=1 to expand."')
+                ctx=$(jq -Rn --arg d "$sym_dir" '"[memory-first] No exact match but memory hints at \($d). Scoped find there (maxdepth 3). CHITTA_DEEP_SEARCH=1 to expand."')
                 new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
                 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s,"updatedInput":{"command":%s}}}\n' "$ctx" "$new_cmd_json"
                 return 0
@@ -219,7 +221,7 @@ find_strategy() {
     # pass through unchanged — NEVER substitute a synthetic find for the command.
     [[ "$new_cmd" == "$cmd" ]] && return 1
     term_label="${term:-(pattern)}"
-    ctx=$(jq -Rn --arg t "$term_label" '"[search-strategy] No memory hit for \($t). Scoped to cwd -maxdepth 3. CC_SOUL_DEEP_SEARCH=1 to expand."')
+    ctx=$(jq -Rn --arg t "$term_label" '"[search-strategy] No memory hit for \($t). Scoped to cwd -maxdepth 3. CHITTA_DEEP_SEARCH=1 to expand."')
     new_cmd_json=$(jq -Rn --arg c "$new_cmd" '$c')
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s,"updatedInput":{"command":%s}}}\n' "$ctx" "$new_cmd_json"
     return 0
@@ -257,7 +259,7 @@ case "$MATCHER" in
         fi
 
         # ── Task ledger: pre-stage analysis/long-running commands ──────────────
-        _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+        _PLUGIN_DIR="${CHITTA_PLUGIN_DIR:-${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}}"
         _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
         _MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
         _is_trackable=0
@@ -275,9 +277,9 @@ case "$MATCHER" in
 
         # Stage 2: Soul memory — surface corrections/gotchas
         # Skip for subagent calls by default (saves 2s timeout per tool call).
-        # Set CC_SOUL_SUBAGENT_BASH_RECALL=1 to enable Bash recall for subagents too.
+        # Set CHITTA_SUBAGENT_BASH_RECALL=1 to enable Bash recall for subagents too.
         agent_id=$(echo "$STDIN_DATA" | jq -r '.agent_id // empty')
-        if [[ -n "$agent_id" && "${CC_SOUL_SUBAGENT_BASH_RECALL:-0}" != "1" ]]; then
+        if [[ -n "$agent_id" && "${CHITTA_SUBAGENT_BASH_RECALL:-${CC_SOUL_SUBAGENT_BASH_RECALL:-0}}" != "1" ]]; then
             exit 0
         fi
 
@@ -359,9 +361,9 @@ case "$MATCHER" in
         is_indexed=0
         [[ "$dir_syms" -gt 0 ]] 2>/dev/null && is_indexed=1
 
-        # Resolve CC_SOUL_ALLOW_READ from env or persistent flag file.
+        # Resolve CHITTA_ALLOW_READ from env or persistent flag file.
         # Flag file survives across hook invocations (each is a separate shell).
-        _allow_read="${CC_SOUL_ALLOW_READ:-0}"
+        _allow_read="${CHITTA_ALLOW_READ:-${CC_SOUL_ALLOW_READ:-0}}"
         _allow_read_flag="${CHITTA_DB_PATH:-${HOME}/.claude/mind}/.allow_read_${_session_id}"
         [[ "$_allow_read" != "1" && -f "$_allow_read_flag" ]] && _allow_read=1
 
@@ -393,7 +395,7 @@ case "$MATCHER" in
                     # read-precondition stays satisfied, and any genuinely-needed bytes are
                     # recoverable via offset or sqz_read_file. This matters because silent
                     # context compaction is frequent: a post-compaction re-read is legitimate,
-                    # so it must never be blocked — only trimmed. Escape hatch: CC_SOUL_ALLOW_READ=1
+                    # so it must never be blocked — only trimmed. Escape hatch: CHITTA_ALLOW_READ=1
                     # or the .allow_read_<id> flag (resolved above) bypasses this whole block.
                     _shadow_log "Read" "$file_path" "$line_count" "$is_indexed" "truncate" "read-dedup" 1
                     _dd_path=$(echo -n "$file_path" | jq -Rs '.')
@@ -491,8 +493,8 @@ case "$MATCHER" in
         agent_model=$(echo "$STDIN_DATA" | jq -r '.tool_input.model // empty' 2>/dev/null)
 
         # Route search/lookup/research agents to haiku + inject ≤200 word limit.
-        # Uses updatedInput (no deny+retry round trip). Bypass: CC_SOUL_AGENT_NO_FORCE=1.
-        if [[ -z "$agent_model" && "${CC_SOUL_AGENT_NO_FORCE:-0}" != "1" ]]; then
+        # Uses updatedInput (no deny+retry round trip). Bypass: CHITTA_AGENT_NO_FORCE=1.
+        if [[ -z "$agent_model" && "${CHITTA_AGENT_NO_FORCE:-${CC_SOUL_AGENT_NO_FORCE:-0}}" != "1" ]]; then
             if echo "${_subtype} ${_desc}" | grep -qiE '(explore|search|find|research|grep|glob|read|locate|list|lookup|where|enumerate|check if)'; then
                 _prompt=$(echo "$STDIN_DATA" | jq -r '.tool_input.prompt // empty')
                 _updated=$(echo "$STDIN_DATA" | jq --arg p "Report in ≤200 words.\n\n${_prompt}" \
@@ -508,8 +510,8 @@ case "$MATCHER" in
             AGENT_COUNT=$((AGENT_COUNT + 1))
             echo "$AGENT_COUNT" > "$AGENT_COUNT_FILE"
 
-            AGENT_WARN_THRESHOLD="${CC_SOUL_AGENT_WARN:-20}"
-            AGENT_HARD_LIMIT="${CC_SOUL_AGENT_LIMIT:-50}"
+            AGENT_WARN_THRESHOLD="${CHITTA_AGENT_WARN:-${CC_SOUL_AGENT_WARN:-20}}"
+            AGENT_HARD_LIMIT="${CHITTA_AGENT_LIMIT:-${CC_SOUL_AGENT_LIMIT:-50}}"
 
             if [[ $AGENT_COUNT -gt $AGENT_HARD_LIMIT ]]; then
                 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d/%d subagents. Each cold-starts a cache (~$5-50). Batch work or /recap for fresh session."}}\n' \
@@ -523,7 +525,7 @@ case "$MATCHER" in
 
     ScheduleWakeup)
         # ─── Loop-budget guard ────────────────────────────────────────────────────
-        # Warn at CC_SOUL_LOOP_WARN (default 10), block at CC_SOUL_LOOP_LIMIT (default 20)
+        # Warn at CHITTA_LOOP_WARN (default 10), block at CHITTA_LOOP_LIMIT (default 20)
         # for autonomous-loop-dynamic re-fires. Legitimate poll wakeups get a softer total advisory.
         MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
         _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null)
@@ -541,11 +543,11 @@ case "$MATCHER" in
                 LOOP_COUNT=$((LOOP_COUNT + 1))
                 echo "$LOOP_COUNT" > "$LOOP_FILE"
 
-                LOOP_WARN="${CC_SOUL_LOOP_WARN:-10}"
-                LOOP_LIMIT="${CC_SOUL_LOOP_LIMIT:-20}"
+                LOOP_WARN="${CHITTA_LOOP_WARN:-${CC_SOUL_LOOP_WARN:-10}}"
+                LOOP_LIMIT="${CHITTA_LOOP_LIMIT:-${CC_SOUL_LOOP_LIMIT:-20}}"
 
                 if [[ $LOOP_COUNT -gt $LOOP_LIMIT ]]; then
-                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"[loop-budget] %d autonomous loop iterations this session (limit %d). Use /compact then restart the loop, or set CC_SOUL_LOOP_LIMIT=N to raise."}}\n' \
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"[loop-budget] %d autonomous loop iterations this session (limit %d). Use /compact then restart the loop, or set CHITTA_LOOP_LIMIT=N to raise."}}\n' \
                         "$LOOP_COUNT" "$LOOP_LIMIT"
                     exit 2
                 elif [[ $LOOP_COUNT -gt $LOOP_WARN ]]; then

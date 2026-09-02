@@ -147,7 +147,11 @@ def register(input_data: dict[str, Any], client: str) -> dict[str, Any]:
 
     prior = session_get(session_id) or {}
     thread_id = str(input_data.get("thread_id") or prior.get("thread_id") or "")
-    model = str(input_data.get("model") or os.environ.get("CC_SOUL_MODEL", ""))
+    model = str(
+        input_data.get("model")
+        or os.environ.get("CHITTA_MODEL")
+        or os.environ.get("CC_SOUL_MODEL", "")
+    )
     host = socket.gethostname()
     metadata = {
         "client": client,

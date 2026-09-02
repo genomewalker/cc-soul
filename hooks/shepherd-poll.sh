@@ -309,7 +309,7 @@ main() {
     poll_once
 
     # Task ledger: poll job status transitions
-    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$SCRIPT_DIR")}"
+    _PLUGIN_DIR="${CHITTA_PLUGIN_DIR:-${CC_SOUL_PLUGIN_DIR:-$(dirname "$SCRIPT_DIR")}}"
     _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
     if [[ -f "$_MCP_DIR/poller.py" ]]; then
         timeout 30 python3 "$_MCP_DIR/poller.py" poll_once >/dev/null 2>&1 || true

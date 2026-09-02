@@ -1,5 +1,5 @@
 #!/bin/bash
-# Release automation script for cc-soul
+# Release automation script for chitta
 #
 # Usage:
 #   ./scripts/release.sh patch       # Bug fixes (2.56.0 → 2.56.1)
@@ -206,8 +206,8 @@ echo "  • macos-x64 binaries"
 echo "  • macos-arm64 binaries"
 echo "  • embedding model (bge-large-en-v1.5.gguf)"
 echo ""
-echo "Monitor: https://github.com/genomewalker/cc-soul/actions"
-echo "Release: https://github.com/genomewalker/cc-soul/releases/tag/v$NEW_VERSION"
+echo "Monitor: https://github.com/genomewalker/chitta/actions"
+echo "Release: https://github.com/genomewalker/chitta/releases/tag/v$NEW_VERSION"
 
 # Local build if requested
 if [[ "$LOCAL_BUILD" == "true" ]]; then

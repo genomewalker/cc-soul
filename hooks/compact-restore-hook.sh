@@ -9,7 +9,7 @@
 # we emit explicit guardrails telling Claude not to suggest redoing them.
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

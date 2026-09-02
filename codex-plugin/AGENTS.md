@@ -1,4 +1,4 @@
-# cc-soul
+# chitta
 
 ## Build & deploy
 ```bash

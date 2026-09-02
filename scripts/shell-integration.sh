@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Shell integration for task tracking outside Claude Code.
 # Source this from ~/.bashrc or ~/.zshrc:
-#   source ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/scripts/shell-integration.sh
+#   source ~/.claude/plugins/cache/genomewalker-chitta/chitta/*/scripts/shell-integration.sh
+# (or the pre-rename genomewalker-cc-soul/cc-soul/*, if that's what's installed)
 #
 # Installs a PROMPT_COMMAND / precmd hook that intercepts analysis commands
 # and registers them in the task ledger automatically.
 
-_CHITTA_MCP_DIR=$(find "$HOME/.claude/plugins/cache/genomewalker-cc-soul" \
+_CHITTA_MCP_DIR=$(find "$HOME/.claude/plugins/cache/genomewalker-chitta" \
+    "$HOME/.claude/plugins/cache/genomewalker-cc-soul" \
     -name "task_ledger.py" 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo "")
 
 [[ -z "$_CHITTA_MCP_DIR" ]] && return 0

@@ -155,7 +155,7 @@ class TestScaffoldEndToEnd(unittest.TestCase):
         self.assertTrue(all(r["passed"] is False for r in records))
 
     def test_ablate_condition_is_now_a_real_scored_run(self):
-        """Ablation is wired via CC_SOUL_ABLATE_LANES (an env var read by
+        """Ablation is wired via CHITTA_ABLATE_LANES (an env var read by
         hooks/prompt-core.sh, not a chittad daemon flag) -- ablate:<lane>
         is a real, scored condition, not the earlier skip-and-drop
         placeholder."""
@@ -437,17 +437,20 @@ class TestAblationWiring(unittest.TestCase):
         for benchmark_name, hook_name in cases.items():
             memory, _ = runner.parse_condition(f"ablate:{benchmark_name}", dry_run=True)
             env = memory.agent_env("project:smriti-test")
+            self.assertEqual(env["CHITTA_ABLATE_LANES"], hook_name)
             self.assertEqual(env["CC_SOUL_ABLATE_LANES"], hook_name)
 
     def test_hook_short_names_pass_through_unchanged(self):
         for hook_name in ("sem", "kw", "hyb", "ctx", "corr", "xr"):
             memory, _ = runner.parse_condition(f"ablate:{hook_name}", dry_run=True)
             env = memory.agent_env("project:smriti-test")
+            self.assertEqual(env["CHITTA_ABLATE_LANES"], hook_name)
             self.assertEqual(env["CC_SOUL_ABLATE_LANES"], hook_name)
 
     def test_ablate_all_disables_every_lane(self):
         memory, _ = runner.parse_condition("ablate:all", dry_run=True)
         env = memory.agent_env("project:smriti-test")
+        self.assertEqual(env["CHITTA_ABLATE_LANES"], "sem,ctx,hyb,kw,corr,xr")
         self.assertEqual(env["CC_SOUL_ABLATE_LANES"], "sem,ctx,hyb,kw,corr,xr")
 
     def test_unknown_lane_is_rejected(self):
@@ -457,8 +460,12 @@ class TestAblationWiring(unittest.TestCase):
     def test_off_and_on_set_no_ablate_lanes_env(self):
         off_memory, _ = runner.parse_condition("off")
         on_memory, _ = runner.parse_condition("on", dry_run=True)
-        self.assertNotIn("CC_SOUL_ABLATE_LANES", off_memory.agent_env("project:smriti-test"))
-        self.assertNotIn("CC_SOUL_ABLATE_LANES", on_memory.agent_env("project:smriti-test"))
+        off_env = off_memory.agent_env("project:smriti-test")
+        on_env = on_memory.agent_env("project:smriti-test")
+        self.assertNotIn("CHITTA_ABLATE_LANES", off_env)
+        self.assertNotIn("CC_SOUL_ABLATE_LANES", off_env)
+        self.assertNotIn("CHITTA_ABLATE_LANES", on_env)
+        self.assertNotIn("CC_SOUL_ABLATE_LANES", on_env)
 
 
 class TestMUI(unittest.TestCase):

@@ -23,7 +23,10 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MKT="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
+# Prefer the renamed marketplace dir; fall back to the pre-rename one for
+# installs that haven't re-added the marketplace under its new name yet.
+MKT="$HOME/.claude/plugins/marketplaces/genomewalker-chitta"
+[ -d "$MKT" ] || MKT="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 HOOKS_DST="$HOME/.claude/hooks"
 BK="$HOME/.claude/.dev-install-backup/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BK"

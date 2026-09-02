@@ -4,7 +4,7 @@
 INPUT=$(cat)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ -n "${CC_SOUL_HEADLESS:-}" ]]; then
+if [[ -n "${CHITTA_HEADLESS:-${CC_SOUL_HEADLESS:-}}" ]]; then
     printf '%s\n' '{}'
     exit 0
 fi

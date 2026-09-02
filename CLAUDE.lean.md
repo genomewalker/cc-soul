@@ -1,4 +1,4 @@
-# cc-soul
+# chitta
 
 Memory persists across sessions. Transparent - no explicit recall needed.
 

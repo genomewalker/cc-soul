@@ -19,7 +19,7 @@ MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # GitHub release URL base
-GITHUB_REPO="genomewalker/cc-soul"
+GITHUB_REPO="genomewalker/chitta"
 RELEASE_URL="https://github.com/$GITHUB_REPO/releases/download"
 
 # Temp dir for downloaded source (cleaned up on exit)
@@ -125,7 +125,7 @@ download_source_tarball() {
     if download "$url" "$tarball" && [[ -s "$tarball" ]]; then
         tar -xzf "$tarball" -C "$_DOWNLOAD_TMP" 2>/dev/null
         local extracted_dir
-        extracted_dir=$(find "$_DOWNLOAD_TMP" -maxdepth 1 -type d -name "cc-soul-*" | head -1)
+        extracted_dir=$(find "$_DOWNLOAD_TMP" -maxdepth 1 -type d \( -name "chitta-*" -o -name "cc-soul-*" \) | head -1)
         if [[ -n "$extracted_dir" && -d "$extracted_dir/chitta" ]]; then
             SOURCE_BUILD_DIR="$extracted_dir"
             return 0
@@ -356,7 +356,10 @@ build_from_source() {
     # Clean build directory to avoid CMake cache conflicts, but preserve
     # FetchContent deps from a previous plugin version to avoid re-downloading.
     local prev_deps=""
-    if [[ -d "$HOME/.claude/plugins/cache/genomewalker-cc-soul" ]]; then
+    local _cache_dir
+    for _cache_dir in "$HOME/.claude/plugins/cache/genomewalker-chitta" \
+                      "$HOME/.claude/plugins/cache/genomewalker-cc-soul"; do
+        [[ -d "$_cache_dir" ]] || continue
         # Find most recent prior version's _deps (sorted descending, skip current)
         local current_ver
         current_ver=$(basename "$PLUGIN_DIR")
@@ -366,9 +369,10 @@ build_from_source() {
                 prev_deps="$candidate"
                 break
             fi
-        done < <(find "$HOME/.claude/plugins/cache/genomewalker-cc-soul" -mindepth 2 -maxdepth 2 \
+        done < <(find "$_cache_dir" -mindepth 2 -maxdepth 2 \
                       -name "chitta" -type d | sed 's|/chitta$||' | sort -Vr)
-    fi
+        [[ -n "$prev_deps" ]] && break
+    done
 
     rm -rf "$build_dir"
     mkdir -p "$build_dir"
@@ -683,7 +687,7 @@ configure_hooks() {
     # When the plugin is enabled, its hooks.json is authoritative. Remove
     # legacy user-level cc-soul hook entries instead of merely skipping new
     # additions; otherwise Claude executes both copies with different timeouts.
-    if jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings_file" &>/dev/null; then
+    if jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings_file" &>/dev/null; then
         local cleanup_stage="${settings_file}.cc-soul-cleanup"
         jq '
           def is_cc_soul_hook:

@@ -1,6 +1,7 @@
 # Changelog
 
-All notable changes to cc-soul are documented here.
+All notable changes to chitta (formerly cc-soul; renamed 2026-09-02, see
+[docs/RENAME.md](docs/RENAME.md)) are documented here.
 
 ## [5.41.3] - 2026-05-21
 

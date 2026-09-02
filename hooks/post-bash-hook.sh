@@ -1,6 +1,6 @@
 #!/bin/bash
 # Headless bridge participant: debugging hints it never asked for.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 
 # PostToolUse hook for Bash: Surface relevant memories on command failure
 #
@@ -100,7 +100,7 @@ if [[ "$exit_code" == "0" && -n "$command" ]]; then
     fi
 
     # ── Task ledger: provenance extraction ──────────────────────────────────
-    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+    _PLUGIN_DIR="${CHITTA_PLUGIN_DIR:-${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}}"
     _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
     if is_long_running_launch "$command" || is_analysis_script "$command"; then
         _task_id=$(cat "$MIND_PATH/.pending_task_id" 2>/dev/null || echo "")

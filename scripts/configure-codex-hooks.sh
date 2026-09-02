@@ -18,7 +18,8 @@ jq \
   '
   def is_cc_soul_cmd($cmd):
     ($cmd | startswith($root + "/hooks/"))
-    or ($cmd | contains("/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/"));
+    or ($cmd | contains("/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/"))
+    or ($cmd | contains("/.claude/plugins/cache/genomewalker-chitta/chitta/"));
   def strip_ours($arr):
     ($arr // [])
     | map(

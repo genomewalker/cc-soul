@@ -1,13 +1,13 @@
 {
-  "name": "cc-soul",
+  "name": "chitta",
   "version": "5.71.0",
   "description": "Persistent memory and code intelligence for Codex. Learns preferences, remembers codebases, anticipates needs. 150+ tools. Local-first.",
   "author": {
     "name": "Antonio Fernandez-Guerra",
     "url": "https://github.com/genomewalker"
   },
-  "homepage": "https://github.com/genomewalker/cc-soul",
-  "repository": "https://github.com/genomewalker/cc-soul",
+  "homepage": "https://github.com/genomewalker/chitta",
+  "repository": "https://github.com/genomewalker/chitta",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -24,13 +24,13 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "cc-soul",
+    "displayName": "chitta",
     "shortDescription": "Persistent soul memory and code intelligence",
-    "longDescription": "cc-soul gives Codex persistent memory (recall/remember), code intelligence (symbol search, call graphs), autonomous learning, codebase indexing, pipeline monitoring, and 150+ specialized tools via the chitta daemon.",
+    "longDescription": "chitta gives Codex persistent memory (recall/remember), code intelligence (symbol search, call graphs), autonomous learning, codebase indexing, pipeline monitoring, and 150+ specialized tools via the chitta daemon.",
     "developerName": "Antonio Fernandez-Guerra",
     "category": "Productivity",
     "capabilities": ["Interactive", "Read", "Write"],
-    "websiteURL": "https://github.com/genomewalker/cc-soul",
+    "websiteURL": "https://github.com/genomewalker/chitta",
     "defaultPrompt": [
       "Recall what I learned about this codebase",
       "Remember that tests must pass before merging",

@@ -148,7 +148,7 @@ Read | Edit | Write | Bash | Agent | ScheduleWakeup
 
 **Stage 2 — Find/grep/ls fallback strategy:**
 
-- Unbounded `find` on `/` or `~` gets scoped: `chitta recall` is called first to get a memory hint; `find` is limited to a specific directory with `-maxdepth 3`. Set `CC_SOUL_DEEP_SEARCH=1` to allow root-wide search.
+- Unbounded `find` on `/` or `~` gets scoped: `chitta recall` is called first to get a memory hint; `find` is limited to a specific directory with `-maxdepth 3`. Set `CHITTA_DEEP_SEARCH=1` to allow root-wide search.
 - Grep content mode is capped at 50 matches via `head_limit` injection (not 200 — the 200 figure in older docs was wrong).
 - Glob results are capped at 100 entries via `head_limit` injection.
 
@@ -175,7 +175,7 @@ Detects trackable commands (`sbatch`, `srun`, `nohup`, python scripts, bash scri
 3. **Code-intel advisory**: If the file is indexed in chitta, suggests using `read_symbol` or `smart_context` instead of reading the whole file. Advisory only appears if chitta has indexed the file.
 4. **Large-file truncation**: Reads of files >200 lines are truncated to the first 150 lines. (Older docs said ">500 lines → head -200"; the actual thresholds are 200 and 150.)
 5. **Read dedup cache**: Tracks file reads by mtime hash at `$MIND/.read_cache_<session>`. Repeat reads of unchanged files return a 13-token `§ref:HASH§` reference via sqz instead of full content.
-6. **Strict-mode enforcement for indexed files**: When enforcement is active, reading a fully-indexed file is blocked with a suggestion to use symbol-level tools instead. Bypass for the session with `CC_SOUL_ALLOW_READ=1` or by creating the flag file `$MIND/.allow_read_<session_id>`.
+6. **Strict-mode enforcement for indexed files**: When enforcement is active, reading a fully-indexed file is blocked with a suggestion to use symbol-level tools instead. Bypass for the session with `CHITTA_ALLOW_READ=1` or by creating the flag file `$MIND/.allow_read_<session_id>`.
 7. **System-path exception**: Enforcement is skipped for paths under `/site-packages`, `/usr/lib`, `/opt/*/lib`, and similar system locations — those files are never indexed.
 
 ### Write Matcher
@@ -185,17 +185,17 @@ Detects trackable commands (`sbatch`, `srun`, `nohup`, python scripts, bash scri
 
 ### Agent Matcher
 
-1. **Haiku routing**: Agents whose prompt matches search/research patterns are rerouted to `claude-haiku-4-5` with a ≤200 word limit injected. Bypass with `CC_SOUL_AGENT_NO_FORCE=1`.
+1. **Haiku routing**: Agents whose prompt matches search/research patterns are rerouted to `claude-haiku-4-5` with a ≤200 word limit injected. Bypass with `CHITTA_AGENT_NO_FORCE=1`.
 2. **Subagent count tracking**: Increments a per-session counter.
-   - Warns at `CC_SOUL_AGENT_WARN` (default: 20).
-   - Hard advisory at `CC_SOUL_AGENT_LIMIT` (default: 50).
+   - Warns at `CHITTA_AGENT_WARN` (default: 20).
+   - Hard advisory at `CHITTA_AGENT_LIMIT` (default: 50).
 
 ### ScheduleWakeup Matcher
 
 Guards autonomous loops (agents that reschedule themselves):
 
-- Warns at `CC_SOUL_LOOP_WARN` iterations (default: 10).
-- Blocks at `CC_SOUL_LOOP_LIMIT` iterations (default: 20).
+- Warns at `CHITTA_LOOP_WARN` iterations (default: 10).
+- Blocks at `CHITTA_LOOP_LIMIT` iterations (default: 20).
 
 This is separate from the Agent subagent count above.
 
@@ -231,11 +231,11 @@ No manual environment flip is needed. The log accumulates in shadow mode (decisi
 
 | Variable                 | Effect                                                            |
 |--------------------------|-------------------------------------------------------------------|
-| `CC_SOUL_HOOK_ENFORCE=1` | Force enforce mode on immediately (skip the 3-day wait)          |
-| `CC_SOUL_HOOK_ENFORCE=0` | Force shadow-only mode (disable enforcement even after threshold) |
-| `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session                                 |
+| `CHITTA_HOOK_ENFORCE=1` | Force enforce mode on immediately (skip the 3-day wait)          |
+| `CHITTA_HOOK_ENFORCE=0` | Force shadow-only mode (disable enforcement even after threshold) |
+| `CHITTA_ALLOW_READ=1`   | Bypass Read deny for this session                                 |
 
-The flag file `$MIND/.allow_read_<session_id>` is an equivalent per-session bypass for `CC_SOUL_ALLOW_READ=1`.
+The flag file `$MIND/.allow_read_<session_id>` is an equivalent per-session bypass for `CHITTA_ALLOW_READ=1`.
 
 ### Log Rotation
 
@@ -251,24 +251,27 @@ The shadow log auto-rotates when it reaches **10 MB**. The current log is rename
 
 ## Environment Variables
 
+Every `CHITTA_*` variable below also works under its pre-rename `CC_SOUL_*`
+name (see [docs/RENAME.md](RENAME.md)).
+
 | Variable                      | Default      | Description                                                              |
 |-------------------------------|--------------|--------------------------------------------------------------------------|
-| `CC_SOUL_HOOK_ENFORCE`        | (auto)       | `1` = force enforce; `0` = force shadow only                             |
-| `CC_SOUL_ALLOW_READ`          | `0`          | `1` = bypass Read deny and indexed-large deny for this session           |
-| `CC_SOUL_DEEP_SEARCH`         | `0`          | `1` = allow root-wide `find` (removes `-maxdepth 3` scoping)             |
-| `CC_SOUL_STRICT_MODE`         | `0`          | `1` = enforce symbol-level flow for indexed files                        |
-| `CC_SOUL_AGENT_NO_FORCE`      | `0`          | `1` = disable haiku routing for search/research agents                   |
-| `CC_SOUL_AGENT_WARN`          | `20`         | Subagent count at which a warning is issued                              |
-| `CC_SOUL_AGENT_LIMIT`         | `50`         | Subagent count at which a hard advisory fires                            |
-| `CC_SOUL_LOOP_WARN`           | `10`         | ScheduleWakeup iterations before warning                                 |
-| `CC_SOUL_LOOP_LIMIT`          | `20`         | ScheduleWakeup iterations before block                                   |
-| `CC_SOUL_SUBAGENT_BASH_RECALL`| `0`          | `1` = run Bash recall for subagent calls (adds ~2s per call, default off)|
-| `CC_SOUL_MAX_WAIT`            | `5`          | Max seconds to wait for daemon responses                                 |
-| `CC_SOUL_LEAN`                | `false`      | Ultra-lean context mode (stats only)                                     |
+| `CHITTA_HOOK_ENFORCE`        | (auto)       | `1` = force enforce; `0` = force shadow only                             |
+| `CHITTA_ALLOW_READ`          | `0`          | `1` = bypass Read deny and indexed-large deny for this session           |
+| `CHITTA_DEEP_SEARCH`         | `0`          | `1` = allow root-wide `find` (removes `-maxdepth 3` scoping)             |
+| `CHITTA_STRICT_MODE`         | `0`          | `1` = enforce symbol-level flow for indexed files                        |
+| `CHITTA_AGENT_NO_FORCE`      | `0`          | `1` = disable haiku routing for search/research agents                   |
+| `CHITTA_AGENT_WARN`          | `20`         | Subagent count at which a warning is issued                              |
+| `CHITTA_AGENT_LIMIT`         | `50`         | Subagent count at which a hard advisory fires                            |
+| `CHITTA_LOOP_WARN`           | `10`         | ScheduleWakeup iterations before warning                                 |
+| `CHITTA_LOOP_LIMIT`          | `20`         | ScheduleWakeup iterations before block                                   |
+| `CHITTA_SUBAGENT_BASH_RECALL`| `0`          | `1` = run Bash recall for subagent calls (adds ~2s per call, default off)|
+| `CHITTA_MAX_WAIT`            | `5`          | Max seconds to wait for daemon responses                                 |
+| `CHITTA_LEAN`                | `false`      | Ultra-lean context mode (stats only)                                     |
 | `DEBUG_SOUL`                  | `0`          | `1` = enable debug output to stderr                                      |
 | `SUBCONSCIOUS_INTERVAL`       | `60`         | Daemon cycle interval in seconds                                         |
 
-**Testing manually:** `CC_SOUL_HOOK_ENFORCE=1 bash hook.sh Read` will NOT work because the prefix assignment is not exported to nested bash. Use `export CC_SOUL_HOOK_ENFORCE=1` first.
+**Testing manually:** `CHITTA_HOOK_ENFORCE=1 bash hook.sh Read` will NOT work because the prefix assignment is not exported to nested bash. Use `export CHITTA_HOOK_ENFORCE=1` first.
 
 ---
 
@@ -596,7 +599,7 @@ ls -la hooks/*.sh
 
 1. Increase timeout in configuration
 2. Check daemon responsiveness: `./hooks/subconscious.sh health`
-3. Set `CC_SOUL_MAX_WAIT=10` for longer daemon response timeout
+3. Set `CHITTA_MAX_WAIT=10` for longer daemon response timeout
 
 ### Resonance Not Working
 
@@ -646,4 +649,4 @@ wc -l ~/.claude/mind/.hook_shadow.jsonl
 stat ~/.claude/mind/.hook_shadow.jsonl
 ```
 
-Enforcement auto-activates when the shadow log reaches ≥100 entries AND is ≥3 days old. Use `CC_SOUL_HOOK_ENFORCE=1` to force it on early, or `CC_SOUL_HOOK_ENFORCE=0` to keep it in shadow mode.
+Enforcement auto-activates when the shadow log reaches ≥100 entries AND is ≥3 days old. Use `CHITTA_HOOK_ENFORCE=1` to force it on early, or `CHITTA_HOOK_ENFORCE=0` to keep it in shadow mode.

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Test hooks/prompt-core.sh lane behavior: CC_SOUL_ABLATE_LANES ablation,
-# smart_recall keyword-route retagging, and C2 small-realm relaxation.
+# Test hooks/prompt-core.sh lane behavior: CHITTA_ABLATE_LANES ablation
+# (CC_SOUL_ABLATE_LANES still honored), smart_recall keyword-route
+# retagging, and C2 small-realm relaxation.
 #
 # Drives the real hook end-to-end (not a unit test of one function) against a
 # stub $CHITTA_BIN so recall-lane content is deterministic instead of subject
@@ -157,5 +158,19 @@ export STUB_HYB_FILE
 CC_SOUL_C2_SMALL_REALM=1 run_hook "sr-largen" "what is cranberry topic about"
 assert "small-realm ON but N=8: sem candidate still dropped" "! grep -q '\[sem\]#21' '$T/stdout.sr-largen'"
 assert "small-realm ON but N=8: admit-debug shows sr=0" "grep -q 'lane=sem.*sr=0' '$T/stderr.sr-largen'"
+
+# ============================================================
+# Item 4: the renamed CHITTA_ABLATE_LANES knob ablates the same way as
+# CC_SOUL_ABLATE_LANES (rename compat shim in lib.sh) — replays item 1's
+# fixtures with the new env var name and neither old one set.
+# ============================================================
+STUB_SEM_FILE="$T/sem1"; STUB_HYB_FILE="$T/hyb1"; STUB_KW_FILE="$T/kw1"
+export STUB_SEM_FILE STUB_HYB_FILE STUB_KW_FILE
+unset CC_SOUL_ABLATE_LANES
+CHITTA_ABLATE_LANES="hyb,kw" run_hook "abl-chitta" "tell me about the apricot fixture"
+assert "CHITTA_ABLATE_LANES: ablated hyb lane absent" "! grep -q 'lane=hyb' '$T/stderr.abl-chitta'"
+assert "CHITTA_ABLATE_LANES: ablated kw lane absent" "! grep -q 'lane=kw' '$T/stderr.abl-chitta'"
+assert "CHITTA_ABLATE_LANES: non-ablated sem lane present" "grep -q 'lane=sem' '$T/stderr.abl-chitta'"
+assert "CHITTA_ABLATE_LANES: admit line reports abl:hyb,kw" "grep -q 'abl:hyb,kw' '$T/stdout.abl-chitta'"
 
 exit $FAIL

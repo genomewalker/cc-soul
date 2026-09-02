@@ -13,7 +13,7 @@ set -e
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 LAST_RETAG_FILE="$MIND_PATH/.last_realm_retag"
-RETAG_INTERVAL="${CC_SOUL_RETAG_INTERVAL:-86400}"  # 24 hours default
+RETAG_INTERVAL="${CHITTA_RETAG_INTERVAL:-${CC_SOUL_RETAG_INTERVAL:-86400}}"  # 24 hours default
 LOCK_FILE="/tmp/chitta-realm-retag.lock"
 
 # Check chitta CLI exists

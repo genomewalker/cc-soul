@@ -1,4 +1,8 @@
-# cc-soul
+# chitta
+
+> Status as of 2026-09-02: project renamed cc-soul → chitta (repo
+> `genomewalker/chitta`, old URL redirects); `CC_SOUL_*` env vars still
+> honored via the alias shim in `hooks/lib.sh` — see `docs/RENAME.md`.
 
 ## Build & deploy
 ```bash
@@ -27,8 +31,10 @@ pkill -f "chitta-m[c]p" 2>/dev/null; sleep 1   # process is `chitta-mcp` (hyphen
 > non-symlinked (plugin-disabled) installs and the cache/Codex destinations.
 
 The live plugin loads **hooks + MCP python from `~/.claude/hooks/*` and
-`~/.claude/plugins/marketplaces/genomewalker-cc-soul/chitta-mcp/*`** — NOT from
-this repo directly. `scripts/dev-install.sh` symlinks those live paths back at
+`~/.claude/plugins/marketplaces/genomewalker-chitta/chitta-mcp/*`** (or the
+pre-rename `genomewalker-cc-soul` marketplace dir, if that's what's still
+installed) — NOT from this repo directly. `scripts/dev-install.sh` symlinks
+those live paths back at
 this repo so `edit repo → restart service → live`, one source of truth, no drift.
 ```bash
 bash scripts/dev-install.sh   # symlinks hooks + MCP *.py to this repo; refreshes
@@ -71,17 +77,17 @@ below v2.1.0 only works while a pre-V23 snapshot family still exists on disk
 Enforce mode auto-activates once shadow log has ≥100 entries AND is
 ≥3 days old — no manual env flip needed.
 
-| Env | Effect |
+| Env (`CC_SOUL_*` still honored) | Effect |
 |---|---|
-| `CC_SOUL_HOOK_ENFORCE=1` | Force enforce on early (skip wait) |
-| `CC_SOUL_HOOK_ENFORCE=0` | Force shadow only (disable enforcement) |
-| `CC_SOUL_ALLOW_READ=1`   | Bypass Read deny for this session |
-| `CC_SOUL_AGENT_NO_FORCE=1` | Disable haiku-force on research subagents (advisory only) |
-| `CC_SOUL_AGENT_WARN=N` | Subagent count to warn at (default 20) |
-| `CC_SOUL_AGENT_LIMIT=N` | Subagent count for hard advisory (default 50) |
-| `CC_SOUL_SUBAGENT_BASH_RECALL=1` | Run Bash recall for subagent calls too (adds 2s/call) |
-| `CC_SOUL_ALLOW_READ=1` | Bypass Read dedup deny for this session (also bypasses indexed-large deny) |
+| `CHITTA_HOOK_ENFORCE=1` | Force enforce on early (skip wait) |
+| `CHITTA_HOOK_ENFORCE=0` | Force shadow only (disable enforcement) |
+| `CHITTA_ALLOW_READ=1`   | Bypass Read deny for this session |
+| `CHITTA_AGENT_NO_FORCE=1` | Disable haiku-force on research subagents (advisory only) |
+| `CHITTA_AGENT_WARN=N` | Subagent count to warn at (default 20) |
+| `CHITTA_AGENT_LIMIT=N` | Subagent count for hard advisory (default 50) |
+| `CHITTA_SUBAGENT_BASH_RECALL=1` | Run Bash recall for subagent calls too (adds 2s/call) |
+| `CHITTA_ALLOW_READ=1` | Bypass Read dedup deny for this session (also bypasses indexed-large deny) |
 
 Review data: `./scripts/hook-stats.sh` (decisions, reasons, tool split, enforce-status).
 
-⚠️ **Testing manually**: `CC_SOUL_HOOK_ENFORCE=1 bash hook.sh Read` won't work — the prefix-assignment isn't exported to nested bash. Use `export CC_SOUL_HOOK_ENFORCE=1` first.
+⚠️ **Testing manually**: `CHITTA_HOOK_ENFORCE=1 bash hook.sh Read` won't work — the prefix-assignment isn't exported to nested bash. Use `export CHITTA_HOOK_ENFORCE=1` first.

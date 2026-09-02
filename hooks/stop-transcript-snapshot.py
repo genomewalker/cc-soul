@@ -29,12 +29,13 @@ def _resolve_chitta_mcp_dir() -> Path | None:
     with no chitta-mcp sibling directory — chitta-mcp only exists under the
     resolved plugin root (marketplace checkout, or a dev-install symlink
     target). stop-core.sh already computes that root via resolve_cc_soul_root()
-    and passes it through CC_SOUL_PLUGIN_DIR. Fall back to the sibling
-    directory for direct/dev-repo invocation (tests, a manual run from a
-    checkout where hooks/ and chitta-mcp/ are siblings).
+    and passes it through CHITTA_PLUGIN_DIR (CC_SOUL_PLUGIN_DIR still
+    honored). Fall back to the sibling directory for direct/dev-repo
+    invocation (tests, a manual run from a checkout where hooks/ and
+    chitta-mcp/ are siblings).
     """
     candidates = []
-    root = os.environ.get("CC_SOUL_PLUGIN_DIR", "")
+    root = os.environ.get("CHITTA_PLUGIN_DIR") or os.environ.get("CC_SOUL_PLUGIN_DIR", "")
     if root:
         candidates.append(Path(root) / "chitta-mcp")
     candidates.append(Path(__file__).resolve().parent.parent / "chitta-mcp")

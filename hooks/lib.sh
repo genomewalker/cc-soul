@@ -1,15 +1,47 @@
 #!/bin/bash
-# Shared library for cc-soul hooks
+# Shared library for chitta hooks (project renamed cc-soul -> chitta,
+# 2026-09-02; see docs/RENAME.md).
 #
 # Common functions used across session-start, prompt, and stop hooks.
 
-# Resolve the cc-soul root whether a hook runs from the source tree, a Claude
+# --- CC_SOUL_* / CHITTA_* env var alias shim -------------------------------
+# Every CC_SOUL_* knob keeps working under its CHITTA_* twin and vice versa.
+# If a caller sets only one name, this exports the other so any process that
+# sources lib.sh sees both; if both are set, neither is touched (new name
+# wins at read sites, which read CHITTA_* first). Not a substitute for the
+# early-exit reads in hook entrypoints that run before lib.sh is sourced --
+# those read both names inline. Table: docs/RENAME.md.
+_CHITTA_ALIAS_VARS=(
+    ABLATE_LANES ADMIT_DEBUG AGENT_LIMIT AGENT_NO_FORCE AGENT_WARN
+    ALLOW_EDIT ALLOW_GLOB_RM ALLOW_READ ANCHOR_ENFORCE AUTO_RECAP
+    BOOT_GRACE C2_SMALL_REALM C2_SMALL_REALM_MAXN C2_SMALL_REALM_MINPCT
+    CHECKPOINT_INTERVAL CTX_LANE DEEP_SEARCH DISCIPLINE_ENFORCE
+    EDIT_REINDEX_RATE ENRICH_INTERVAL HEADLESS HOOK_BUDGET_MS HOOK_ENFORCE
+    HOOK_STATE_DIR INDEX_INTERVAL LEAN LEGACY_MARKERS LOOP_LIMIT LOOP_WARN
+    MAX_INDEX_FILES MAX_OUTPUT_CHARS MAX_WAIT MCP_DIR MODEL PLUGIN_DIR
+    REINDEX_RATE_LIMIT RETAG_INTERVAL RLM_MODE RLM_QUERY SADHANA_MAX
+    SADHANA_TIMEOUT SNAPSHOT_TIMEOUT STOP_BOOTSTRAP_BYTES
+    STOP_ENRICH_INTERVAL STOP_GRACE STOP_MAX_INCREMENT_BYTES STORE_INTERVAL
+    STRICT_MODE STRICT_MODE_DEFAULT SUBAGENT_BASH_RECALL UNKNOWN_SILENCE
+)
+for _v in "${_CHITTA_ALIAS_VARS[@]}"; do
+    _old="CC_SOUL_${_v}"
+    _new="CHITTA_${_v}"
+    if [[ -z "${!_new+x}" && -n "${!_old+x}" ]]; then
+        export "$_new=${!_old}"
+    elif [[ -z "${!_old+x}" && -n "${!_new+x}" ]]; then
+        export "$_old=${!_new}"
+    fi
+done
+unset _v _old _new
+
+# Resolve the chitta root whether a hook runs from the source tree, a Claude
 # plugin cache, or a user-level hook symlink/copy. Callers should still verify
 # the particular file they need exists.
 resolve_cc_soul_root() {
     local candidate real_root
     for candidate in \
-        "${CC_SOUL_PLUGIN_DIR:-}" \
+        "${CHITTA_PLUGIN_DIR:-${CC_SOUL_PLUGIN_DIR:-}}" \
         "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")")"; do
         if [[ -n "$candidate" && -d "$candidate/chitta-mcp" ]]; then
             printf '%s\n' "$candidate"
@@ -19,7 +51,10 @@ resolve_cc_soul_root() {
 
     # Marketplace installs are versioned. `sort -V` makes the newest installed
     # source the compatibility fallback for copied ~/.claude/hooks scripts.
+    # Prefer the renamed marketplace/plugin dir, fall back to the pre-rename
+    # one for installs that haven't re-added the marketplace yet.
     real_root=$(for candidate in \
+        "$HOME"/.claude/plugins/cache/genomewalker-chitta/chitta/* \
         "$HOME"/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*; do
         [[ -d "$candidate/chitta-mcp" ]] && printf '%s\n' "$candidate"
     done 2>/dev/null | sort -V | tail -1)

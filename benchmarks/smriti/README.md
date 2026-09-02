@@ -22,7 +22,7 @@ count/backoff constant -- each a convention with no way to deduce the
 "right" answer from the fixture alone, the same shape as `005`/`009` in
 the first matrix, the only two tasks that showed a real `off`-failure
 gap. **Ablation**: real now, not skipped -- `ablate:<lane>` sets
-`CC_SOUL_ABLATE_LANES=<short-lane-name>` on the agent subprocess
+`CHITTA_ABLATE_LANES=<short-lane-name>` on the agent subprocess
 (`runner.ABLATE_LANE_ALIASES` maps semantic/keyword/graph/hybrid/context/
 corrections to chitta's own sem/kw/hyb/ctx/corr hook-lane names; short
 names also accepted directly, plus `xr`), consumed by
@@ -198,7 +198,7 @@ For each task × condition × trial:
 
 `ChittaAdapter` does not hand `ClaudeCodeAdapter` a hand-built memory string
 to prepend to the prompt. For real runs, memory reaches the agent the way it
-would in actual use: cc-soul's own hooks (`hooks/prompt-core.sh`'s
+would in actual use: chitta's own hooks (`hooks/prompt-core.sh`'s
 `UserPromptSubmit` handler, plus `session-start-hook.sh` /
 `resume-inject-hook.sh`) recall from the live daemon when `claude -p` runs.
 Two adapter-level env vars steer that (`MemoryAdapter.agent_env`, set on the
@@ -210,11 +210,11 @@ Two adapter-level env vars steer that (`MemoryAdapter.agent_env`, set on the
   `.cc-soul-realm`-file and git-repo-name fallbacks, so this pins the
   agent's hooks to exactly this trial's planted realm without touching the
   materialized fixture's files.
-- **`off`** (`NullAdapter.agent_env`): sets `CC_SOUL_HEADLESS=1`. This is
-  **not** a benchmark-specific workaround — it's cc-soul's existing global
+- **`off`** (`NullAdapter.agent_env`): sets `CHITTA_HEADLESS=1`. This is
+  **not** a benchmark-specific workaround — it's chitta's existing global
   kill switch, used today to keep multi-agent "room" participants quiet.
   Every memory-injecting hook no-ops immediately when it's set (verified:
-  `grep CC_SOUL_HEADLESS hooks/*.sh` hits `prompt-core.sh`,
+  `grep CHITTA_HEADLESS hooks/*.sh` hits `prompt-core.sh`,
   `session-start-hook.sh`, `resume-inject-hook.sh`, `post-bash-hook.sh`,
   `pre-tool-hook.sh` — every hook that could inject memory). We considered
   and rejected the alternative the task brief floated (an empty/nonce realm
@@ -222,7 +222,7 @@ Two adapter-level env vars steer that (`MemoryAdapter.agent_env`, set on the
   falls back to unfiltered cross-realm results rather than returning nothing
   (the daemon's own cross-realm-fallback behavior, mirrored at the hook
   level in `prompt-core.sh:410-411`) — an empty realm does not reliably mean
-  zero injection. `CC_SOUL_HEADLESS=1` does.
+  zero injection. `CHITTA_HEADLESS=1` does.
 
 `ChittaAdapter.context_for` still makes a real `chitta recall --realm
 <realm_prefix>` call and records what it returns as
@@ -243,13 +243,13 @@ parsed by `runner.parse_condition`, resolving to a `MemoryAdapter`.
 
 **Wired via env, not a daemon flag.** chittad still has no `--ablate-lane`
 RPC flag, but it doesn't need one: `ChittaAdapter.agent_env` sets
-`CC_SOUL_ABLATE_LANES=<comma-list>` on the `claude -p` subprocess, and
+`CHITTA_ABLATE_LANES=<comma-list>` on the `claude -p` subprocess, and
 `hooks/prompt-core.sh`'s recall call skips any lane named there before
 issuing it — the ablation happens in the hook that would have made the
 recall call, not in chittad itself. `runner.ABLATE_LANE_ALIASES` maps a
 benchmark-facing lane name to chitta's own short hook-lane name; the short
 name also works directly. `ablate:all` sets every lane at once
-(`CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr`) and should behave like
+(`CHITTA_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr`) and should behave like
 `off` in effect — `scorer.py` reports the gap between them as
 `ablate_all_vs_off_sr_gap`, a sanity check on the wiring itself rather
 than a memory-effect number: a gap far from 0 there means the env var
@@ -257,9 +257,9 @@ isn't reaching every injection path, not that ablation "found" something.
 An unrecognized lane name raises `ValueError` immediately from
 `parse_condition`, before any subprocess runs.
 
-| Condition | Benchmark lane name(s) | `CC_SOUL_ABLATE_LANES` value | What's disabled | Isolates |
+| Condition | Benchmark lane name(s) | `CHITTA_ABLATE_LANES` value | What's disabled | Isolates |
 |---|---|---|---|---|
-| `off` | — | (unset; `CC_SOUL_HEADLESS=1` instead) | all memory | baseline — can the agent solve it cold |
+| `off` | — | (unset; `CHITTA_HEADLESS=1` instead) | all memory | baseline — can the agent solve it cold |
 | `on` | — | (unset) | nothing | full system upper bound |
 | `ablate:semantic` | `semantic` / `sem` | `sem` | embedding/ANN recall | value of fuzzy semantic match |
 | `ablate:keyword` | `keyword` / `kw` | `kw` | BM25 lane | value of exact term overlap |
@@ -481,7 +481,7 @@ python3 -m unittest tests/test_scaffold.py -v
 
 ## Open design questions
 
-1. **Ablation env vars — resolved for v2: `CC_SOUL_ABLATE_LANES`.**
+1. **Ablation env vars — resolved for v2: `CHITTA_ABLATE_LANES`.**
    `ChittaAdapter.agent_env` sets it directly on the agent subprocess;
    `hooks/prompt-core.sh` reads it and skips any named lane's recall call.
    No daemon-side `--ablate-lane` flag was needed after all — the ablation

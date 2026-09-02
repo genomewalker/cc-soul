@@ -26,13 +26,13 @@ LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-10}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-10}}"
 # How long a daemon may take to boot before we treat silence as "stuck" rather than
 # "still loading". Must exceed worst-case snapshot load + WAL replay, or hooks kill the
 # daemon mid-boot on every tool call and it never comes up.
-BOOT_GRACE="${CC_SOUL_BOOT_GRACE:-1800}"
+BOOT_GRACE="${CHITTA_BOOT_GRACE:-${CC_SOUL_BOOT_GRACE:-1800}}"
 # Seconds to let a SIGTERMed daemon finish its shutdown snapshot before SIGKILL.
-STOP_GRACE="${CC_SOUL_STOP_GRACE:-120}"
+STOP_GRACE="${CHITTA_STOP_GRACE:-${CC_SOUL_STOP_GRACE:-120}}"
 
 if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD=(timeout "$MAX_WAIT")

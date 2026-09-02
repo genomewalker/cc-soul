@@ -8,7 +8,7 @@ Critically, `hooks/distill.sh` already implements a mature LLM extractor (SSL v0
 
 ## 1. Location — Decision: (c) Hybrid, daemon-side async
 
-The hook MUST remain fast (`CC_SOUL_MAX_WAIT=2s`, `stop-hook.sh:12`). We therefore split:
+The hook MUST remain fast (`CHITTA_MAX_WAIT=2s`, `stop-hook.sh:12`). We therefore split:
 
 - **Hook side (sync, <100ms):** extract `[USED:id]` and `[TRIPLET]` markers (ID-bearing, cheap), store the assistant turn (`stop-hook.sh:122`), then enqueue a single `distill_request` queue write naming the transcript path, session, turn-range, and realm.
 - **Daemon side (async worker):** a `distill_request` queue handler invokes `hooks/distill.sh` (already in tree), which performs the LLM call against the discovered GPU endpoint (`distill.sh:210-218`) and writes `observe` events with `source=distillation` — which means they land as `Active (0)` per `CONTRACTS.md:133-137` rather than `Proposed (4)` as hook_regex did.
@@ -76,7 +76,7 @@ OUTPUT: JSONL, max 8 objects.
 
 ## 4. Migration — 2-release deprecation
 
-- **v5.x (current + next):** keep regex loop at `stop-hook.sh:172-185` gated behind `CC_SOUL_LEGACY_MARKERS=1` (default **on** for v5.x). New extractor runs unconditionally; dedup via existing `DEDUP_FILE` content hash (`lib.sh:161-166`) prevents double-writes when the assistant emits both explicit `[SOLUTION]` and the LLM re-extracts the same content. Source label for the new path: `distillation` (auto-promoted). Source label for legacy regex: `hook_regex` (stays `Proposed`).
+- **v5.x (current + next):** keep regex loop at `stop-hook.sh:172-185` gated behind `CHITTA_LEGACY_MARKERS=1` (default **on** for v5.x). New extractor runs unconditionally; dedup via existing `DEDUP_FILE` content hash (`lib.sh:161-166`) prevents double-writes when the assistant emits both explicit `[SOLUTION]` and the LLM re-extracts the same content. Source label for the new path: `distillation` (auto-promoted). Source label for legacy regex: `hook_regex` (stays `Proposed`).
 - **v6.0:** delete the regex loop and the `case` mapper (`stop-hook.sh:85-95`, `:172-185`). Keep `to_ssl()` — distill.sh reuses it. Update `CHANGELOG.md` and `hooks/stop-hook.sh:6-8` header.
 
 `[USED:id]`, `[TRIPLET]`, the compliance tracker (`:287`), and curiosity-gap detection (`:258`) are out of scope — they survive untouched.

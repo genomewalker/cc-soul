@@ -12,8 +12,8 @@ set -e
 
 # Config
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
-INDEX_INTERVAL="${CC_SOUL_INDEX_INTERVAL:-600}"  # 10 minutes default
-MAX_FILES="${CC_SOUL_MAX_INDEX_FILES:-200}"
+INDEX_INTERVAL="${CHITTA_INDEX_INTERVAL:-${CC_SOUL_INDEX_INTERVAL:-600}}"  # 10 minutes default
+MAX_FILES="${CHITTA_MAX_INDEX_FILES:-${CC_SOUL_MAX_INDEX_FILES:-200}}"
 LOCK_FILE="/tmp/chitta-autoindex.lock"
 LAST_INDEX_FILE="$MIND_PATH/.last_autoindex"
 

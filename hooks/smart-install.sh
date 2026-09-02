@@ -18,7 +18,7 @@ MODELS_DIR="${HOME}/.claude/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # GitHub release URL base
-GITHUB_REPO="genomewalker/cc-soul"
+GITHUB_REPO="genomewalker/chitta"
 RELEASE_URL="https://github.com/$GITHUB_REPO/releases/download"
 
 # ONNX model checksums (SHA256) - empty hash = skip verification
@@ -311,7 +311,7 @@ configure_hooks() {
 
     # Plugin hooks.json is canonical when enabled. Clean old user-level copies
     # so this legacy entrypoint cannot reintroduce double execution.
-    if jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings_file" &>/dev/null; then
+    if jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings_file" &>/dev/null; then
         local cleanup_stage="${settings_file}.cc-soul-cleanup"
         jq '
           def is_cc_soul_hook:

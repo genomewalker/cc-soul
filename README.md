@@ -1,22 +1,26 @@
-# CC-Soul
+# Chitta
+
+> Status as of 2026-09-02: project renamed cc-soul → chitta; repo
+> github.com/genomewalker/chitta (old URL redirects); CC_SOUL_* env vars
+> still honored via alias shim — see [docs/RENAME.md](docs/RENAME.md).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue.svg)](https://claude.ai/code)
-[![Documentation](https://img.shields.io/badge/docs-genomewalker.github.io%2Fcc--soul-blue)](https://genomewalker.github.io/cc-soul/)
+[![Documentation](https://img.shields.io/badge/docs-genomewalker.github.io%2Fchitta-blue)](https://genomewalker.github.io/chitta/)
 
-📖 **[Documentation & Architecture →](https://genomewalker.github.io/cc-soul/)**
+📖 **[Documentation & Architecture →](https://genomewalker.github.io/chitta/)**
 
-Persistent memory for Claude. Learns from every session, surfaces what matters, forgets what doesn't.
+Persistent memory for Claude Code, Codex, and OpenCode. Learns from every session, surfaces what matters, forgets what doesn't.
 
 ## Before & After
 
-**Without cc-soul:**
+**Without chitta:**
 > You: "How should I handle caching?"
 > Claude: [Generic answer]
 > You: "No, we tried Redis already. Remember?"
 > Claude: "I don't have context from previous sessions..."
 
-**With cc-soul:**
+**With chitta:**
 > You: "How should I handle caching?"
 > Claude: "We tried Redis in week 2 and it was too slow. In-memory LRU worked better — that's what we shipped."
 
@@ -24,27 +28,27 @@ Persistent memory for Claude. Learns from every session, surfaces what matters, 
 
 ```bash
 # 1. Register marketplace
-claude marketplace add https://github.com/genomewalker/cc-soul
+claude marketplace add https://github.com/genomewalker/chitta
 
 # 2. Install plugin
-claude plugin add cc-soul@genomewalker-cc-soul
+claude plugin add chitta@genomewalker-chitta
 ```
 
 Or manual installation:
 
 ```bash
-git clone https://github.com/genomewalker/cc-soul.git
-cd cc-soul && ./scripts/smart-install.sh
+git clone https://github.com/genomewalker/chitta.git
+cd chitta && ./scripts/smart-install.sh
 ```
 
 ## Shared Stack: Claude Code + Codex
 
-`cc-soul` is the shared backend. Claude Code and Codex are frontend adapters that point at the same daemon, socket, and memory store.
+`chitta` is the shared backend. Claude Code and Codex are frontend adapters that point at the same daemon, socket, and memory store.
 
 ```text
 shared backend   ~/.claude/bin/chitta + ~/.claude/bin/chittad + ~/.claude/mind
 Claude adapter   Claude Code MCP registration for `chitta`
-Codex adapter    Codex cc-soul plugin/hooks + optional `chitta-bridge`
+Codex adapter    Codex chitta plugin/hooks + optional `chitta-bridge`
 ```
 
 ```bash
@@ -109,7 +113,7 @@ chitta dream_start --topic "causal inference"         # specific topic
 chitta dream_list                                      # review recent dreams
 ```
 
-[Dream posts from the soul →](https://genomewalker.github.io/cc-soul/dreams/)
+[Dream posts from the soul →](https://genomewalker.github.io/chitta/dreams/)
 
 ### Sadhana: Autonomous Agents
 
@@ -135,7 +139,7 @@ chitta sadhana_start --goal "Monitor until done" --interval 300
 sadhana-tui                                         # real-time TUI
 ```
 
-[Full sadhana documentation](docs/SADHANA.md) | [Website](https://genomewalker.github.io/cc-soul/sadhana.html)
+[Full sadhana documentation](docs/SADHANA.md) | [Website](https://genomewalker.github.io/chitta/sadhana.html)
 
 ## What Gets Remembered
 
@@ -182,7 +186,7 @@ The soul is not a database. It is who Claude becomes through working with you.
 | [HOOKS.md](docs/HOOKS.md) | Hook system configuration |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude |
 
-**[Full Documentation Site](https://genomewalker.github.io/cc-soul/)**
+**[Full Documentation Site](https://genomewalker.github.io/chitta/)**
 
 ## Models
 
@@ -224,8 +228,8 @@ Deep multi-session research that accumulates structured knowledge over time. 7 s
 Requirements: CMake 3.14+, C++17 compiler, Rust 1.92+
 
 ```bash
-git clone --recurse-submodules https://github.com/genomewalker/cc-soul.git
-cd cc-soul && ./scripts/smart-install.sh
+git clone --recurse-submodules https://github.com/genomewalker/chitta.git
+cd chitta && ./scripts/smart-install.sh
 ```
 
 Or manually:

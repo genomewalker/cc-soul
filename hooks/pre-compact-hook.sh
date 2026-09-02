@@ -11,7 +11,7 @@
 # Don't use set -e: we want to save as much state as possible even if parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 
 # Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

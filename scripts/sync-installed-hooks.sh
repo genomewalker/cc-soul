@@ -62,8 +62,10 @@ done < "$HOOK_MANIFEST"
 installed_json="$HOME/.claude/plugins/installed_plugins.json"
 claude_root=""
 if [[ -f "$installed_json" ]]; then
+    # Prefer the renamed plugin key; fall back to the pre-rename one so
+    # installs that haven't reinstalled under the new name still sync.
     claude_root=$(jq -r '
-      .plugins["cc-soul@genomewalker-cc-soul"][]?
+      (.plugins["chitta@genomewalker-chitta"] // .plugins["cc-soul@genomewalker-cc-soul"] // [])[]?
       | select(.scope == "user") | .installPath
     ' "$installed_json" | tail -1)
 fi
@@ -84,7 +86,8 @@ fi
 # Codex hook commands point at ROOT_DIR, while its cached skills need their own
 # refresh so both frontends follow the same recap/resume ownership protocol.
 # Also never symlinked by dev-install.sh — sync-installed-hooks.sh owns it.
-codex_root="$HOME/.codex/plugins/cache/local/cc-soul/local"
+codex_root="$HOME/.codex/plugins/cache/local/chitta/local"
+[[ -d "$codex_root" ]] || codex_root="$HOME/.codex/plugins/cache/local/cc-soul/local"
 if [[ -d "$codex_root" ]]; then
     echo "[cc-soul] owner: $codex_root/skills/* (Codex cache — sync-installed-hooks.sh owns this outright)"
     for skill in recap resume; do
@@ -95,7 +98,7 @@ fi
 
 settings="$HOME/.claude/settings.json"
 if [[ "$CHECK_ONLY" == "true" && -f "$settings" ]] && \
-   jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings" >/dev/null; then
+   jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings" >/dev/null; then
     if jq -e '
       [.hooks[][]?.hooks[]?
        | (.command? // "")
@@ -131,7 +134,7 @@ if [[ "$CHECK_ONLY" == "false" ]]; then
     # Plugin hooks.json is authoritative. Strip only cc-soul's legacy global
     # hook commands while preserving unrelated user hooks in the same event.
     if [[ -f "$settings" ]] && \
-       jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings" >/dev/null; then
+       jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings" >/dev/null; then
         stage="${settings}.cc-soul-sync"
         jq '
           def is_cc_soul_hook:

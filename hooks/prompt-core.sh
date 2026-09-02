@@ -2,7 +2,7 @@
 # Headless bridge participant: the room supplies its own CONTEXT block, and
 # injecting global soul recall here is the bleed commit 87e915d removed one
 # layer up. Stay quiet.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 
 # UserPromptSubmit hook: Surface relevant memories + detect learning opportunities
 #
@@ -15,7 +15,7 @@ if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 # Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 # The hyb lane always requests this many results, so a header count that HITS
@@ -40,7 +40,7 @@ mkdir -p "$MIND_PATH" 2>/dev/null || true
 # ceiling: budget is wall-clock, not CPU; a stalled daemon still costs one
 # per-call timeout after the last check. upgrade: pass a deadline to chitta.
 _HOOK_T0=$(date +%s%3N)
-HOOK_BUDGET_MS="${CC_SOUL_HOOK_BUDGET_MS:-6000}"
+HOOK_BUDGET_MS="${CHITTA_HOOK_BUDGET_MS:-${CC_SOUL_HOOK_BUDGET_MS:-6000}}"
 budget_left() { (( $(date +%s%3N) - _HOOK_T0 < HOOK_BUDGET_MS )); }
 
 # realm_detect costs up to 1s and was called twice per prompt (checkpoint block
@@ -192,7 +192,7 @@ fi
 # stays pinned to the turn's own tokens (_QTOK from CLEAN_QUERY), so enriching this
 # query cannot inflate shares>0 (fable's definitional-inflation guard).
 CTX_QUERY=""; _CTXTOK=""
-if [[ "${CC_SOUL_CTX_LANE:-1}" == "1" && "$SESSION_ID" != "unknown" ]]; then
+if [[ "${CHITTA_CTX_LANE:-${CC_SOUL_CTX_LANE:-1}}" == "1" && "$SESSION_ID" != "unknown" ]]; then
     _ctx_ring="${MIND_PATH}/.ctx_window_${SESSION_ID}"
     _cur_tok=$(printf '%s' "$CLEAN_QUERY" | tr '[:upper:]' '[:lower:]' \
                | grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u | tr '\n' ' ')
@@ -261,7 +261,7 @@ daemon_available || exit 0
 # ===========================================
 # TURN-BASED CHECKPOINT: Save ledger every N turns
 # ===========================================
-CHECKPOINT_INTERVAL="${CC_SOUL_CHECKPOINT_INTERVAL:-10}"
+CHECKPOINT_INTERVAL="${CHITTA_CHECKPOINT_INTERVAL:-${CC_SOUL_CHECKPOINT_INTERVAL:-10}}"
 if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
     # Detect realm for project
     realm_detect_once
@@ -302,12 +302,14 @@ timeout 0.5 "$CHITTA_BIN" log_event --tool "user_prompt" \
 # ===========================================
 # RLM mode: Use soul_repl for dynamic exploration (more powerful but slower)
 # Standard mode: Use structured_recall (three-lens: facts/context/temporal)
-RLM_MODE="${CC_SOUL_RLM_MODE:-}"
+RLM_MODE="${CHITTA_RLM_MODE:-${CC_SOUL_RLM_MODE:-}}"
 
-# Lane ablation (CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr — comma list),
-# defined here (not inside the lane block below) so it is always callable —
-# including from the cross-realm fallback, which runs even in RLM_MODE.
-_ABLATE_LANES=",${CC_SOUL_ABLATE_LANES:-},"
+# Lane ablation (CHITTA_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr — comma list;
+# CC_SOUL_ABLATE_LANES still honored), defined here (not inside the lane
+# block below) so it is always callable — including from the cross-realm
+# fallback, which runs even in RLM_MODE.
+_ABLATE_LANES_RAW="${CHITTA_ABLATE_LANES:-${CC_SOUL_ABLATE_LANES:-}}"
+_ABLATE_LANES=",${_ABLATE_LANES_RAW},"
 _lane_ablated() { [[ "$_ABLATE_LANES" == *",$1,"* ]]; }
 
 if [[ -n "$RLM_MODE" ]]; then
@@ -417,7 +419,7 @@ else
     # congested, and the comment above already accepts an omitted tag as the
     # honest degrade ("no signal beats a wrong signal"). Also skipped when hyb
     # is deliberately ablated — a standalone hybrid call here would silently
-    # defeat CC_SOUL_ABLATE_LANES=hyb by fetching the exact scalar the ablation
+    # defeat CHITTA_ABLATE_LANES=hyb by fetching the exact scalar the ablation
     # was asked to withhold. Unset _c2_pct then correctly means "not measured",
     # which the UNKNOWN-silence gate below already treats as no signal, not UNKNOWN.
     if [[ -z "${_c2_pct:-}" ]] && budget_left && ! _lane_ablated hyb; then
@@ -431,7 +433,7 @@ else
     fi
 
     # C2 small-realm relaxation setup (capability #3, default via
-    # CC_SOUL_C2_SMALL_REALM). A scoped realm that is genuinely small can return
+    # CHITTA_C2_SMALL_REALM). A scoped realm that is genuinely small can return
     # a confident top hit (hyb display_pct) while the calibrated maxrel still
     # reads UNKNOWN — the calibration was fit on the larger cross-project store,
     # not on a thin project realm. Parse the hyb header's `Found N results in
@@ -449,10 +451,10 @@ else
         _hyb_realm_n="${BASH_REMATCH[1]}"; _hyb_realm_name="${BASH_REMATCH[2]}"
     fi
     _hyb_top_pct=$(printf '%s\n' "$_hyb_out" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
-    _C2_SR_MAXN="${CC_SOUL_C2_SMALL_REALM_MAXN:-3}"
-    _C2_SR_MINPCT="${CC_SOUL_C2_SMALL_REALM_MINPCT:-50}"
+    _C2_SR_MAXN="${CHITTA_C2_SMALL_REALM_MAXN:-${CC_SOUL_C2_SMALL_REALM_MAXN:-3}}"
+    _C2_SR_MINPCT="${CHITTA_C2_SMALL_REALM_MINPCT:-${CC_SOUL_C2_SMALL_REALM_MINPCT:-50}}"
     _c2_small_realm_relax=0
-    if [[ "${CC_SOUL_C2_SMALL_REALM:-1}" == "1" && -n "$_hyb_realm_n" && "$_hyb_realm_name" != "brahman" \
+    if [[ "${CHITTA_C2_SMALL_REALM:-${CC_SOUL_C2_SMALL_REALM:-1}}" == "1" && -n "$_hyb_realm_n" && "$_hyb_realm_name" != "brahman" \
           && "$_hyb_realm_n" -lt "$HYB_LANE_LIMIT" && "$_hyb_realm_n" -le "$_C2_SR_MAXN" \
           && -n "$_hyb_top_pct" && "$_hyb_top_pct" -ge "$_C2_SR_MINPCT" ]]; then
         _c2_small_realm_relax=1
@@ -570,10 +572,10 @@ while IFS= read -r line; do
 
     # Extract confidence from anywhere in line
     conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
-    # CC_SOUL_ADMIT_DEBUG=1: one stderr line per candidate (lane, conf, C2,
+    # CHITTA_ADMIT_DEBUG=1: one stderr line per candidate (lane, conf, C2,
     # query-token count, small-realm-relax flag) — the only way to see why a
     # memory was not admitted.
-    [[ -n "${CC_SOUL_ADMIT_DEBUG:-}" ]] && \
+    [[ -n "${CHITTA_ADMIT_DEBUG:-${CC_SOUL_ADMIT_DEBUG:-}}" ]] && \
         printf '[admit-debug] lane=%s conf=%s c2=%s qtok=%s sr=%s | %s\n' "$reason" "${conf:-none}" "${_c2_pct:-none}" "${_QTOK_N:-0}" "${_c2_small_realm_relax:-0}" "${line:0:90}" >&2
     [[ -z "$conf" ]] && continue
 
@@ -597,9 +599,9 @@ while IFS= read -r line; do
     # correction lane is also silenced here; deterministic correction_check output
     # is handled separately below and remains available. Only fires when
     # _c2_pct is actually measured (empty = hybrid timeout = no signal, don't gate).
-    # Reversible via CC_SOUL_UNKNOWN_SILENCE=0.
+    # Reversible via CHITTA_UNKNOWN_SILENCE=0.
     #
-    # Small-realm relaxation (capability #3, default via CC_SOUL_C2_SMALL_REALM):
+    # Small-realm relaxation (capability #3, default via CHITTA_C2_SMALL_REALM):
     # the cross-project maxrel calibration under-scores a genuinely small scoped
     # realm — a handful of on-topic memories can pin the calibrated band below 81
     # even though the top hybrid hit is a strong match. _c2_small_realm_relax was
@@ -608,7 +610,7 @@ while IFS= read -r line; do
     # to kw/hyb/xr to sem/ctx too, instead of dropping them outright. corr stays
     # unconditionally silenced — the fuzzy correction lane's false-positive risk
     # (nack-worthy wrong corrections) isn't offset by a small-realm hit.
-    if [[ "${CC_SOUL_UNKNOWN_SILENCE:-1}" == "1" && -n "${_c2_pct:-}" && "$_c2_pct" -lt 81 ]]; then
+    if [[ "${CHITTA_UNKNOWN_SILENCE:-${CC_SOUL_UNKNOWN_SILENCE:-1}}" == "1" && -n "${_c2_pct:-}" && "$_c2_pct" -lt 81 ]]; then
         _unk_shares=0
         if [[ "${_QTOK_N:-0}" -gt 0 ]]; then
             _unk_ctok=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | \
@@ -710,7 +712,7 @@ while IFS= read -r line; do
         # window guards both ends: tiny qn can't anchor, huge qn is a paste/relay.
         # Only flip on after the join-validation clears BOTH gates (precision(shares=1)
         # >= 2x precision(shares=0) AND used-recall >= 90%) on a FRESH Fable audit.
-        if [[ "$reason" == "sem" && "${CC_SOUL_ANCHOR_ENFORCE:-0}" == "1" && "$_shares" -eq 0 \
+        if [[ "$reason" == "sem" && "${CHITTA_ANCHOR_ENFORCE:-${CC_SOUL_ANCHOR_ENFORCE:-0}}" == "1" && "$_shares" -eq 0 \
               && "${_QTOK_N:-0}" -ge 3 && "${_QTOK_N:-0}" -le 50 ]]; then
             ((++_drop_meta)); continue
         fi
@@ -843,7 +845,7 @@ if [[ $COUNT -gt 0 || $((_drop_conf + _drop_dup + _drop_meta + _drop_cap + _drop
     [[ $_drop_cap  -gt 0 ]] && _out="$_out cap:$_drop_cap"
     [[ $_drop_unk  -gt 0 ]] && _out="$_out unk:$_drop_unk"
     _sr_tag=""; [[ "${_c2_small_realm_relax:-0}" -eq 1 ]] && _sr_tag=" sr:on"
-    ADMIT_LINE="[admit]${CC_SOUL_ABLATE_LANES:+ abl:$CC_SOUL_ABLATE_LANES}${_c2_tag:+ C2:$_c2_tag($_c2_cal%)}${_sr_tag}${_in:- none} | drop${_out:- none}${_c2_phrase}"
+    ADMIT_LINE="[admit]${_ABLATE_LANES_RAW:+ abl:$_ABLATE_LANES_RAW}${_c2_tag:+ C2:$_c2_tag($_c2_cal%)}${_sr_tag}${_in:- none} | drop${_out:- none}${_c2_phrase}"
 fi
 
 # ===========================================
@@ -1053,7 +1055,7 @@ fi  # end _skip_intent guard
 # TURN DISCIPLINE: Nudge if too many turns without storing
 # Inspired by SAGE's 7-call enforcement. We warn, not block.
 # ===========================================
-STORE_INTERVAL="${CC_SOUL_STORE_INTERVAL:-7}"
+STORE_INTERVAL="${CHITTA_STORE_INTERVAL:-${CC_SOUL_STORE_INTERVAL:-7}}"
 LAST_STORE_FILE="${MIND_PATH}/.last_store_turn_${SESSION_ID}"
 # Initialize on first prompt of a session (state file absent = fresh or resumed session)
 if [[ ! -f "$LAST_STORE_FILE" ]]; then
@@ -1074,8 +1076,8 @@ fi
 
 turns_since_store=$((TURN_INDEX - last_store_turn))
 if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
-    # Hard block at 3× interval when CC_SOUL_DISCIPLINE_ENFORCE=1
-    if [[ $turns_since_store -ge $((STORE_INTERVAL * 3)) && "${CC_SOUL_DISCIPLINE_ENFORCE:-0}" == "1" ]]; then
+    # Hard block at 3× interval when CHITTA_DISCIPLINE_ENFORCE=1
+    if [[ $turns_since_store -ge $((STORE_INTERVAL * 3)) && "${CHITTA_DISCIPLINE_ENFORCE:-${CC_SOUL_DISCIPLINE_ENFORCE:-0}}" == "1" ]]; then
         printf '{"decision":"block","reason":"[DISCIPLINE] %d turns without a soul store. Call remember/learn_correction/learn_milestone before continuing — memories are the persistent layer that survives compaction."}\n' "$turns_since_store"
         exit 0
     fi
@@ -1103,7 +1105,7 @@ summary=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
 
 # Token diet: narrative/anticipation/habits/goals only fire every Nth turn
 # Saves 4-6 daemon calls and ~200-400 output tokens on non-Nth turns
-ENRICH_INTERVAL="${CC_SOUL_ENRICH_INTERVAL:-5}"
+ENRICH_INTERVAL="${CHITTA_ENRICH_INTERVAL:-${CC_SOUL_ENRICH_INTERVAL:-5}}"
 ENRICH_TURN=$(( TURN_INDEX % ENRICH_INTERVAL == 0 || TURN_INDEX <= 1 ? 1 : 0 ))
 # The five enrichment calls below (narrative_status, anticipation_filter,
 # anticipation_predict, habit_match, goal_list, curiosity_gaps) are serial and
@@ -1330,9 +1332,9 @@ fi
 # memories > narrative > goals > curiosity > habits > anticipations
 # Cache-expired sessions: cache is already busted, expand the memory budget.
 if [[ -n "$CACHE_WARN" ]]; then
-    MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-2000}"
+    MAX_OUTPUT_CHARS="${CHITTA_MAX_OUTPUT_CHARS:-${CC_SOUL_MAX_OUTPUT_CHARS:-2000}}"
 else
-    MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-500}"
+    MAX_OUTPUT_CHARS="${CHITTA_MAX_OUTPUT_CHARS:-${CC_SOUL_MAX_OUTPUT_CHARS:-500}}"
 fi
 FINAL_OUTPUT=""
 

@@ -16,7 +16,7 @@ CHITTA_MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-5}}"
 CHITTA_ARGS=()
 
 if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then

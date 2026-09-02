@@ -6,7 +6,7 @@
 # during the learning session.
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 

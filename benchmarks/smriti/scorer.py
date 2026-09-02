@@ -166,7 +166,7 @@ def score(records):
 
     # Sanity check on the ablation wiring itself (runner.ABLATE_ALL_LANES):
     # disabling every lane should behave like memory=off. A gap far from 0
-    # here means CC_SOUL_ABLATE_LANES isn't actually reaching/working in
+    # here means CHITTA_ABLATE_LANES isn't actually reaching/working in
     # every hook, not that ablation "found" a memory effect.
     if "ablate:all" in per_condition and "off" in per_condition:
         headline["ablate_all_vs_off_sr_gap"] = (

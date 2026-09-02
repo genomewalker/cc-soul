@@ -35,13 +35,14 @@ daemon when `claude -p` runs. Two adapter-level env vars steer that:
   .cc-soul-realm-file and git-repo-name fallbacks, so this pins the agent's
   own hooks to exactly this trial's planted realm without touching the
   materialized fixture's files.
-- NullAdapter.agent_env sets CC_SOUL_HEADLESS=1. Every memory-injecting hook
-  (prompt-core.sh, session-start-hook.sh, resume-inject-hook.sh,
-  post-bash-hook.sh, pre-tool-hook.sh -- `grep CC_SOUL_HEADLESS hooks/*.sh`)
-  no-ops immediately when this is set. It is cc-soul's existing global kill
-  switch (used today to keep multi-agent "room" participants quiet), not a
-  benchmark-specific workaround -- memory=off gets zero injection through
-  any lane, deterministically.
+- NullAdapter.agent_env sets CHITTA_HEADLESS=1 (and CC_SOUL_HEADLESS=1, the
+  pre-rename name). Every memory-injecting hook (prompt-core.sh,
+  session-start-hook.sh, resume-inject-hook.sh, post-bash-hook.sh,
+  pre-tool-hook.sh -- `grep _HEADLESS hooks/*.sh`) no-ops immediately when
+  either is set. It is chitta's existing global kill switch (used today to
+  keep multi-agent "room" participants quiet), not a benchmark-specific
+  workaround -- memory=off gets zero injection through any lane,
+  deterministically.
 
 ChittaAdapter.context_for still makes a real `chitta recall` call and
 records what it returns, but only as a diagnostic (results/*.jsonl
@@ -53,10 +54,11 @@ ablation) with a hand-rolled proxy of it.
 Ablation
 --------
 Wired via env, not a daemon flag: ablate:<lane> sets
-CC_SOUL_ABLATE_LANES=<short-lane-name> on the agent subprocess
-(ChittaAdapter.agent_env); hooks/prompt-core.sh's recall call skips any
-lane named there. ablate:all disables every lane at once
-(CC_SOUL_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr) -- in effect this should
+CHITTA_ABLATE_LANES=<short-lane-name> (and the pre-rename
+CC_SOUL_ABLATE_LANES) on the agent subprocess (ChittaAdapter.agent_env);
+hooks/prompt-core.sh's recall call skips any lane named there. ablate:all
+disables every lane at once (CHITTA_ABLATE_LANES=sem,ctx,hyb,kw,corr,xr)
+-- in effect this should
 match `off`, and scorer.py reports the gap as ablate_all_vs_off_sr_gap as
 a sanity check on the wiring itself. ABLATE_LANE_ALIASES maps
 benchmark-facing lane names (semantic, keyword, graph, hybrid, context,
@@ -81,7 +83,7 @@ from typing import Optional
 SCRATCH_ROOT = os.environ.get("SMRITI_SCRATCH", "/projects/caeg/scratch/kbd606/tmp")
 
 # Benchmark-facing ablation lane name -> chitta's short hook-lane name
-# (hooks/prompt-core.sh's CC_SOUL_ABLATE_LANES contract). graph and hybrid
+# (hooks/prompt-core.sh's CHITTA_ABLATE_LANES contract). graph and hybrid
 # both land on "hyb" -- chitta has no separate triplet/graph lane distinct
 # from the hybrid-recall path (see README "Ablation matrix"). Passing a
 # short name directly (sem/kw/hyb/ctx/corr/xr) also works -- see
@@ -159,7 +161,7 @@ class NullAdapter(MemoryAdapter):
         return ""
 
     def agent_env(self, realm_prefix):
-        return {"CC_SOUL_HEADLESS": "1"}
+        return {"CHITTA_HEADLESS": "1", "CC_SOUL_HEADLESS": "1"}
 
 
 class ChittaAdapter(MemoryAdapter):
@@ -224,9 +226,9 @@ class ChittaAdapter(MemoryAdapter):
     def agent_env(self, realm_prefix):
         env = {"CHITTA_REALM": realm_prefix}
         if self.ablate_lane == "all":
-            env["CC_SOUL_ABLATE_LANES"] = ABLATE_ALL_LANES
+            env["CHITTA_ABLATE_LANES"] = env["CC_SOUL_ABLATE_LANES"] = ABLATE_ALL_LANES
         elif self.ablate_lane:
-            env["CC_SOUL_ABLATE_LANES"] = self.ablate_lane
+            env["CHITTA_ABLATE_LANES"] = env["CC_SOUL_ABLATE_LANES"] = self.ablate_lane
         return env
 
     def teardown(self, realm_prefix, planted_ids):

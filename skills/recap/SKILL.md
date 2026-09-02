@@ -12,11 +12,13 @@ transcript from global file recency and never resume a live session.
 ## 1. Resolve the shared implementation
 
 Locate `chitta-mcp/resume_selector.py` in this plugin root. Prefer
-`$CC_SOUL_PLUGIN_DIR`, then the source root containing this skill, then the
-newest installed `~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*`,
-then the Python environment from the `chitta-mcp` executable (read its shebang
-and import `resume_selector` to locate the module directory).
-If the selector is unavailable, stop and report that cc-soul must be updated;
+`$CHITTA_PLUGIN_DIR` (falling back to `$CC_SOUL_PLUGIN_DIR`), then the source
+root containing this skill, then the newest installed
+`~/.claude/plugins/cache/genomewalker-chitta/chitta/*` (or the pre-rename
+`genomewalker-cc-soul/cc-soul/*`), then the Python environment from the
+`chitta-mcp` executable (read its shebang and import `resume_selector` to
+locate the module directory).
+If the selector is unavailable, stop and report that chitta must be updated;
 do not fall back to "newest transcript" heuristics.
 
 Set the invoking client to `codex` when a `CODEX_*` session variable is present,

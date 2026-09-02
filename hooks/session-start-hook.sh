@@ -1,6 +1,6 @@
 #!/bin/bash
 # Headless bridge participant: no session to restore — it answers once and exits.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 
 # SessionStart hook: Initialize soul context with FULL state restoration
 #
@@ -14,7 +14,7 @@ if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 # This is critical for post-compaction sessions where some data may be missing
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 
 # Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,7 +33,7 @@ HOOK_SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 # Clean stale per-session sentinels — but NOT on compact (same session continues)
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 STRICT_MODE_FILE="${MIND_PATH}/.strict_claude_style"
-STRICT_MODE_DEFAULT="${CC_SOUL_STRICT_MODE_DEFAULT:-1}"
+STRICT_MODE_DEFAULT="${CHITTA_STRICT_MODE_DEFAULT:-${CC_SOUL_STRICT_MODE_DEFAULT:-1}}"
 if [[ "$HOOK_SOURCE" != "compact" ]]; then
     rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
     rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
@@ -43,7 +43,7 @@ if [[ "$HOOK_SOURCE" != "compact" ]]; then
 fi
 
 # Strict Claude-style mode toggle persisted per session workspace.
-# Default ON; set CC_SOUL_STRICT_MODE_DEFAULT=0 to disable auto-enable.
+# Default ON; set CHITTA_STRICT_MODE_DEFAULT=0 to disable auto-enable.
 mkdir -p "$MIND_PATH" 2>/dev/null || true
 if [[ "$STRICT_MODE_DEFAULT" == "1" ]]; then
     printf '%s\n' "enabled $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STRICT_MODE_FILE" 2>/dev/null || true
@@ -311,7 +311,7 @@ elif [[ "$IS_POST_CLEAR" == "true" ]]; then
 else
     # Normal session start - just show minimal info
     # ── Task ledger: inbox + active tasks ─────────────────────────────────
-    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+    _PLUGIN_DIR="${CHITTA_PLUGIN_DIR:-${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}}"
     _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
     _inbox_txt=$(timeout 4 python3 "$_MCP_DIR/task_ledger.py" render_inbox \
         --realm "${REALM:-}" --limit 5 2>/dev/null || true)

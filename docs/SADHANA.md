@@ -300,8 +300,8 @@ chitta sadhana_start \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | — | Required for Claude brain |
-| `CC_SOUL_SADHANA_MAX` | 3 | Max concurrent sadhanas |
-| `CC_SOUL_SADHANA_TIMEOUT` | 300000 | Max brain call time (ms) |
+| `CHITTA_SADHANA_MAX` | 3 | Max concurrent sadhanas |
+| `CHITTA_SADHANA_TIMEOUT` | 300000 | Max brain call time (ms) |
 
 ### Sadhana Table Schema
 
@@ -506,7 +506,7 @@ Seed: "[gap] Vedantic philosophy — are the mappings deep or just naming?"
 Dream: Searches "chitta Vedanta philosophy consciousness", finds academic sources
        Stores: "[dream] Chitta in Advaita Vedanta means..."
   ↓
-Synthesis: Links "[dream] Chitta..." to existing memory about cc-soul architecture
+Synthesis: Links "[dream] Chitta..." to existing memory about chitta architecture
            Stores: "[auto-improve] The brahman/chitta mapping is philosophically grounded..."
   ↓
 New gap: "[gap] What would samadhi look like computationally?"

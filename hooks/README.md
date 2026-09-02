@@ -1,4 +1,4 @@
-# cc-soul Hooks
+# chitta Hooks
 
 Modular hooks for Claude Code integration. Each hook has a single responsibility.
 
@@ -159,7 +159,7 @@ Compact, token-efficient format for injected context:
 | `CHITTA_DB_PATH` | `~/.claude/mind/chitta` | Path to chitta database |
 | `CHITTA_BIN` | `~/.claude/bin/chitta` | Path to chitta CLI |
 | `CHITTAD_BIN` | `~/.claude/bin/chittad` | Path to chittad daemon |
-| `CC_SOUL_MAX_WAIT` | `5` | RPC timeout in seconds |
+| `CHITTA_MAX_WAIT` | `5` | RPC timeout in seconds |
 
 ## Testing
 

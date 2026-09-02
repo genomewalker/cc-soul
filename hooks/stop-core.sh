@@ -10,7 +10,7 @@
 # Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-2}}"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
 # Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
@@ -199,18 +199,19 @@ _TCACHE=$(mktemp -d)
 trap 'rm -rf "$_TCACHE"' EXIT
 _SNAPSHOT_FILE="$_TCACHE/stop-snapshot.json"
 _SNAPSHOT_HELPER="$SCRIPT_DIR/stop-transcript-snapshot.py"
-_CURSOR_DIR="${CC_SOUL_HOOK_STATE_DIR:-${MIND_PATH}/hook-state}"
+_CURSOR_DIR="${CHITTA_HOOK_STATE_DIR:-${CC_SOUL_HOOK_STATE_DIR:-${MIND_PATH}/hook-state}}"
 _CURSOR_KEY=$(printf '%s\n%s\n' "$SESSION_ID" "$TRANSCRIPT_PATH" | sha256sum | awk '{print $1}')
 _CURSOR_FILE="${_CURSOR_DIR}/${_CURSOR_KEY}.json"
 mkdir -p "$_CURSOR_DIR" 2>/dev/null || true
 
 if [[ -x "$_SNAPSHOT_HELPER" ]]; then
-    printf '%s' "$INPUT" | CC_SOUL_PLUGIN_DIR="$_PLUGIN_DIR" timeout "${CC_SOUL_SNAPSHOT_TIMEOUT:-20}" \
+    printf '%s' "$INPUT" | CHITTA_PLUGIN_DIR="$_PLUGIN_DIR" CC_SOUL_PLUGIN_DIR="$_PLUGIN_DIR" \
+        timeout "${CHITTA_SNAPSHOT_TIMEOUT:-${CC_SOUL_SNAPSHOT_TIMEOUT:-20}}" \
         python3 "$_SNAPSHOT_HELPER" snapshot \
         --transcript "$TRANSCRIPT_PATH" \
         --cursor "$_CURSOR_FILE" \
-        --bootstrap-bytes "${CC_SOUL_STOP_BOOTSTRAP_BYTES:-4194304}" \
-        --max-increment-bytes "${CC_SOUL_STOP_MAX_INCREMENT_BYTES:-33554432}" \
+        --bootstrap-bytes "${CHITTA_STOP_BOOTSTRAP_BYTES:-${CC_SOUL_STOP_BOOTSTRAP_BYTES:-4194304}}" \
+        --max-increment-bytes "${CHITTA_STOP_MAX_INCREMENT_BYTES:-${CC_SOUL_STOP_MAX_INCREMENT_BYTES:-33554432}}" \
         > "$_SNAPSHOT_FILE" 2>/dev/null || true
 fi
 
@@ -440,7 +441,7 @@ done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 # Token diet: expensive analysis only fires every Nth turn
 # Saves daemon calls + transcript scans on non-enrichment turns
 # ===========================================
-STOP_ENRICH_INTERVAL="${CC_SOUL_STOP_ENRICH_INTERVAL:-3}"
+STOP_ENRICH_INTERVAL="${CHITTA_STOP_ENRICH_INTERVAL:-${CC_SOUL_STOP_ENRICH_INTERVAL:-3}}"
 STOP_ENRICH_TURN=$(( TURN_INDEX % STOP_ENRICH_INTERVAL == 0 || TURN_INDEX <= 1 ? 1 : 0 ))
 
 # ===========================================
@@ -530,7 +531,7 @@ fi
 
 # AUTO-STORE: When discipline threshold crossed and model didn't store, do it
 # automatically from the stop hook — no model intervention needed.
-STORE_INTERVAL="${CC_SOUL_STORE_INTERVAL:-7}"
+STORE_INTERVAL="${CHITTA_STORE_INTERVAL:-${CC_SOUL_STORE_INTERVAL:-7}}"
 LAST_STORE_FILE="${MIND_PATH}/.last_store_turn_${SESSION_ID}"
 _last_store=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo 0)
 _turns_since_store=$(( TURN_INDEX - _last_store ))

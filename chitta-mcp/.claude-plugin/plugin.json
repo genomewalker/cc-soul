@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Soul memory and code intelligence tools for Claude Code",
   "author": "Antonio Fernandez-Guerra",
-  "repository": "https://github.com/genomewalker/cc-soul",
+  "repository": "https://github.com/genomewalker/chitta",
   "license": "MIT",
   "keywords": ["memory", "soul", "chitta", "code-intelligence", "mcp"],
   "mcpServers": {

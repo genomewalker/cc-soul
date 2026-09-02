@@ -101,5 +101,5 @@ Per Conversation:
 Comparison (from paper):
   Human ceiling: 87.9%
   GPT-4 baseline: 32.1%
-  cc-soul: XX.X%
+  chitta: XX.X%
 ```

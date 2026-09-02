@@ -20,7 +20,7 @@ Run this Python snippet to gather data:
 ```python
 import subprocess, json, os
 
-mcp_dir = os.path.expanduser("~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/$(cat ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/.version 2>/dev/null || echo 'latest')/chitta-mcp")
+mcp_dir = os.path.expanduser("~/.claude/plugins/cache/genomewalker-chitta/chitta/$(cat ~/.claude/plugins/cache/genomewalker-chitta/chitta/.version 2>/dev/null || echo 'latest')/chitta-mcp")
 # Fallback: find it relative to the skills dir
 import pathlib
 skill_file = pathlib.Path(__file__) if '__file__' in dir() else pathlib.Path('.')
@@ -31,8 +31,9 @@ Actually, use the Bash tool to gather the data, then use AskUserQuestion.
 ### Step 1 — gather data
 
 ```bash
-_BASE="$HOME/.claude/plugins/cache/genomewalker-cc-soul/cc-soul"
-_VER="$(cat $HOME/.claude/plugins/cache/genomewalker-cc-soul/.version 2>/dev/null || ls -v "$_BASE" | tail -1)"
+_BASE="$HOME/.claude/plugins/cache/genomewalker-chitta/chitta"
+[ -d "$_BASE" ] || _BASE="$HOME/.claude/plugins/cache/genomewalker-cc-soul/cc-soul"
+_VER="$(cat "$(dirname "$_BASE")/.version" 2>/dev/null || ls -v "$_BASE" | tail -1)"
 _MCP_DIR="$_BASE/$_VER/chitta-mcp"
 
 # Active threads
@@ -93,6 +94,6 @@ python3 "$_MCP_DIR/task_ledger.py" inbox_push \
 
 ## Notes
 
-- The MCP dir can be found reliably as: the directory containing `task_ledger.py` under `$HOME/.claude/plugins/cache/genomewalker-cc-soul/`.
+- The MCP dir can be found reliably as: the directory containing `task_ledger.py` under `$HOME/.claude/plugins/cache/genomewalker-chitta/` (or the pre-rename `genomewalker-cc-soul/`, if that's what's installed).
 - If the task ledger DB doesn't exist yet (`~/.claude/task-ledger.db`), the ledger will be empty — that's fine, just say "No tracked tasks yet."
 - Use `realm_detect` via chitta if REALM is not set: `chitta realm_detect`

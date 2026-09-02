@@ -121,7 +121,7 @@ def main():
     print(f"GATE-A precision-lift (>= {args.lift}x): {'PASS' if gate_a else 'FAIL'}")
     print(f"GATE-B used-recall (>= {args.used_recall:.0%}): {'PASS' if gate_b else 'FAIL'}")
     if gate_a and gate_b:
-        print("=> ENFORCE OK: set CC_SOUL_ANCHOR_ENFORCE=1 (precision rises AND used survives).")
+        print("=> ENFORCE OK: set CHITTA_ANCHOR_ENFORCE=1 (precision rises AND used survives).")
     else:
         print("=> KEEP SHADOW: at least one gate failed — enforcing would repeat the #14 mirage.")
 

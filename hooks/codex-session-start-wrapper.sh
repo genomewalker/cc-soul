@@ -9,7 +9,7 @@
 # Headless bridge participant: it answers one prompt and exits, so there is no
 # session to register and nothing to restore. This path costs ~10s warm, paid
 # per participant per room turn, for state nobody reads.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then
     cat >/dev/null
     printf '%s\n' '{}'
     exit 0

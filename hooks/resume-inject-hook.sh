@@ -1,7 +1,7 @@
 #!/bin/bash
 # Headless bridge participant: nothing to resume, and /recap would hijack the
 # one prompt it exists to answer.
-if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
+if [[ -n "${CHITTA_HEADLESS:-$CC_SOUL_HEADLESS}" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 
 # SessionStart hook for source=resume: Auto-trigger /recap
 #
@@ -9,9 +9,9 @@ if [[ -n "$CC_SOUL_HEADLESS" ]]; then cat >/dev/null; printf '{}'; exit 0; fi
 # user message, providing token-efficient session continuation (~1500 tokens
 # instead of replaying 100K+ of raw history).
 #
-# Disable with CC_SOUL_AUTO_RECAP=0
+# Disable with CHITTA_AUTO_RECAP=0 (CC_SOUL_AUTO_RECAP still honored)
 
-[[ "${CC_SOUL_AUTO_RECAP:-1}" == "0" ]] && exit 0
+[[ "${CHITTA_AUTO_RECAP:-${CC_SOUL_AUTO_RECAP:-1}}" == "0" ]] && exit 0
 
 # Emit JSON with initialUserMessage
 # stdout starts with { → Claude Code parses as hookSpecificOutput

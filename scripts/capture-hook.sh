@@ -28,7 +28,7 @@ MIND_PATH="${HOME}/.claude/mind/chitta"
 CAPTURE_WARNED=false
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+MAX_WAIT="${CHITTA_MAX_WAIT:-${CC_SOUL_MAX_WAIT:-5}}"
 
 if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD=(timeout "$MAX_WAIT")
