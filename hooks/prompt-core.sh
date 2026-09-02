@@ -35,7 +35,7 @@ mkdir -p "$MIND_PATH" 2>/dev/null || true
 # ceiling: budget is wall-clock, not CPU; a stalled daemon still costs one
 # per-call timeout after the last check. upgrade: pass a deadline to chitta.
 _HOOK_T0=$(date +%s%3N)
-HOOK_BUDGET_MS="${CC_SOUL_HOOK_BUDGET_MS:-4000}"
+HOOK_BUDGET_MS="${CC_SOUL_HOOK_BUDGET_MS:-6000}"
 budget_left() { (( $(date +%s%3N) - _HOOK_T0 < HOOK_BUDGET_MS )); }
 
 # realm_detect costs up to 1s and was called twice per prompt (checkpoint block
@@ -48,6 +48,11 @@ realm_detect_once() {
     # silently fell back to "brahman" — making every recall lane global and bleeding
     # cross-project memories (aDNA, generic episodes) into scoped sessions. Strip any
     # quotes and pull the first `word:token` realm, tolerating both bare and JSON output.
+    # An explicit CHITTA_REALM (headless runs, benchmarks) is authoritative:
+    # skip detection and the canonical-shape grep, which would discard it.
+    if [[ -z "$_REALM_CACHE" && -n "${CHITTA_REALM:-}" ]]; then
+        _REALM_CACHE="$CHITTA_REALM"
+    fi
     if [[ -z "$_REALM_CACHE" ]]; then
         _REALM_CACHE=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null | tr -d '"' \
                        | grep -oE '[a-z][a-z0-9_]*:[A-Za-z0-9_./-]+' | head -1)
@@ -112,6 +117,21 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null 
 
 [[ -z "$QUERY" ]] && exit 0
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
+
+# A prompt is authoritative proof that this frontend session is alive. Refresh
+# both the Chitta session heartbeat and any thread lease, independent of whether
+# this is a Claude or Codex adapter invocation. Rate-limited: the daemon's
+# liveness TTL is 900s, so a heartbeat every single turn (2 python3 spawns +
+# sqlite opens) is far more often than needed — skip while the last one is
+# still under 120s old.
+if [[ "$SESSION_ID" != "unknown" ]]; then
+    _HB_MARKER="${MIND_PATH}/.hb_${SESSION_ID}"
+    _HB_AGE=999999
+    [[ -f "$_HB_MARKER" ]] && _HB_AGE=$(( $(date +%s) - $(stat -c %Y "$_HB_MARKER" 2>/dev/null || echo 0) ))
+    if [[ "$_HB_AGE" -ge 120 ]]; then
+        printf '%s' "$INPUT" | registry_call 1 heartbeat --queued && touch "$_HB_MARKER" 2>/dev/null
+    fi
+fi
 
 # Strip system markup (task-notifications, system-reminders, command blocks) to get real user intent.
 # When a message is purely system markup (e.g. task-notification firing UserPromptSubmit),
@@ -280,12 +300,15 @@ timeout 0.5 "$CHITTA_BIN" log_event --tool "user_prompt" \
 RLM_MODE="${CC_SOUL_RLM_MODE:-}"
 
 if [[ -n "$RLM_MODE" ]]; then
-    # RLM-style exploration via Python soul_repl
-    memories=$(timeout "$MAX_WAIT" python3 -c "
-import sys
-sys.path.insert(0, '${SCRIPT_DIR}/../chitta-mcp')
+    # RLM-style exploration via Python soul_repl.
+    # Query passed via env, never interpolated into Python source — the raw
+    # prompt is attacker-influenceable text.
+    memories=$(CC_SOUL_RLM_QUERY="$QUERY" CC_SOUL_MCP_DIR="${SCRIPT_DIR}/../chitta-mcp" \
+        timeout "$MAX_WAIT" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['CC_SOUL_MCP_DIR'])
 from server import handle_smart_context
-result = handle_smart_context({'mode': 'rlm', 'task': '''$QUERY'''})
+result = handle_smart_context({'mode': 'rlm', 'task': os.environ.get('CC_SOUL_RLM_QUERY', '')})
 print(result)
 " 2>/dev/null || true)
 else
@@ -298,7 +321,10 @@ else
     _ld=$(mktemp -d "${TMPDIR:-/tmp}/ccsoul-lanes.XXXXXX")
     ( timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 --realm "$REALM" >"$_ld/sem" 2>/dev/null || true ) &
     _sem_pid=$!
-    ( timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
+    # Hybrid gets +1s: it carries the C2 maxrel and the fused hits, and a cold
+    # query-embed takes ~3.7s (measured 2026-09-01) vs ~0.4s warm. Losing it
+    # drops C2 to none and silences every lane.
+    ( timeout "$((MAX_WAIT + 1))" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 --realm "$REALM" >"$_ld/hyb" 2>/dev/null || true ) &
     _hyb_pid=$!
     # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
     # regardless of semantic similarity. Plain format (NOT --toon): the daemon's
@@ -377,17 +403,21 @@ else
     # prompts scored the unfiltered kw lane 0.345 useful; restricting to
     # knowledge types lifts it to 0.818 (drops 18 of 19 noise items, loses 1
     # useful). Keep only knowledge-typed results.
-    _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -E '^\[[0-9]+%\]' | \
+    _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -E '^(#[0-9]+ )?\[[0-9]+%\]' | \
               grep -E '\] \[(wisdom|insight|research|data|milestone|convergence)\]' | \
-              grep -v '\[thought\]' | sed 's/^\[/[kw][/')
+              grep -v '\[thought\]' | sed 's/^/[kw]/')
 
-    # Merge: prefix hybrid lines with [hyb] marker so filter can use lower threshold.
+    # Merge: prefix lane markers WITHOUT consuming the line (`s/^/[lane]/`).
+    # Result lines are `#<id> [pct%] ...`; the old `s/^\[/[hyb]/` form replaced
+    # the `[` and left `[hyb]55%]`, which the conf parser can't read — hyb and
+    # corr were silently dead until 2026-09-01. Header lines carry no `[NN%]`
+    # and are dropped by the filter loop below.
     # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
     memories=$(printf '%s\n' "$_sem_out"; \
                printf '%s\n' "$_ctx_out" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[ctx]/'; \
-               printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | sed 's/^\[/[hyb]/'; \
+               printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[hyb]/'; \
                printf '%s\n' "$_kw_fmt"; \
-               printf '%s\n' "$_corr_out" | grep -v '\[thought\]' | sed 's/^\[/[corr]/')
+               printf '%s\n' "$_corr_out" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[corr]/')
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
@@ -402,7 +432,7 @@ if [[ -z "$memories" ]] && [[ "$REALM" != "brahman" ]] && budget_left; then
     _fallback=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid \
                 --limit 5 2>/dev/null || true)
     if [[ -n "$_fallback" && "$_fallback" != *"No memories"* ]]; then
-        memories=$(printf '%s\n' "$_fallback" | grep -v '\[thought\]' | sed 's/^\[/[xr][/')
+        memories=$(printf '%s\n' "$_fallback" | grep -v '\[thought\]' | grep -E '\[[0-9]+%\]' | sed 's/^/[xr]/')
     fi
 fi
 
@@ -425,7 +455,19 @@ _cand_reason=(); _cand_line=()
 # USED memory echoes the turn's entities. Shadow-join with the used-signal
 # validates the gate before it's allowed to drop live context.
 _QTOK=$(printf '%s' "$CLEAN_QUERY" | tr '[:upper:]' '[:lower:]' | grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
-_QTOK_N=$(printf '%s\n' "$_QTOK" | grep -c . || echo 0)
+_QTOK_N=$(printf '%s\n' "$_QTOK" | grep -c . || true)
+
+# A terse negation is usually a correction of the immediately preceding turn,
+# not a request for topic search. Broad recall here reinforces the negated noun
+# (for example, "is not sqlite" used to inject unrelated SQLite memories).
+# Keep deterministic correction_check available, but silence every fuzzy lane.
+_TERSE_NEGATION=0
+_TURN_WORDS=$(printf '%s' "$CLEAN_QUERY" | wc -w | tr -d ' ')
+if [[ "${_TURN_WORDS:-0}" -le 8 ]] && printf '%s\n' "$CLEAN_QUERY" | \
+   grep -qiE '(^|[[:space:]])(is|are|was|were)[[:space:]]+not([[:space:]]|$)|^(no|not)([[:punct:][:space:]]|$)'; then
+    _TERSE_NEGATION=1
+    _corr_out=""
+fi
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     # Match both formats: "[79%]..." (full_resonate) and "#123 [kind] [79%]..." (smart_recall)
@@ -441,8 +483,16 @@ while IFS= read -r line; do
         \[xr\]*)   reason="xr";   line="${line#\[xr\]}" ;;
     esac
 
+    if [[ "$_TERSE_NEGATION" -eq 1 ]]; then
+        ((++_drop_unk)); continue
+    fi
+
     # Extract confidence from anywhere in line
     conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
+    # CC_SOUL_ADMIT_DEBUG=1: one stderr line per candidate (lane, conf, C2,
+    # query-token count) — the only way to see why a memory was not admitted.
+    [[ -n "${CC_SOUL_ADMIT_DEBUG:-}" ]] && \
+        printf '[admit-debug] lane=%s conf=%s c2=%s qtok=%s | %s\n' "$reason" "${conf:-none}" "${_c2_pct:-none}" "${_QTOK_N:-0}" "${line:0:90}" >&2
     [[ -z "$conf" ]] && continue
 
     # BM25-backed lanes (hyb/kw) surface literal tokens (filenames, IDs, paths)
@@ -458,13 +508,30 @@ while IFS= read -r line; do
     # for any query, even off-topic. That defeats MIN_CONFIDENCE. The honest
     # absolute signal is the Platt-calibrated maxrel (_c2_pct, same scalar the C2
     # tag is calibrated on). When it says UNKNOWN (below the confident band, 81),
-    # the semantic + context lanes are noise — drop them, keep only exact-token
-    # lanes (kw) + corrections (whose low BM25 scores are honest). Only fires when
+    # the semantic + context lanes are noise. Keyword/hybrid results may still be
+    # useful for an exact filename/ID lookup, but only when they share a distinctive
+    # token with the current turn. This prevents stop-word BM25 matches from leaking
+    # arbitrary memories while preserving the reason those lanes exist. The fuzzy
+    # correction lane is also silenced here; deterministic correction_check output
+    # is handled separately below and remains available. Only fires when
     # _c2_pct is actually measured (empty = hybrid timeout = no signal, don't gate).
     # Reversible via CC_SOUL_UNKNOWN_SILENCE=0.
-    if [[ "${CC_SOUL_UNKNOWN_SILENCE:-1}" == "1" && ( "$reason" == "sem" || "$reason" == "ctx" ) \
-          && -n "${_c2_pct:-}" && "$_c2_pct" -lt 81 ]]; then
-        ((++_drop_unk)); continue
+    if [[ "${CC_SOUL_UNKNOWN_SILENCE:-1}" == "1" && -n "${_c2_pct:-}" && "$_c2_pct" -lt 81 ]]; then
+        if [[ "$reason" == "sem" || "$reason" == "ctx" || "$reason" == "corr" ]]; then
+            ((++_drop_unk)); continue
+        fi
+        if [[ "$reason" == "kw" || "$reason" == "hyb" || "$reason" == "xr" ]]; then
+            _unk_shares=0
+            if [[ "${_QTOK_N:-0}" -gt 0 ]]; then
+                _unk_ctok=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | \
+                             grep -oE '[a-z0-9][a-z0-9_>/-]{3,}' | sort -u)
+                if [[ -n "$_unk_ctok" ]] && \
+                   comm -12 <(printf '%s\n' "$_QTOK") <(printf '%s\n' "$_unk_ctok") | grep -q .; then
+                    _unk_shares=1
+                fi
+            fi
+            [[ "$_unk_shares" -eq 0 ]] && { ((++_drop_unk)); continue; }
+        fi
     fi
 
     # Skip episode thinking-blocks — internal reasoning traces, never useful as injected context
@@ -473,6 +540,32 @@ while IFS= read -r line; do
     # Skip [thought] synthesis memories — soul:meta artifacts, not domain knowledge.
     # Soul cycles that need [thought] memories query soul:meta explicitly.
     [[ "$line" =~ \[thought\] ]] && { ((++_drop_meta)); continue; }
+
+    # Session counters and cache diagnostics are telemetry, not reusable domain
+    # knowledge. Keep them queryable in the store for diagnostics, but never let
+    # their generic words ("working", "tools", "session", "cache") win an
+    # automatic recall slot.
+    if printf '%s' "$line" | grep -qiE '\[session:[^]]+\][[:space:]]+(working|complete|completed|failed|blocked)→[0-9]+[[:space:]]+turns|\[cache:break\]'; then
+        ((++_drop_meta)); continue
+    fi
+
+    # Checkpoint scaffolding is continuity data for explicit recap/resume flows,
+    # not evidence for ordinary prompt-time recall.  Keyword search gives these
+    # records an unfair advantage because they repeat generic words such as
+    # "context" and "compact", so keep them in the shared store but never inject
+    # them automatically into either frontend.
+    if printf '%s' "$line" | grep -qiE 'pre-compact[[:space:]]+context:|\[pre-compact:'; then
+        ((++_drop_meta)); continue
+    fi
+
+    # Discussion-room role prompts describe the frontend that produced an old
+    # transcript; they are not durable user preferences.  Persisting one as
+    # wisdom/correction can otherwise tell Codex it is Claude (or vice versa).
+    # Current system/developer identity always wins, so exclude these artifacts
+    # from every automatic recall lane while leaving the source transcript intact.
+    if printf '%s' "$line" | grep -qiE 'you are ([*]{0,2})?(claude|codex)(:[^ ,*]+)?([*]{0,2})?.*multi-agent discussion'; then
+        ((++_drop_meta)); continue
+    fi
 
     # M0 content-quality floor (Fable-audited over 80 injection/reply pairs; 0 of
     # the matched records were USED). Two waste shapes carry no reusable content
@@ -576,6 +669,26 @@ for i in "${_sel[@]}"; do
     fi
 done
 
+# Outcome ledger tap (additive, Phase 1): join target for injected memory ids.
+# OUTPUT lines are `[lane]#<id> [pct%] ...` — the lane marker is added at
+# admission above; the `#<id>` prefix comes from the daemon formatters
+# (field_memory_recall.cpp). Verified live 2026-09-01.
+if [[ -f "${SCRIPT_DIR}/outcome-ledger.sh" ]]; then
+    source "${SCRIPT_DIR}/outcome-ledger.sh" 2>/dev/null
+    _lg_evt=$(printf '%s' "$OUTPUT" | python3 -c "
+import sys, re, json
+# ids stay strings: memory ids are large uint64s the daemon already quotes in
+# --json output (float round-trip through jq would corrupt them otherwise).
+lanes = {}
+for line in sys.stdin:
+    m = re.match(r'\[(\w+)\]#(\d+)', line)
+    if m: lanes.setdefault(m.group(1), []).append(m.group(2))
+ids = sorted({i for v in lanes.values() for i in v})
+ids and print(json.dumps({'event': 'injected', 'ids': ids, 'lanes': lanes}))
+" 2>/dev/null)
+    [[ -n "$_lg_evt" ]] && { ledger_append "$_lg_evt" "$SESSION_ID" || true; }
+fi
+
 # C2 self-monitoring ("feeling of knowing"): bin the daemon's Platt-calibrated
 # max_relevance (from the hybrid-lane header) into TWO honest bands.
 #
@@ -649,7 +762,8 @@ fi
         [[ -z "$_sus_line" ]] && continue
         [[ ! "$_sus_line" =~ \[[0-9]+%\] ]] && continue
 
-        # Extract memory ID: #NNN at start of line
+        # Extract memory ID: #NNN at start of line (after any [lane] marker)
+        _sus_line="${_sus_line#\[[a-z]*\]}"
         if [[ "$_sus_line" =~ ^#([0-9]+) ]]; then
             _sus_mid="${BASH_REMATCH[1]}"
         else
@@ -1223,7 +1337,8 @@ fi
 # (managed independently during compaction, not just system-reminder text)
 # Plain text fallback if jq unavailable
 # ===========================================
-if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
+if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" || \
+      "${_corrk_out:-}" == CORRECTION\ FIRED* ]]; then
     # Strip trailing whitespace
     FINAL_OUTPUT=$(echo -n "$FINAL_OUTPUT" | sed 's/[[:space:]]*$//')
 
@@ -1250,12 +1365,17 @@ if [[ -n "$FINAL_OUTPUT" || -n "$CACHE_WARN" || -n "$SESSION_WARN" ]]; then
         # promoted to systemMessage even when the fuzzy --tag lane ranked it out
         # of the top-3 — this is the enforcement that ends the ~99% correction miss.
         _corr_sys=""
-        if [[ -n "$_corrk_out" && "$_corrk_out" == *"[correction]"* ]]; then
+        # The negative response also contains the literal word "[correction]"
+        # ("NO CORRECTION — no stored [correction] trigger..."). Require the
+        # daemon's positive sentinel or every miss becomes a bogus warning.
+        if [[ -n "$_corrk_out" && "$_corrk_out" == CORRECTION\ FIRED* ]]; then
             _corr_sys=$(printf '%s' "$_corrk_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
         fi
-        # Fuzzy lane fills any remaining budget (topic-adjacent corrections the
-        # keyed probe did not trigger on) — only if the reserved slot left room.
-        if [[ -z "$_corr_sys" && -n "$_corr_out" && "$_corr_out" != *"No memories"* ]]; then
+        # Fuzzy lane fills any remaining budget only when the absolute C2 signal
+        # says the topic is known. Otherwise an arbitrary high-strength
+        # correction can become an urgent system message for an unrelated turn.
+        if [[ -z "$_corr_sys" && -n "$_corr_out" && "$_corr_out" != *"No memories"* && \
+              -n "${_c2_pct:-}" && "$_c2_pct" -ge 81 ]]; then
             _corr_sys=$(printf '%s' "$_corr_out" | grep -oE '\[correction\][^|]+' | head -3 | tr '\n' ' ' | cut -c1-400 || true)
         fi
         if [[ -n "$_corr_sys" ]]; then
