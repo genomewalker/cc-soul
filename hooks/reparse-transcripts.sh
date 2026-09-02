@@ -88,7 +88,7 @@ echo "Queue file: $QUEUE_FILE" >&2
 echo "" >&2
 
 # Clear existing queue to avoid duplicates
-> "$QUEUE_FILE"
+: > "$QUEUE_FILE"
 
 # Find all transcript files
 total_files=0

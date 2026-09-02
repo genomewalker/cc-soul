@@ -15,7 +15,7 @@ CTAGS=$(command -v universal-ctags || command -v ctags || echo "")
 [[ -z "$CTAGS" ]] && { echo "Error: ctags not found" >&2; exit 1; }
 
 TAGS=$(mktemp)
-trap "rm -f $TAGS" EXIT
+trap 'rm -f "$TAGS"' EXIT
 
 cd "$PROJECT_DIR"
 

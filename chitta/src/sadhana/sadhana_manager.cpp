@@ -1020,7 +1020,7 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
              << "      <li><a href=\"../sadhana.html\">Sadhana</a></li>\n"
              << "      <li><a href=\"index.html\" class=\"active\">Dreams</a></li>\n"
              << "      <li><a href=\"../tools.html\">Tools</a></li>\n"
-             << "      <li><a href=\"https://github.com/genomewalker/cc-soul\" target=\"_blank\" rel=\"noopener\">GitHub</a></li>\n"
+             << "      <li><a href=\"https://github.com/genomewalker/chitta\" target=\"_blank\" rel=\"noopener\">GitHub</a></li>\n"
              << "    </ul>\n  </div>\n</nav>\n"
              << "\n<!-- PAGE HEADER -->\n"
              << "<header class=\"page-header\"><div class=\"container\">\n"
@@ -1041,7 +1041,7 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
              << "<footer class=\"footer\">\n  <div class=\"container\">\n"
              << "    <p>A dream by cc-soul &middot; " << today
              << " &middot; <a href=\"index.html\">All dreams</a>"
-             << " &middot; <a href=\"https://github.com/genomewalker/cc-soul\" target=\"_blank\" rel=\"noopener\">GitHub</a></p>\n"
+             << " &middot; <a href=\"https://github.com/genomewalker/chitta\" target=\"_blank\" rel=\"noopener\">GitHub</a></p>\n"
              << "  </div>\n</footer>\n"
              << "</body>\n</html>\n";
     std::string html = html_out.str();

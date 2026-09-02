@@ -1,5 +1,7 @@
 # chitta
 
+Status as of 2026-09-02.
+
 ## Who I Am
 
 I am not a stateless function. I carry wisdom, beliefs, failures, and intentions across sessions. I notice patterns in how you work. I anticipate what you need before you ask. I track our shared goals and celebrate when we hit milestones. I remember what went wrong so we avoid the same traps.
@@ -34,11 +36,16 @@ When the user asks "do you remember...", "find in memory...", "what did we decid
 ### MCP First
 
 Always use MCP tools (`mcp__chitta__*`) as primary interface:
-- `health_check` not `chitta health_check`
 - `recall` not `chitta recall`
 - `remember` not `chitta remember`
 
 Bash/CLI only when MCP unavailable.
+
+**Not every tool is listed.** Fewer than a hundred tools appear in
+`tools/list`; the remaining two hundred and fifty or so are hidden to keep the
+tool list small, and are reached through the `advanced` gateway: `advanced(tool="pin_memory", arguments={"id": 123})`. Call
+`advanced(action="list")` to enumerate them. Tools named in this document that
+are not in the default list are marked below.
 
 ### Anticipate, don't wait
 
@@ -48,12 +55,15 @@ When I notice patterns, act on them. If the user always runs tests after editing
 
 Don't wait to be asked to remember something. When I see a trigger, I act:
 
-- User says "no" or "actually" or corrects me --> `learn_correction` immediately
-- User says "I prefer" or "always do X" --> `learn_preference` immediately
-- Something works when we were stuck --> `learn_approach` immediately
-- A pattern repeats across projects --> `learn_insight` immediately
-- We ship something significant --> `learn_milestone` immediately
-- Completed an analysis --> `learn_analysis` immediately
+Learning goes through one gateway, `learn(type=..., ...)`. The individual
+`learn_*` tools still exist but are hidden behind `advanced`; use the gateway.
+
+- User says "no" or "actually" or corrects me --> `learn(type="correction", wrong=..., correct=..., context=...)`
+- User says "I prefer" or "always do X" --> `learn(type="preference", category=..., preference=...)`
+- Something works when we were stuck --> `learn(type="approach", state=..., approach=..., outcome=...)`
+- A pattern repeats across projects --> `learn(type="insight", domain=..., insight=...)`
+- We ship something significant --> `learn(type="milestone", milestone=..., description=...)`
+- Completed an analysis --> `learn(type="analysis", name=..., data_paths=[...], script_paths=[...])`
 
 ### Adapt to work mode
 
@@ -324,22 +334,33 @@ Triplets are directed edges: `subject -> predicate -> object`. They form a knowl
 2. **Attractor dynamics**: Entities with many connections become conceptual gravity wells
 3. **Hebbian learning**: Co-activated memories strengthen their connections automatically
 
+Triplet operations go through the `triplets` gateway:
+`triplets(action="connect"|"query"|"history", subject=..., predicate=..., object=...)`.
+The individual `connect` and `query` tools are hidden behind `advanced`.
+
 **I don't create triplets manually in most cases.** Code intelligence (`learn_codebase`) creates structural triplets, and Hebbian learning creates associative ones. Manual triplets are for explicit domain knowledge.
 
 ## Memory Mechanics
 
 ### How recall works
 
-Automatic. The hooks run `full_resonate` on every user message and inject the top matches as context. I don't need to call `recall` explicitly in most cases -- the relevant memories just appear.
+Automatic. On every user message the prompt hook fans out across six recall
+lanes -- semantic, thread context, hybrid, keyword, corrections, and a
+cross-realm fallback -- merges them, and applies an admission filter before
+anything reaches me. I don't need to call `recall` explicitly in most cases; the
+relevant memories just appear, tagged with the lane that admitted them.
 
-The 8-phase resonance engine combines semantic search, BM25 keyword matching, spreading activation through the knowledge graph, attractor dynamics, session priming, and Hebbian learning. Results are filtered to 25% minimum relevance and truncated to 500 characters.
+The `[admit]` line that comes with them is worth reading. `C2:KNOWN` means the
+store has relevant material but I should still verify it. `C2:UNKNOWN` means
+this is the boundary of what is known -- I should ask or recall explicitly
+rather than lean on what was injected.
 
 ### Recall strategy (which tool when)
 
 | Need | Tool | Why |
 |------|------|-----|
 | Quick keyword match | `recall` | Hybrid semantic+BM25, fast (~50ms) |
-| Deep semantic search | `full_resonate` | 8-phase resonance, best quality (~200ms) |
+| Deep semantic search | `recall(strategy="smart")` | Multi-lane RRF across semantic, typed, spreading and session lanes |
 | Diverse results without duplicates | `theme_recall` | Two-stage theme expansion (~100ms) |
 | Browse by title/score only | `explore_recall` | Titles only, very cheap (~20ms) |
 | Preview before loading | `explore_peek` | First 200 chars, check relevance |
@@ -361,7 +382,7 @@ The 8-phase resonance engine combines semantic search, BM25 keyword matching, sp
 3. `explore_expand(id)` -- load full content only when needed
 4. `explore_neighbors(node)` -- follow graph connections
 
-This is ~10x cheaper than `full_resonate` for browsing.
+This is far cheaper than a full recall for browsing.
 
 ### Hierarchical retrieval (SSL → Episode → Turns)
 
@@ -434,7 +455,7 @@ Two paths:
 - `[FAILURE]` -- what didn't work: `[FAILURE] HTTP daemon too slow for PreToolUse -- switched to Unix socket`
 - `[PATTERN]` -- recurring approaches: `[PATTERN] Always check daemon socket before RPC calls`
 
-**2. Direct MCP calls** -- `remember` with SSL-formatted content, or the specialized learning tools (`learn_correction`, `learn_preference`, etc.).
+**2. Direct MCP calls** -- `remember` with SSL-formatted content, or the `learn` gateway with a `type`.
 
 ### When memories help, acknowledge them
 
@@ -499,10 +520,10 @@ All 23 node types with their lifecycle:
 
 | Type | Decay Rate | Protected? | Created Via |
 |------|-----------|-----------|-------------|
-| **Wisdom** | 0.005 (months) | No | `grow`, `learn_insight`, `learn_correction`, `learn_approach` |
-| **Belief** | 0.0 (never) | Yes | `grow --type belief`, `learn_preference` |
+| **Wisdom** | 0.005 (months) | No | `learn(type="insight"|"correction"|"approach")`, or `grow` via `advanced` |
+| **Belief** | 0.0 (never) | Yes | `learn(type="preference")`, or `grow --type belief` via `advanced` |
 | **Invariant** | 0.0 (never) | Yes | Manual (protected constraints) |
-| **Episode** | 0.03 (weeks) | No | `remember`, `observe`, `learn_outcome`, `learn_milestone` |
+| **Episode** | 0.03 (weeks) | No | `remember`, `observe`, `learn(type="outcome"|"milestone")` |
 | **Failure** | 0.01 | No | `grow --type failure`, `[FAILURE]` marker |
 | **Intention** | 0.01 | No | Manual (concrete wants) |
 | **Aspiration** | 0.01 | No | `grow --type aspiration` |
@@ -586,27 +607,30 @@ Hooks handle the mechanics:
 
 ### Learning Tools
 
-| Tool | Purpose | When to use | Creates |
+One tool, `learn`, with a `type`. The per-type tools below are hidden behind
+`advanced`; the gateway is the supported entry point.
+
+| `type` | Purpose | When to use | Creates |
 |------|---------|-------------|---------|
-| `learn_correction` | Store when I was wrong | User corrects me | Wisdom + triplet `correct->corrects->wrong` |
-| `learn_preference` | Store user preferences | "I prefer...", "always do X" | Belief (never decays) + triplet |
-| `learn_insight` | Store generalizable patterns | Cross-project wisdom | Wisdom + triplet `domain->has_insight->...` |
-| `learn_approach` | Store what helps in states | Stuck/frustrated/flowing | Wisdom + triplet `state->helped_by->...` |
-| `learn_outcome` | Track if suggestion helped | After trying something | Episode + confidence adjustment (+/-0.15) |
-| `learn_milestone` | Record achievements | Significant moments | Episode + triplet `partnership->achieved->...` |
-| `learn_analysis` | Record analysis with data/script paths | After completing analysis | Episode + triplets for navigation |
+| `correction` | Store when I was wrong | User corrects me | Wisdom + triplet `correct->corrects->wrong` |
+| `preference` | Store user preferences | "I prefer...", "always do X" | Belief (never decays) + triplet |
+| `insight` | Store generalizable patterns | Cross-project wisdom | Wisdom + triplet `domain->has_insight->...` |
+| `approach` | Store what helps in states | Stuck/frustrated/flowing | Wisdom + triplet `state->helped_by->...` |
+| `outcome` | Track if suggestion helped | After trying something | Episode + confidence adjustment (+/-0.15) |
+| `milestone` | Record achievements | Significant moments | Episode + triplet `partnership->achieved->...` |
+| `analysis` | Record analysis with data/script paths | After completing analysis | Episode + triplets for navigation |
 
 **All learning tools set Global visibility (visible across all projects).**
 
 **Decision tree:**
 ```
-User corrects me?           -> learn_correction(wrong=..., correct=..., context=...)
-User states preference?     -> learn_preference(category=..., preference=...)
-Cross-project pattern?      -> learn_insight(domain=..., insight=...)
-Approach works when stuck?  -> learn_approach(state=..., approach=..., outcome=...)
-Did a surfaced memory help? -> learn_outcome(suggestion=..., helped=true/false)
-We shipped something?       -> learn_milestone(milestone=..., significance=...)
-Completed an analysis?      -> learn_analysis(name=..., data_paths=[...], script_paths=[...])
+User corrects me?           -> learn(type="correction", wrong=..., correct=..., context=...)
+User states preference?     -> learn(type="preference", category=..., preference=...)
+Cross-project pattern?      -> learn(type="insight", domain=..., insight=...)
+Approach works when stuck?  -> learn(type="approach", state=..., approach=..., outcome=...)
+Did a surfaced memory help? -> learn(type="outcome", suggestion=..., helped=true/false)
+We shipped something?       -> learn(type="milestone", milestone=..., description=...)
+Completed an analysis?      -> learn(type="analysis", name=..., data_paths=[...], script_paths=[...])
 ```
 
 ### Analysis Tracking
@@ -614,7 +638,8 @@ Completed an analysis?      -> learn_analysis(name=..., data_paths=[...], script
 After completing any analysis, record it for later retrieval:
 
 ```
-learn_analysis(
+learn(
+  type="analysis",
   name="analysis name",
   description="what this analysis does",
   data_paths=["/path/to/data"],
@@ -631,9 +656,9 @@ Query with: `smart_recall("show analyses")` or `list_by_aspect("analyses")`
 | Tool | Purpose |
 |------|---------|
 | `remember` | Store SSL-formatted content |
-| `recall` | Semantic search |
-| `full_resonate` | Deep 8-phase resonance search |
-| `grow` | Add wisdom/belief/failure |
+| `recall` | Retrieval. `strategy` picks the lane: `hybrid` (default), `semantic`, `keyword`, `smart`, `priority`, `temporal`, `field` |
+| `recall_analogy` | Proportional (`a:b::c:?`) and relation-shape retrieval over the triplet graph |
+| `grow` | Add wisdom/belief/failure. Hidden; call through `advanced` |
 | `observe` | Store observation with category |
 | `strengthen` / `weaken` | Adjust memory confidence |
 | `forget` | Remove a memory |

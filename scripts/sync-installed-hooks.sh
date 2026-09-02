@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOKS_SRC="$ROOT_DIR/hooks"
 HOOK_MANIFEST="$HOOKS_SRC/install-manifest.txt"
+# shellcheck source=../hooks/hook-names.sh
+source "$HOOKS_SRC/hook-names.sh"
 CHECK_ONLY=false
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=true
 
@@ -99,10 +101,10 @@ fi
 settings="$HOME/.claude/settings.json"
 if [[ "$CHECK_ONLY" == "true" && -f "$settings" ]] && \
    jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings" >/dev/null; then
-    if jq -e '
+    if jq -e --arg re "$CC_SOUL_SETTINGS_HOOK_RE" '
       [.hooks[][]?.hooks[]?
        | (.command? // "")
-       | select(test("(subconscious|session-start-hook|compact-restore-hook|resume-inject-hook|prompt-hook|stop-hook|session-end-hook|pre-compact-hook|subagent-stop-hook|file-changed-hook|pre-tool-hook|post-bash-hook|log-bash-history|memory-intercept)\\.sh"))]
+       | select(test($re))]
       | length > 0
     ' "$settings" >/dev/null; then
         echo "[drift] duplicate user-level cc-soul hook entries in $settings"
@@ -136,9 +138,9 @@ if [[ "$CHECK_ONLY" == "false" ]]; then
     if [[ -f "$settings" ]] && \
        jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings" >/dev/null; then
         stage="${settings}.cc-soul-sync"
-        jq '
+        jq --arg re "$CC_SOUL_SETTINGS_HOOK_RE" '
           def is_cc_soul_hook:
-            ((.command? // "") | test("(subconscious|session-start-hook|compact-restore-hook|resume-inject-hook|prompt-hook|stop-hook|session-end-hook|pre-compact-hook|subagent-stop-hook|file-changed-hook|pre-tool-hook|post-bash-hook|log-bash-history|memory-intercept)\\.sh"));
+            ((.command? // "") | test($re));
           def strip_cc_soul:
             map(.hooks = ((.hooks // []) | map(select((is_cc_soul_hook | not)))))
             | map(select((.hooks | length) > 0));

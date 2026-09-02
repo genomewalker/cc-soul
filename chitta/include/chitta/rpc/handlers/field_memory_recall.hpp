@@ -1,20 +1,24 @@
-// Included into FieldRpcHandler class body — declarations only.
+// Included into FieldRpcHandler class body — not a standalone header, declarations only.
 // Bodies live in chitta/src/handlers/field_memory_recall.cpp.
-
-// Included into FieldRpcHandler class body — not a standalone header.
-// Memory recall tools: remember, recall (semantic/temporal/keyword/hybrid/smart/full_resonate).
-
-// Included into FieldRpcHandler class body — not a standalone header.
 // Memory tools: remember, recall, strengthen, weaken, forget, observe, grow,
-// hybrid_recall, smart_recall, recall_keyword, recall_temporal, etc.
+// hybrid_recall, smart_recall, recall_keyword, recall_temporal, full_resonate.
 
-    // ── Core write ops ───────────────────────────────────────────────────────
-
-
-
-
-
-
+    // ── Shared hit-line renderer ─────────────────────────────────────────────
+    // Line contract (parsed by hooks/prompt-core.sh and the outcome-ledger tap):
+    //   #<id> [<pct>%][ [<type>]][ (on: YYYY-MM-DD)] <text truncated to 400>
+    // Both parse `^#([0-9]+)` and the bracketed percent; dropping the id prefix
+    // silently kills exposure/credit tracking (it happened once). Every recall
+    // lane renders through format_hits() so a contract change cannot drift
+    // across call sites — the lanes differ only in the flags below.
+    struct HitLineOpts {
+        bool show_type    = true;   // append ` [<type>]`
+        bool show_date    = false;  // append ` (on: YYYY-MM-DD)` when ts_ms > 0
+        bool link_atoms   = false;  // emit the `↳` span sub-line, set r["atoms"]
+        bool norm_lexical = false;  // keyword lane: max-normalize pct over `lexical`
+        bool record_pct   = false;  // write the printed value back as r["display_pct"]
+    };
+    void format_hits(std::ostringstream& ss, json& results, const std::string& query,
+                     const HitLineOpts& opts);
 
     void fire_recall_callback(const json& results, int passes) {
         if (!recall_callback_ || !results.is_array() || results.empty()) return;

@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Getting Started — cc-soul</title>
-<meta name="description" content="Install cc-soul, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
+<title>Getting Started — chitta</title>
+<meta name="description" content="Install chitta, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Getting Started — cc-soul">
-<meta property="og:description" content="Install cc-soul, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
+<meta property="og:title" content="Getting Started — chitta">
+<meta property="og:description" content="Install chitta, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Getting Started — cc-soul">
-<meta name="twitter:description" content="Install cc-soul, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
+<meta name="twitter:title" content="Getting Started — chitta">
+<meta name="twitter:description" content="Install chitta, configure hooks, and give Claude Code a persistent memory in under 5 minutes.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -23,15 +23,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html" class="active">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -39,9 +40,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -52,6 +54,7 @@
     <div class="page-header-badge reveal">Getting Started</div>
     <h1 class="reveal reveal-delay-1">Two commands. That's it.</h1>
     <p class="page-header-sub reveal reveal-delay-2">Register the marketplace, add the plugin. Everything else is automatic.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -87,10 +90,10 @@
           <span class="step-number">1</span>
           <div class="step-info">
             <h3 class="step-title">Register Marketplace</h3>
-            <p class="step-desc">Add the cc-soul marketplace to Claude Code.</p>
+            <p class="step-desc">Add the chitta marketplace to Claude Code.</p>
           </div>
         </div>
-        <div class="code-block"><span class="command">claude</span> marketplace add https://github.com/genomewalker/cc-soul</div>
+        <div class="code-block"><span class="command">claude</span> marketplace add https://github.com/genomewalker/chitta</div>
       </div>
 
       <!-- Step 2 -->
@@ -99,10 +102,10 @@
           <span class="step-number">2</span>
           <div class="step-info">
             <h3 class="step-title">Add Plugin</h3>
-            <p class="step-desc">Install cc-soul from the marketplace.</p>
+            <p class="step-desc">Install chitta from the marketplace.</p>
           </div>
         </div>
-        <div class="code-block"><span class="command">claude</span> plugin add cc-soul@genomewalker-cc-soul</div>
+        <div class="code-block"><span class="command">claude</span> plugin add chitta@genomewalker-chitta</div>
       </div>
 
       <!-- Step 3 (optional) -->
@@ -111,17 +114,18 @@
           <span class="step-number">3</span>
           <div class="step-info">
             <h3 class="step-title">Register MCP Server <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ash-300); font-weight: 400;">(optional)</span></h3>
-            <p class="step-desc">Gives Claude direct access to 100+ chitta tools via <code style="color: var(--aura-300);">mcp__chitta__*</code>. Without this, hooks still provide memory &mdash; MCP adds the full toolkit.</p>
+            <p class="step-desc">Gives Claude direct access to the chitta tools via <code style="color: var(--aura-300);">mcp__chitta__*</code> &mdash; a small default list, with the rest reachable through the <code style="color: var(--aura-300);">advanced</code> gateway. Without this, hooks still provide memory; MCP adds the toolkit. See <a href="tools.html">Tools</a>.</p>
           </div>
         </div>
-        <div class="code-block"><span class="command">/cc-soul-mcp</span></div>
+        <div class="code-block"><span class="command">/chitta:cc-soul-mcp</span></div>
       </div>
 
     </div>
 
     <div class="verify-card reveal reveal-delay-4" style="margin-top: var(--space-7);">
       <p style="font-size: var(--text-sm); color: var(--lotus-200); margin-bottom: var(--space-3);">That's it.</p>
-      <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.8;">On your next Claude Code session, <code style="color: var(--aura-300);">smart-install</code> runs automatically &mdash; downloads pre-built binaries (or builds from source), fetches the embedding model, configures hooks and permissions. The daemon starts, memory awakens.</p>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.8;">On your next Claude Code session, <code style="color: var(--aura-300);">smart-install.sh</code> runs automatically &mdash; it builds the binaries, fetches the embedding model, and configures hooks and permissions. The daemon starts, memory awakens.</p>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.8; margin-top: var(--space-3);">Upgrading from the old <code style="color: var(--aura-300);">cc-soul</code> marketplace? Nothing you have breaks &mdash; every <code style="color: var(--aura-300);">CC_SOUL_*</code> variable, your stored realms and your existing store all keep working. The three commands to move to the renamed marketplace are in <a href="https://github.com/genomewalker/chitta/blob/main/docs/RENAME.md" target="_blank" rel="noopener">the rename note</a>.</p>
     </div>
   </div>
 </section>
@@ -132,7 +136,7 @@
     <div class="reveal">
       <div class="section-divider"></div>
       <h2 class="section-title">Codex</h2>
-      <p style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">cc-soul also works as a Codex plugin. The same chitta daemon, same 150+ tools, same memory &mdash; hooks wired into Codex&rsquo;s lifecycle events so memory flows automatically across both harnesses.</p>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">chitta also works as a Codex plugin. The same daemon, the same tools, the same memory &mdash; hooks wired into Codex&rsquo;s lifecycle events so memory flows automatically across both harnesses.</p>
     </div>
     <div class="steps-list">
       <div class="step-card reveal reveal-delay-1">
@@ -143,7 +147,7 @@
             <p class="step-desc">If you haven&rsquo;t already, install via Claude Code first &mdash; this builds the binaries and starts the daemon.</p>
           </div>
         </div>
-        <div class="code-block"><span class="command">claude</span> plugin add cc-soul@genomewalker-cc-soul</div>
+        <div class="code-block"><span class="command">claude</span> plugin add chitta@genomewalker-chitta</div>
       </div>
       <div class="step-card reveal reveal-delay-2">
         <div class="step-header">
@@ -153,7 +157,7 @@
             <p class="step-desc">Run the Codex hook configurator. Writes <code style="color:var(--aura-300);">~/.codex/hooks.json</code> with session-start, prompt, pre-tool, and stop handlers pointing at the same chitta daemon.</p>
           </div>
         </div>
-        <div class="code-block"><span class="command">~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/$(cat ~/.claude/plugins/cache/genomewalker-cc-soul/.version)/scripts/configure-codex-hooks.sh</span></div>
+        <div class="code-block"><span class="command">~/.claude/plugins/cache/genomewalker-chitta/chitta/$(cat ~/.claude/plugins/cache/genomewalker-chitta/.version)/scripts/configure-codex-hooks.sh</span></div>
       </div>
       <div class="step-card reveal reveal-delay-3">
         <div class="step-header">
@@ -179,14 +183,40 @@
     </div>
     <div class="prereq-card reveal reveal-delay-1">
       <ul class="prereq-list">
-        <li>Downloads <strong>pre-built binaries</strong> for your platform (falls back to building from source if unavailable)</li>
-        <li>Fetches the <strong>ONNX embedding model</strong> (~80 MB) for semantic search</li>
-        <li>Installs <strong>hooks</strong> (session start, prompt resonance, stop checkpoint, pre-compact)</li>
-        <li>Configures <strong>bash permissions</strong> for chitta commands</li>
-        <li>Runs <strong>database migrations</strong> if upgrading from a previous version</li>
+        <li>Resolves the <strong>latest release</strong>, which may be newer than the plugin cache, and fetches that source</li>
+        <li><strong>Builds from source</strong> with llama.cpp embeddings when a C++ compiler is present; falls back to pre-built binaries when it is not, or when the build fails</li>
+        <li>Downloads the <strong>GGUF embedding model</strong> (<code>bge-large-en-v1.5</code>, 1024 dimensions). An existing <code>nomic-embed-text</code> install is detected and preserved, because changing embedding identity would invalidate the store</li>
+        <li>Installs <strong>hooks</strong>, links the rules file, and configures bash permissions and hook wiring in <code>settings.json</code></li>
+        <li>Installs the <strong>Python packages</strong> for the MCP server and the TUI</li>
+        <li>Sets up the <strong>systemd user service</strong> on Linux; a no-op on macOS</li>
+        <li>Runs <strong>store migrations</strong> against a stopped daemon, then restarts it</li>
+        <li>Trains the <strong>hook intent classifier</strong> in the background if it is missing, from a bundled corpus with no API calls. A regex fallback is active until it finishes</li>
       </ul>
     </div>
     <p class="reveal reveal-delay-2" style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-5); line-height: 1.8;">Smart install only runs when the version changes or binaries are missing. Subsequent sessions start instantly.</p>
+  </div>
+</section>
+
+<!-- PROCESSES -->
+<section class="content-section">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="section-title">What Is Running</h2>
+    </div>
+    <div class="env-table-wrap reveal reveal-delay-1">
+      <table class="env-table">
+        <thead><tr><th>Process</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><span class="env-var-name">chittad</span></td><td><span class="env-var-desc">The daemon. Holds the store, answers every recall over a Unix socket, runs distillation on a timer. On Linux it is a systemd user service.</span></td></tr>
+          <tr><td><span class="env-var-name">chitta</span></td><td><span class="env-var-desc">The client. What hooks and the shell call; also speaks MCP over stdio with <code>chitta mcp</code>.</span></td></tr>
+          <tr><td><span class="env-var-name">chitta-mcp</span></td><td><span class="env-var-desc">The Python MCP server. Adds the composite gateways &mdash; <code>advanced</code>, <code>learn</code>, <code>research</code>, <code>recall</code> strategy routing &mdash; and the optional cross-encoder rerank stage.</span></td></tr>
+          <tr><td><span class="env-var-name">chitta_hintd</span></td><td><span class="env-var-desc">Optional. A small local hint model behind its own socket, built only when the build enables llama.cpp. Everything works without it.</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="reveal reveal-delay-2" style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-5); line-height: 1.8;">Hooks do not run from a checkout. Lifecycle hooks execute from the plugin cache, and the tool hooks execute from <code style="color: var(--aura-300);">~/.claude/hooks</code>. Those are two different roots in the same configuration, so editing a source checkout changes nothing until you install. Working on chitta itself is what <code style="color: var(--aura-300);">scripts/dev-install.sh</code> is for: it symlinks both live paths back at your checkout, so an edit is live on the next hook invocation. Re-run it after any plugin update, which can replace the symlinks with a fresh clone.</p>
+    <p class="reveal reveal-delay-2" style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-4); line-height: 1.8;">Nothing here needs a GPU. Distillation runs natively in the daemon. A GPU-backed model endpoint can be started on demand for heavier distillation through <code style="color: var(--aura-300);">chitta-gpu start</code>, which ships in the separate <a href="https://github.com/genomewalker/chitta-bridge" target="_blank" rel="noopener">chitta-bridge</a> repository, not here.</p>
   </div>
 </section>
 
@@ -207,23 +237,23 @@
         </thead>
         <tbody>
           <tr>
-            <td><span class="env-var-name">/cc-soul-setup</span></td>
+            <td><span class="env-var-name">/chitta:cc-soul-setup</span></td>
             <td><span class="env-var-desc">Manual build from source (if you need to rebuild)</span></td>
           </tr>
           <tr>
-            <td><span class="env-var-name">/cc-soul-update</span></td>
+            <td><span class="env-var-name">/chitta:cc-soul-update</span></td>
             <td><span class="env-var-desc">Update binaries (downloads pre-built or builds from source)</span></td>
           </tr>
           <tr>
-            <td><span class="env-var-name">/cc-soul-mcp</span></td>
+            <td><span class="env-var-name">/chitta:cc-soul-mcp</span></td>
             <td><span class="env-var-desc">Configure the MCP server for direct tool access</span></td>
           </tr>
           <tr>
-            <td><span class="env-var-name">/health</span></td>
+            <td><span class="env-var-name">/chitta:health</span></td>
             <td><span class="env-var-desc">Check soul system health with remediation</span></td>
           </tr>
           <tr>
-            <td><span class="env-var-name">/codebase-learn</span></td>
+            <td><span class="env-var-name">/chitta:codebase-learn</span></td>
             <td><span class="env-var-desc">Index a project's symbols and call graphs</span></td>
           </tr>
         </tbody>
@@ -257,7 +287,7 @@
       <div class="section-divider"></div>
       <h2 class="section-title">Companion Features</h2>
     </div>
-    <p class="reveal reveal-delay-1" style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">Beyond memory, cc-soul learns how you work. These features build a richer partnership over time &mdash; most activate automatically through hooks, but you can also use them directly.</p>
+    <p class="reveal reveal-delay-1" style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">Beyond memory, chitta learns how you work. These features build a richer partnership over time &mdash; most activate automatically through hooks, but you can also use them directly.</p>
 
     <div class="steps-list">
 
@@ -385,7 +415,7 @@
 
     <div class="next-grid">
       <a href="tools.html" class="next-card reveal reveal-delay-1">
-        <h3 class="next-card-title">Explore 100+ Tools</h3>
+        <h3 class="next-card-title">Explore the Tools</h3>
         <p class="next-card-desc">Browse the full MCP toolkit &mdash; memory, code intelligence, learning, anticipation, and more.</p>
         <p class="next-card-arrow">&rarr; tools reference</p>
       </a>
@@ -405,7 +435,7 @@
       <div class="next-card next-card-inline reveal reveal-delay-4">
         <h3 class="next-card-title">Index Your Codebase</h3>
         <p class="next-card-desc">Give the soul knowledge of your project structure, symbols, and call graphs.</p>
-        <div class="code-block"><span class="command">/codebase-learn</span> /path/to/project</div>
+        <div class="code-block"><span class="command">/chitta:codebase-learn</span> /path/to/project</div>
       </div>
     </div>
   </div>
@@ -518,7 +548,7 @@
 <!-- BACK -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
   </div>
 </section>
 
@@ -528,7 +558,7 @@
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

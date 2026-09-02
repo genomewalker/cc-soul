@@ -342,6 +342,10 @@ if(NOT EXISTS "${CHITTA_FIELD_LIB}")
 endif()
 message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
 
+# Warnings are enabled per-target, never globally: the vendored llama.cpp and
+# tree-sitter trees are not ours to fix and would bury first-party diagnostics.
+set(CHITTA_WARN_FLAGS -Wall -Wextra)
+
 # Daemon/admin tool
 add_executable(chittad
     src/simple_cli.cpp
@@ -419,6 +423,7 @@ if(CHITTA_WITH_LLAMA_CPP)
 endif()
 list(APPEND CHITTA_RUNTIME_LIBS "${Python3_LIBRARY_DIRS}")
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
+target_compile_options(chittad PRIVATE ${CHITTA_WARN_FLAGS})
 
 # Resident hint-extraction daemon (chitta_hintd) — wraps one HintYantra over a
 # Unix socket so the realtime-hint backend loads the hint GGUF once instead of
@@ -439,6 +444,7 @@ if(CHITTA_BUILD_RPC)
     set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
     target_link_libraries(chitta_tool PRIVATE chitta)
     target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
+    target_compile_options(chitta_tool PRIVATE ${CHITTA_WARN_FLAGS})
 endif()
 
 # Thinking block insight extractor — perception-change mining from session JSONL
@@ -455,6 +461,13 @@ target_include_directories(chitta_migrate PRIVATE "${CHITTA_FIELD_INCLUDE}")
 install(TARGETS chitta_migrate DESTINATION bin)
 
 # Unit tests (assert-style, no framework) — run with: ctest --test-dir build
+#
+# These tests carry their checks in assert(), and CMAKE_BUILD_TYPE=Release adds
+# -DNDEBUG, which compiles assert() to nothing. Every test therefore PASSED
+# VACUOUSLY in a Release build — verified 2026-09-02: a `assert(1==2)` binary
+# built with -O3 -DNDEBUG runs to completion and exits 0. CHITTA_TEST_TARGETS
+# below re-enables assertions per test target so a green ctest means something.
+# Add new test targets to that list, or their checks silently evaporate.
 if(CHITTA_BUILD_TESTS)
     enable_testing()
     add_executable(thread_pool_test src/thread_pool_test.cpp)
@@ -474,6 +487,22 @@ if(CHITTA_BUILD_TESTS)
     add_test(NAME mdl_gate_test COMMAND mdl_gate_test)
     add_executable(prefilter_keep_test src/prefilter_keep_test.cpp)
     add_test(NAME prefilter_keep_test COMMAND prefilter_keep_test)
+    add_executable(hit_line_test src/hit_line_test.cpp)
+    target_link_libraries(hit_line_test PRIVATE chitta)
+    target_compile_options(hit_line_test PRIVATE ${CHITTA_WARN_FLAGS})
+    add_test(NAME hit_line_test COMMAND hit_line_test)
+    add_executable(tool_spec_test src/tool_spec_test.cpp)
+    target_link_libraries(tool_spec_test PRIVATE chitta)
+    target_compile_options(tool_spec_test PRIVATE ${CHITTA_WARN_FLAGS})
+    add_test(NAME tool_spec_test COMMAND tool_spec_test)
+
+    set(CHITTA_TEST_TARGETS
+        thread_pool_test llm_probe_test callsite_extract_test
+        value_fact_extract_test mdl_gate_test prefilter_keep_test
+        hit_line_test tool_spec_test)
+    foreach(t ${CHITTA_TEST_TARGETS})
+        target_compile_options(${t} PRIVATE -UNDEBUG ${CHITTA_WARN_FLAGS})
+    endforeach()
     add_test(NAME prefilter_keep_sync COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/src/prefilter_keep_sync.sh)
 endif()
 

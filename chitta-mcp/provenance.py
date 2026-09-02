@@ -4,27 +4,31 @@ Provenance extraction for task tracking.
 Extracts inputs, outputs, params, job IDs from command + stdout + filesystem.
 Pure stdlib — yaml/toml are attempted but not required.
 """
+
+from __future__ import annotations
+
 import argparse
-import hashlib
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-
 # ─── Git + environment ────────────────────────────────────────────────────────
+
 
 def git_info(cwd: str) -> dict:
     def _run(args: list[str]) -> str:
         try:
             r = subprocess.run(args, capture_output=True, text=True, cwd=cwd, timeout=1)
             return r.stdout.strip() if r.returncode == 0 else ""
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
+            # git missing, cwd gone, or slower than the 1s budget. Provenance
+            # records "" for the field rather than failing the whole capture.
             return ""
+
     return {
         "git_branch": _run(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
         "git_commit": _run(["git", "rev-parse", "--short", "HEAD"]),
@@ -34,7 +38,7 @@ def git_info(cwd: str) -> dict:
 def env_info(env: dict | None = None) -> dict:
     e = env or os.environ
     return {
-        "conda_env":   e.get("CONDA_DEFAULT_ENV") or e.get("CONDA_ENV") or "",
+        "conda_env": e.get("CONDA_DEFAULT_ENV") or e.get("CONDA_ENV") or "",
         "virtual_env": e.get("VIRTUAL_ENV", ""),
     }
 
@@ -83,8 +87,11 @@ def _parse_val(v: str) -> int | float | str:
 
 def parse_cli_flags(command: str) -> dict:
     result: dict = {
-        "inputs": [], "outputs": [], "params": {},
-        "config_files": [], "references": [],
+        "inputs": [],
+        "outputs": [],
+        "params": {},
+        "config_files": [],
+        "references": [],
     }
     try:
         tokens = shlex.split(command, posix=True)
@@ -137,28 +144,36 @@ def parse_cli_flags(command: str) -> dict:
 
 def _parse_config_text(text: str, suffix: str) -> dict:
     suffix = suffix.lower()
+    # Each branch falls through to the JSON-then-key=value fallback below when
+    # the parser is absent or the text does not parse — this module is
+    # documented as stdlib-only, with yaml/toml attempted but never required.
     if suffix in (".yaml", ".yml"):
         try:
             import yaml  # type: ignore
-            return yaml.safe_load(text) or {}
-        except Exception:
+        except ImportError:
             pass
+        else:
+            try:
+                return yaml.safe_load(text) or {}
+            except yaml.YAMLError:
+                pass
     elif suffix == ".json":
         try:
             return json.loads(text)
-        except Exception:
+        except json.JSONDecodeError:
             pass
     elif suffix == ".toml":
         for loader in ("tomllib", "tomli"):
             try:
                 mod = __import__(loader)
                 return mod.loads(text)
-            except Exception:
+            except (ImportError, ValueError):
+                # ValueError covers TOMLDecodeError in both implementations.
                 pass
     # Fallback: JSON then simple key=value
     try:
         return json.loads(text)
-    except Exception:
+    except json.JSONDecodeError:
         pass
     result: dict = {}
     for line in text.splitlines():
@@ -189,7 +204,9 @@ def ingest_config_files(config_paths: list[str]) -> dict:
                         params[k] = v
                     elif isinstance(v, str) and Path(v).exists():
                         extra_inputs.append(v)
-        except Exception:
+        except OSError:
+            # Unreadable config file. Skip it and keep ingesting the rest —
+            # partial provenance beats none.
             pass
     return {"params": params, "extra_inputs": extra_inputs}
 
@@ -211,7 +228,10 @@ _OUTPUT_PATH_PATTERNS = [
 ]
 
 _COMPLETION_PATTERNS = [
-    re.compile(r"(\d+)/(\d+)\s+(?:tasks?|jobs?|samples?|reads?)\s+(?:completed?|done|finished|processed)", re.I),
+    re.compile(
+        r"(\d+)/(\d+)\s+(?:tasks?|jobs?|samples?|reads?)\s+(?:completed?|done|finished|processed)",
+        re.I,
+    ),
     re.compile(r"(?:completed?|finished|done)[^\n]*?(\d+)\s+(?:tasks?|jobs?|samples?)", re.I),
     re.compile(r"snakemake.*?(\d+)\s+of\s+(\d+)", re.I),
     re.compile(r"nextflow.*?(\d+)\s+(?:task|process)", re.I),
@@ -225,8 +245,11 @@ _ERROR_RE = re.compile(
 
 def parse_stdout(text: str) -> dict:
     result: dict = {
-        "job_id": None, "scheduler": None,
-        "declared_outputs": [], "completion_digest": None, "has_error": False,
+        "job_id": None,
+        "scheduler": None,
+        "declared_outputs": [],
+        "completion_digest": None,
+        "has_error": False,
     }
     if not text:
         return result
@@ -260,8 +283,17 @@ def parse_stdout(text: str) -> dict:
 # ─── Filesystem snapshot + diff ───────────────────────────────────────────────
 
 _SKIP_DIRS = {
-    ".git", "__pycache__", ".venv", "venv", "node_modules",
-    ".snakemake", ".nextflow", "work", "target", "dist", "build",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".snakemake",
+    ".nextflow",
+    "work",
+    "target",
+    "dist",
+    "build",
 }
 
 
@@ -273,7 +305,10 @@ def snapshot(cwd: str, depth: int = 2) -> dict:
         return result
     try:
         _scan(base, depth, result)
-    except Exception:
+    except OSError:
+        # Permission denied or a directory removed mid-walk. `result` keeps
+        # whatever was scanned before the error; the pre/post diff degrades to
+        # covering fewer files rather than reporting none.
         pass
     return result
 
@@ -298,12 +333,12 @@ def _scan(current: Path, depth: int, acc: dict) -> None:
 
 def filesystem_diff(before: dict, after: dict) -> list[str]:
     return [
-        path for path, mtime in after.items()
-        if path not in before or mtime > before[path] + 0.01
+        path for path, mtime in after.items() if path not in before or mtime > before[path] + 0.01
     ]
 
 
 # ─── Status-check inference ───────────────────────────────────────────────────
+
 
 def infer_status_check(job_id: str | None, scheduler: str | None) -> str:
     if not job_id:
@@ -314,12 +349,11 @@ def infer_status_check(job_id: str | None, scheduler: str | None) -> str:
         return f"qstat -j {job_id} 2>/dev/null | grep -c job_number || echo 0"
     if scheduler == "lsf":
         return f"bjobs {job_id} 2>/dev/null | tail -1 | awk '{{print $3}}'"
-    return (
-        f"ps -p {job_id} -o pid= 2>/dev/null | grep -q . && echo RUNNING || echo COMPLETED"
-    )
+    return f"ps -p {job_id} -o pid= 2>/dev/null | grep -q . && echo RUNNING || echo COMPLETED"
 
 
 # ─── Full extraction ──────────────────────────────────────────────────────────
+
 
 def extract(
     command: str,
@@ -346,29 +380,30 @@ def extract(
     status_check = infer_status_check(stdout_data["job_id"], stdout_data["scheduler"])
 
     return {
-        "cmd":               command,
-        "cwd":               cwd,
-        "git_branch":        git["git_branch"],
-        "git_commit":        git["git_commit"],
-        "conda_env":         env_data["conda_env"],
-        "virtual_env":       env_data["virtual_env"],
-        "inputs":            all_inputs,
-        "outputs":           all_outputs,
-        "params":            merged_params,
-        "config_files":      flags["config_files"],
-        "references":        flags["references"],
-        "job_id":            stdout_data["job_id"],
-        "scheduler":         stdout_data["scheduler"],
-        "status_check_cmd":  status_check,
+        "cmd": command,
+        "cwd": cwd,
+        "git_branch": git["git_branch"],
+        "git_commit": git["git_commit"],
+        "conda_env": env_data["conda_env"],
+        "virtual_env": env_data["virtual_env"],
+        "inputs": all_inputs,
+        "outputs": all_outputs,
+        "params": merged_params,
+        "config_files": flags["config_files"],
+        "references": flags["references"],
+        "job_id": stdout_data["job_id"],
+        "scheduler": stdout_data["scheduler"],
+        "status_check_cmd": status_check,
         "completion_digest": stdout_data["completion_digest"],
-        "has_error":         stdout_data["has_error"],
-        "declared_outputs":  stdout_data["declared_outputs"],
-        "new_files":         new_files,
-        "binary":            Path(command.split()[0]).name if command else "",
+        "has_error": stdout_data["has_error"],
+        "declared_outputs": stdout_data["declared_outputs"],
+        "new_files": new_files,
+        "binary": Path(command.split()[0]).name if command else "",
     }
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
+
 
 def _cli() -> None:
     p = argparse.ArgumentParser(prog="provenance")
@@ -398,11 +433,10 @@ def _cli() -> None:
             try:
                 data = json.loads(raw)
                 raw_stdout = (
-                    data.get("tool_result", {}).get("stdout", "")
-                    or data.get("stdout", "")
-                    or ""
+                    data.get("tool_result", {}).get("stdout", "") or data.get("stdout", "") or ""
                 )
-            except Exception:
+            except (json.JSONDecodeError, AttributeError):
+                # stdin was raw command output, not a hook JSON envelope.
                 raw_stdout = raw
         before = None
         after = None
@@ -410,8 +444,9 @@ def _cli() -> None:
             before = json.loads(Path(args.before_snapshot).read_text())
         if args.after_snapshot and Path(args.after_snapshot).exists():
             after = json.loads(Path(args.after_snapshot).read_text())
-        result = extract(args.command, args.cwd, stdout=raw_stdout,
-                         before_snapshot=before, after_snapshot=after)
+        result = extract(
+            args.command, args.cwd, stdout=raw_stdout, before_snapshot=before, after_snapshot=after
+        )
 
     elif args.cmd == "snapshot":
         snap = snapshot(args.cwd)

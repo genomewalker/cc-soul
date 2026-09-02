@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CLI Reference — cc-soul</title>
-<meta name="description" content="CLI reference for cc-soul's two binaries: chittad (daemon) and chitta (client). Unix socket communication, TOON output, environment variables, and daemon internals.">
+<title>CLI Reference — chitta</title>
+<meta name="description" content="CLI reference for chitta's two binaries: chittad (daemon) and chitta (client). Unix socket communication, TOON output, environment variables, and daemon internals.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="CLI Reference — cc-soul">
-<meta property="og:description" content="CLI reference for cc-soul's two binaries: chittad (daemon) and chitta (client). Unix socket communication, TOON output, and daemon internals.">
+<meta property="og:title" content="CLI Reference — chitta">
+<meta property="og:description" content="CLI reference for chitta's two binaries: chittad (daemon) and chitta (client). Unix socket communication, TOON output, and daemon internals.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="CLI Reference — cc-soul">
-<meta name="twitter:description" content="CLI reference for cc-soul's two binaries: chittad (daemon) and chitta (client).">
+<meta name="twitter:title" content="CLI Reference — chitta">
+<meta name="twitter:description" content="CLI reference for chitta's two binaries: chittad (daemon) and chitta (client).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -87,15 +87,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -103,9 +104,10 @@
       <li><a href="cli.html" class="active">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -115,6 +117,8 @@
   <div class="container">
     <div class="page-header-badge reveal">CLI Reference</div>
     <h1 class="reveal reveal-delay-1">Two binaries. One soul.</h1>
+    <p class="page-header-sub reveal reveal-delay-2" style="margin-top:var(--space-3);">A third, <code style="color: var(--aura-300);">chitta_hintd</code>, is built only when the build enables llama.cpp and is optional at runtime.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
     <p class="page-header-sub reveal reveal-delay-2"><code style="color: var(--aura-300);">chittad</code> runs the daemon. <code style="color: var(--aura-300);">chitta</code> talks to it. Both compiled from C++, communicating over Unix domain socket.</p>
   </div>
 </header>
@@ -150,7 +154,7 @@
         <div class="tools-list">
           <div class="tool-row">
             <span class="tool-name">chittad daemon [--foreground] [--path PATH] [--interval SECS]</span>
-            <span class="tool-desc">Run background daemon. Self-daemonizes by default (double-fork). Opens chitta-field memory substrate, loads ONNX model, creates Unix socket, starts thread pool.</span>
+            <span class="tool-desc">Run background daemon. Self-daemonizes by default (double-fork). Opens the chitta-field memory substrate, loads the GGUF embedding model through llama.cpp, creates the Unix socket, starts the thread pool.</span>
           </div>
           <div class="tool-row">
             <span class="tool-name">chittad shutdown</span>
@@ -163,6 +167,14 @@
           <div class="tool-row">
             <span class="tool-name">chittad stats [--json] [--fast]</span>
             <span class="tool-desc">Show soul statistics &mdash; nodes, coherence, ojas, yantra status.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chittad metrics</span>
+            <span class="tool-desc">Show the component metrics behind the Soul Utility Score.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chittad distill --transcript-path PATH [--session-id ID] [--realm REALM]</span>
+            <span class="tool-desc">Distill one transcript by hand. The daemon also does this on a timer (<code>--distill-interval</code>, minutes) once a session has at least <code>--distill-min-turns</code> turns. Distillation is native C++; the <code>--distill-script</code> flag is accepted and ignored.</span>
           </div>
         </div>
         <div class="code-block">
@@ -184,7 +196,7 @@
           <svg viewBox="0 0 20 20" fill="none"><path d="M7 5 L3 10 L7 15" stroke="#9DB2D9" stroke-width="1.2"/><path d="M13 5 L17 10 L13 15" stroke="#9DB2D9" stroke-width="1.2"/><line x1="11" y1="4" x2="9" y2="16" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
         </div>
         <span class="tools-category-name">chitta &mdash; Client (CLI Mode)</span>
-        <span class="tools-category-count">7 examples</span>
+        <span class="tools-category-count">8 examples</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="category-body">
@@ -221,6 +233,10 @@
           <div class="tool-row">
             <span class="tool-name">chitta remember --content "[domain] pattern&rarr;insight"</span>
             <span class="tool-desc">Store a memory in SSL format with automatic embedding and realm detection.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta mcp</span>
+            <span class="tool-desc">Speak MCP over stdio. <code>printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | chitta mcp</code> enumerates the daemon&rsquo;s whole tool surface; this is what generates <a href="tools.html">the tools page</a>.</span>
           </div>
         </div>
       </div>
@@ -355,15 +371,18 @@
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="category-body">
-        <p class="section-intro">The daemon searches for the ONNX model (bge-base-en-v1.5) in this order:</p>
+        <p class="section-intro">The embedding model is a GGUF loaded in-process through llama.cpp. Its filename follows the <em>compiled</em> embedding identity, so auto-discovery and the bundled model can never drift apart: a public build looks for <code>bge-large-en-v1.5.gguf</code>. Search order:</p>
         <div class="path-chain">
-          <span class="path-step">$CLAUDE_PLUGIN_ROOT/chitta/models/</span>
+          <span class="path-step">--embed-model / $CHITTA_EMBED_MODEL</span>
           <span class="path-arrow">&rarr;</span>
           <span class="path-step">~/.claude/models/</span>
           <span class="path-arrow">&rarr;</span>
-          <span class="path-step">~/.claude/mind/</span>
-          <span class="path-fallback">(legacy)</span>
+          <span class="path-step">~/.claude/bin/</span>
+          <span class="path-arrow">&rarr;</span>
+          <span class="path-step">&lt;mind&gt;/../../models/</span>
         </div>
+        <p class="section-intro" style="margin-top: var(--space-4);">The <code>~/.claude/bin/</code> probe exists because the systemd unit keeps the model beside the binaries. Without it, a daemon started with no <code>--embed-model</code> would silently fall back to an HTTP embedding backend &mdash; a different vector space, which means wrong-dimension vectors and corrupt recall rather than a clean failure.</p>
+        <p class="section-intro">Embedding dimension is a <em>compile-time</em> constant, 1024 on a public build, set with <code>-DCHITTA_EMBED_DIM</code> or <code>$CHITTA_EMBED_DIM</code> at configure time. Changing it requires a fresh build directory and re-embedding the store.</p>
       </div>
     </div>
 
@@ -380,7 +399,7 @@
         <p class="section-intro">What happens when <code>chittad daemon</code> starts:</p>
         <ul class="internals-list">
           <li>Opens chitta-field at <code>{path}/chitta-field/</code></li>
-          <li>Loads ONNX model (<code>bge-base-en-v1.5</code>, 768 dimensions)</li>
+          <li>Loads the GGUF embedding model through llama.cpp (<code>bge-large-en-v1.5</code>, 1024 dimensions, on a public build)</li>
           <li>Creates Unix socket at <code>/tmp/chitta-{hash}.sock</code></li>
           <li>Starts thread pool (2&ndash;16 workers)</li>
           <li>Begins subconscious processing loop</li>
@@ -406,7 +425,7 @@
 <!-- BACK -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
   </div>
 </section>
 
@@ -416,7 +435,7 @@
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

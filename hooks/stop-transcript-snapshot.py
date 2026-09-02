@@ -18,8 +18,9 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 def _resolve_chitta_mcp_dir() -> Path | None:
@@ -50,7 +51,7 @@ if _MCP_DIR is not None:
     sys.path.insert(0, str(_MCP_DIR))
 try:
     from thread_inference import _clean_user_text as _clean_user  # noqa: E402
-except Exception:
+except ImportError:
     # chitta-mcp unreachable (unusual: thread_inference.py itself is already a
     # hard dependency of the Stop hook's thread-inference step) — fall back to
     # a local copy so transcript sanitization still degrades gracefully.
@@ -165,9 +166,7 @@ def _read_window(
     stat = transcript.stat()
     bootstrap = cursor is None
     requested_start = (
-        max(0, stat.st_size - bootstrap_bytes)
-        if bootstrap
-        else int(cursor.get("offset", 0))
+        max(0, stat.st_size - bootstrap_bytes) if bootstrap else int(cursor.get("offset", 0))
     )
     dropped = 0
     if stat.st_size - requested_start > max_increment_bytes:
@@ -273,9 +272,12 @@ def build_snapshot(
         _ordered_add(tools, tool_seen, name)
         args = _json_object(arguments)
         _extract_paths(args, files, file_seen)
-        key = call_id or hashlib.sha256(
-            (name + json.dumps(args, sort_keys=True, default=str)).encode()
-        ).hexdigest()[:16]
+        key = (
+            call_id
+            or hashlib.sha256(
+                (name + json.dumps(args, sort_keys=True, default=str)).encode()
+            ).hexdigest()[:16]
+        )
         tool_calls.setdefault(key, {"id": key, "tool": name, "input": args})
 
     for row in rows:
@@ -294,7 +296,10 @@ def build_snapshot(
                             continue
                         call_id = str(block.get("tool_use_id") or "")
                         output = block.get("content", block.get("text", ""))
-                        tool_outputs[call_id] = (str(output)[:500], bool(block.get("is_error", False)))
+                        tool_outputs[call_id] = (
+                            str(output)[:500],
+                            bool(block.get("is_error", False)),
+                        )
             else:
                 add_assistant(_text(content))
                 if isinstance(content, list):
@@ -306,12 +311,18 @@ def build_snapshot(
                             str(block.get("name") or ""),
                             block.get("input", {}),
                         )
-                claude_usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+                claude_usage = (
+                    message.get("usage") if isinstance(message.get("usage"), dict) else {}
+                )
                 if claude_usage:
                     usage["total_input_tokens"] += int(claude_usage.get("input_tokens", 0) or 0)
                     usage["total_output_tokens"] += int(claude_usage.get("output_tokens", 0) or 0)
-                    usage["total_cache_read"] += int(claude_usage.get("cache_read_input_tokens", 0) or 0)
-                    usage["total_cache_creation"] += int(claude_usage.get("cache_creation_input_tokens", 0) or 0)
+                    usage["total_cache_read"] += int(
+                        claude_usage.get("cache_read_input_tokens", 0) or 0
+                    )
+                    usage["total_cache_creation"] += int(
+                        claude_usage.get("cache_creation_input_tokens", 0) or 0
+                    )
                     usage["n_messages"] += 1
             continue
 
@@ -393,7 +404,11 @@ def build_snapshot(
         }
 
     exact_response = hook_input.get("last_assistant_message")
-    response = exact_response if isinstance(exact_response, str) and exact_response else (assistants[-1] if assistants else "")
+    response = (
+        exact_response
+        if isinstance(exact_response, str) and exact_response
+        else (assistants[-1] if assistants else "")
+    )
     last_user = users[-1] if users else (previous_users[-1] if previous_users else "")
     user_turns = previous_users[:]
     for value in users:
@@ -462,7 +477,13 @@ def _fallback_snapshot(hook_input: dict[str, Any], error: str) -> dict[str, Any]
         "counts": {"user": 0, "assistant": 0},
         "markers": _markers([response]) if isinstance(response, str) else [],
         "token_usage": _default_usage(),
-        "window": {"start": 0, "next_offset": 0, "bytes_scanned": 0, "dropped_bytes": 0, "bootstrap": True},
+        "window": {
+            "start": 0,
+            "next_offset": 0,
+            "bytes_scanned": 0,
+            "dropped_bytes": 0,
+            "bootstrap": True,
+        },
         "next_state": None,
         "error": error[:500],
     }
@@ -506,7 +527,9 @@ def main() -> int:
     snapshot_parser.add_argument("--transcript", required=True, type=Path)
     snapshot_parser.add_argument("--cursor", required=True, type=Path)
     snapshot_parser.add_argument("--bootstrap-bytes", type=int, default=DEFAULT_BOOTSTRAP_BYTES)
-    snapshot_parser.add_argument("--max-increment-bytes", type=int, default=DEFAULT_MAX_INCREMENT_BYTES)
+    snapshot_parser.add_argument(
+        "--max-increment-bytes", type=int, default=DEFAULT_MAX_INCREMENT_BYTES
+    )
     commit_parser = subparsers.add_parser("commit")
     commit_parser.add_argument("--snapshot", required=True, type=Path)
     commit_parser.add_argument("--cursor", required=True, type=Path)
@@ -525,7 +548,9 @@ def main() -> int:
             args.bootstrap_bytes,
             args.max_increment_bytes,
         )
-    except Exception as exc:  # Stop hooks must degrade to the exact event message.
+    except Exception as exc:  # noqa: BLE001
+        # Fail-open by design: a Stop hook that raises breaks the session, so
+        # every failure degrades to the exact event message instead.
         snapshot = _fallback_snapshot(hook_input, f"{type(exc).__name__}: {exc}")
     json.dump(snapshot, os.sys.stdout, separators=(",", ":"))
     os.sys.stdout.write("\n")

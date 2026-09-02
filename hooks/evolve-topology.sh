@@ -77,10 +77,12 @@ fi
 # ---------------------------------------------------------------------------
 # 4. Mutation operator — edge-flip
 # ---------------------------------------------------------------------------
-MUTATED_JSON=$(echo "$GENOME_JSON" | python3 - <<'PYEOF'
-import json, random, sys
+# The genome travels in the environment, not on stdin: `python3 -` already reads
+# its program from stdin, so the heredoc wins and a pipe would be swallowed.
+MUTATED_JSON=$(GENOME_JSON="$GENOME_JSON" python3 - <<'PYEOF'
+import json, os, random, sys
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ["GENOME_JSON"])
 vis = data.get("visibility", {})
 roles = data.get("roles", list(vis.keys()))
 

@@ -21,39 +21,6 @@ METRICS_FILE="${MIND_PATH}/.hook_metrics.json"
 ALERT_FILE="${MIND_PATH}/.hook_alerts.log"
 mkdir -p "$MIND_PATH" 2>/dev/null || true
 
-safe_queue_write() {
-    local tool="$1"
-    local args="$2"
-    queue_write "$tool" "$args" && return 0
-    sleep 0.05
-    queue_write "$tool" "$args"
-}
-
-record_ingest_metric() {
-    local success="$1" # true|false
-    [[ -f "$METRICS_FILE" ]] || printf '%s\n' '{"turns_total":0,"turns_ingested":0}' > "$METRICS_FILE"
-    if [[ "$success" == "true" ]]; then
-        jq '.turns_total += 1 | .turns_ingested += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
-    else
-        jq '.turns_total += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
-    fi
-    if [[ -s "${METRICS_FILE}.tmp" ]]; then
-        mv "${METRICS_FILE}.tmp" "$METRICS_FILE"
-    else
-        rm -f "${METRICS_FILE}.tmp"
-    fi
-
-    local total ingested pct
-    total=$(jq -r '.turns_total // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
-    ingested=$(jq -r '.turns_ingested // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
-    if [[ "$total" -gt 0 ]]; then
-        pct=$(( ingested * 100 / total ))
-        if [[ "$total" -ge 20 && "$pct" -lt 95 ]]; then
-            printf '%s ingest_rate=%s%% turns=%s ingested=%s\n' "$(date -Is)" "$pct" "$total" "$ingested" >> "$ALERT_FILE"
-        fi
-    fi
-}
-
 # Parse JSON input (gracefully handle malformed input)
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
@@ -285,8 +252,10 @@ fi
 # Lossless storage (store_turn above) preserves the full transcript.
 
 # Structured LLM extraction is designed in docs/STRUCTURED_EXTRACTOR_DESIGN.md.
-# The `distill_turn` op has no daemon-side handler yet, so enqueue is held
-# until the C++ side lands. Re-enable once queue_processor.cpp dispatches it.
+# The `distill_turn` op still has no daemon-side handler (absent from
+# chitta/src and chitta/include as of 2026-09-02), so enqueue is held until the
+# C++ side lands. Re-enable once queue_processor.cpp dispatches it; the regex
+# fallback below goes away in the same change.
 
 # Skip daemon-dependent operations if daemon is not running.
 # queue_write / store_turn above are file-based and always run.
@@ -398,9 +367,12 @@ DEDUP_FILE="$MIND_PATH/.stop_dedup_${SESSION_ID}"
 touch "$DEDUP_FILE"
 
 # Extract typed learnings → convert to SSL v0.3 → queue with provenance + affect/flags/refs
-# TODO(v6): remove this regex block once the `distill_turn` op is wired in
-# queue_processor.cpp. See docs/STRUCTURED_EXTRACTOR_DESIGN.md §4 (migration)
-# and §6 (MVP scope).
+# ceiling: regex-only extraction — catches the bracketed [SOLUTION]/[GOTCHA]/…
+# forms and nothing else; unmarked prose learnings are lost. This is the sole
+# extraction path today, so it must stay.
+# upgrade: delete this block once queue_processor.cpp dispatches `distill_turn`
+# (verified absent from chitta/src and chitta/include as of 2026-09-02). See
+# docs/STRUCTURED_EXTRACTOR_DESIGN.md §4 (migration) and §6 (MVP scope).
 LEARNED=0
 while IFS= read -r line; do
     if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN|CORRECTION|EVENT)\] ]]; then

@@ -17,12 +17,22 @@ Usage:
 
 Exit 0 if mean_nDCG@LIMIT >= --min, else 1.
 """
-import argparse, json, math, os, subprocess, sys, urllib.request
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import subprocess
+import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 try:
     import numpy as _np
+
     _HAS_NUMPY = True
 except ImportError:
     _HAS_NUMPY = False
@@ -49,8 +59,16 @@ def s_entropy_from_embeddings(result_ids):
         return 0.0 if _HAS_NUMPY else None
     try:
         out = subprocess.run(
-            ["chitta", "get_embeddings", "--ids", json.dumps([str(i) for i in result_ids]), "--json"],
-            capture_output=True, text=True, timeout=30,
+            [
+                "chitta",
+                "get_embeddings",
+                "--ids",
+                json.dumps([str(i) for i in result_ids]),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if out.returncode != 0:
             return None
@@ -70,17 +88,24 @@ def s_entropy_from_embeddings(result_ids):
             return 0.0
         probs = eig / eig.sum()
         return float(-_np.sum(probs * _np.log(probs + 1e-12)))
-    except Exception:
+    except (ImportError, ValueError, FloatingPointError):
+        # numpy absent, or a matrix eigendecomposition that did not converge.
+        # None is the "metric unavailable" value the report already handles.
         return None
+
 
 # Cross-encoder reranker — loaded once, used for all queries
 _reranker = None
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 _RERANK_FETCH_MUL = 4  # fetch this many × limit, then rerank to top-limit
 
-_sigmoid = lambda x: 1.0 / (1.0 + math.exp(-x))
-ABSTAIN_SCORE_THRESHOLD = 0.6   # epistemic: sigmoid(cross-encoder) below threshold → undetermined
-ABSTAIN_BAND_EPS = 0.05         # posterior-band: gold/non-gold score gap < ε → rank is noise
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+ABSTAIN_SCORE_THRESHOLD = 0.6  # epistemic: sigmoid(cross-encoder) below threshold → undetermined
+ABSTAIN_BAND_EPS = 0.05  # posterior-band: gold/non-gold score gap < ε → rank is noise
 
 # C2 self-monitoring ("feeling of knowing") — monotone binning of the daemon's
 # Platt-calibrated max_relevance (field_memory_recall.cpp: sigma(3.27*cos-0.85)),
@@ -93,8 +118,8 @@ ABSTAIN_BAND_EPS = 0.05         # posterior-band: gold/non-gold score gap < ε �
 # KNOWN (confident-but-verify, maxrel >= .81) vs UNKNOWN (< .81). KNOWN-vs-UNKNOWN
 # IS monotonic — all 6 probes UNKNOWN, hit@10 clean. C2_THIN_MAXREL retained as
 # an alias of the single boundary so ignition_admit and older refs keep working.
-C2_KNOWN_MAXREL = 0.81   # single confident-band cut (was 0.86 in the 3-band)
-C2_THIN_MAXREL = 0.81    # boundary: all 6 out-of-domain probes < .81; all 30 answerable >= .814
+C2_KNOWN_MAXREL = 0.81  # single confident-band cut (was 0.86 in the 3-band)
+C2_THIN_MAXREL = 0.81  # boundary: all 6 out-of-domain probes < .81; all 30 answerable >= .814
 
 # Out-of-domain probes: no gold exists by construction — must land in UNKNOWN.
 C2_PROBES = [
@@ -126,9 +151,13 @@ def ignition_admit(platt_scores: list[float], budget: int = 3) -> tuple[list[int
     below THIN drops. A flat low recall ignites nothing — the no-ignition case.
     Returns (admitted_idx, gap_idx)."""
     admitted = [i for i, p in enumerate(platt_scores) if p >= C2_KNOWN_MAXREL][:budget]
-    gap = [i for i, p in enumerate(platt_scores)
-           if C2_THIN_MAXREL <= p < C2_KNOWN_MAXREL and i not in admitted]
+    gap = [
+        i
+        for i, p in enumerate(platt_scores)
+        if C2_THIN_MAXREL <= p < C2_KNOWN_MAXREL and i not in admitted
+    ]
     return admitted, gap
+
 
 def _load_reranker():
     global _reranker
@@ -136,13 +165,19 @@ def _load_reranker():
         return _reranker
     try:
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from sentence_transformers import CrossEncoder
+
             _reranker = CrossEncoder(_RERANKER_MODEL)
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Loading a torch cross-encoder can fail on a missing package, a stale
+        # HF cache, a download error, or OOM. They all mean the same thing to
+        # the grader — no reranking — so the sentinel is cached and not retried.
         _reranker = False  # sentinel: tried and failed
     return _reranker
+
 
 GOLDEN_VERSION = 6
 
@@ -336,11 +371,15 @@ GOLDEN_SET = [
     },
 ]
 
-RESULTS_PATH    = Path(__file__).resolve().parent / "grade-recall-results.json"
-GOLD_IDS_PATH   = Path(__file__).resolve().parent / "grade-recall-goldids.json"
+RESULTS_PATH = Path(__file__).resolve().parent / "grade-recall-results.json"
+GOLD_IDS_PATH = Path(__file__).resolve().parent / "grade-recall-goldids.json"
 
-GREEN = "\033[32m"; RED = "\033[31m"; YELLOW = "\033[33m"
-BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 
 GRADE_REALM = "project:cc-soul"
@@ -353,8 +392,17 @@ def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
     # every graded recall enqueues co-retrieval strengthening (+0.05/pair) that
     # drains on the next snapshot, reinforcing near-but-wrong hits on a sparse
     # store — the store degrades exactly the queries we measure.
-    cmd = ["chitta", "recall", "--query", query, "--limit", str(limit),
-           "--realm", GRADE_REALM, "--json"]
+    cmd = [
+        "chitta",
+        "recall",
+        "--query",
+        query,
+        "--limit",
+        str(limit),
+        "--realm",
+        GRADE_REALM,
+        "--json",
+    ]
     # CC_GRADE_LEARN=1 removes the hygiene flag for the pollution-magnitude
     # experiment (WITHOUT-flag arm of the S0 drain protocol). Default keeps
     # --no-learn so routine grading never mutates the store it measures.
@@ -371,7 +419,9 @@ def _recall_full(query: str, limit: int, strategy: str = "") -> dict:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
         parsed = json.loads(out.stdout)
         return parsed if isinstance(parsed, dict) else {}
-    except Exception:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        # chitta missing, over its 60s budget, or a non-JSON reply. An empty
+        # dict scores as a miss for this query rather than aborting the grade.
         return {}
 
 
@@ -417,10 +467,19 @@ _CHITTA_RPC_PORT = int(os.environ.get("CHITTA_RPC_PORT", "7432"))
 
 
 def _chitta_rpc(tool: str, args: dict) -> dict:
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": tool, "arguments": args}}).encode()
-    req = urllib.request.Request(f"http://localhost:{_CHITTA_RPC_PORT}",
-                                 data=body, headers={"Content-Type": "application/json"})
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"http://localhost:{_CHITTA_RPC_PORT}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read()).get("result", {})
 
@@ -430,24 +489,42 @@ def _graph_hop(seed_ids: list[str], max_hops: int = 2, max_nodes: int = 30) -> s
     found: set[str] = set()
     for sid in seed_ids[:5]:
         try:
-            result = _chitta_rpc("graph_traverse", {"start": str(sid), "max_hops": max_hops, "max_nodes": max_nodes})
+            result = _chitta_rpc(
+                "graph_traverse", {"start": str(sid), "max_hops": max_hops, "max_nodes": max_nodes}
+            )
             for hit in result.get("structured", {}).get("hits", []):
                 node = str(hit.get("node", ""))
                 if node.isdigit() or (node.lstrip("-").isdigit()):
                     found.add(node)
-        except Exception:
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            json.JSONDecodeError,
+            AttributeError,
+            TypeError,
+        ):
+            # One unreachable seed must not drop the whole traversal; the other
+            # seeds still contribute to `found`.
             pass
     return found - set(seed_ids)
 
 
 def _fetch_memory(mid: str) -> dict | None:
     try:
-        out = subprocess.run(["chitta", "get", "--id", mid, "--json"],
-                             capture_output=True, text=True, timeout=10)
+        out = subprocess.run(
+            ["chitta", "get", "--id", mid, "--json"], capture_output=True, text=True, timeout=10
+        )
         d = json.loads(out.stdout)
-        return {"id": mid, "text": d.get("content", ""), "realm": d.get("realm", ""),
-                "relevance": 0.0, "confidence": d.get("confidence", 0.5)}
-    except Exception:
+        return {
+            "id": mid,
+            "text": d.get("content", ""),
+            "realm": d.get("realm", ""),
+            "relevance": 0.0,
+            "confidence": d.get("confidence", 0.5),
+        }
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, AttributeError):
+        # Memory id no longer resolvable, or the daemon is down. None means
+        # "not fetchable" and the caller skips it.
         return None
 
 
@@ -490,9 +567,13 @@ def _rank_multihop(query: str, limit: int) -> tuple[list[dict], list[float] | No
     seed_ids = [str(h["id"]) for h in primary_top[:5]]
     neighbor_ids = _graph_hop(seed_ids, max_hops=2, max_nodes=40)
     if neighbor_ids and reranker:
-        neighbor_mems = [m for mid in list(neighbor_ids)[:20]
-                         if str(mid) not in all_hits and (m := _fetch_memory(mid))
-                         and (m.get("realm", "") in ("", GRADE_REALM))]
+        neighbor_mems = [
+            m
+            for mid in list(neighbor_ids)[:20]
+            if str(mid) not in all_hits
+            and (m := _fetch_memory(mid))
+            and (m.get("realm", "") in ("", GRADE_REALM))
+        ]
         if neighbor_mems:
             hop_pairs = [(query, m.get("text", "")) for m in neighbor_mems]
             hop_scores = reranker.predict(hop_pairs)
@@ -507,7 +588,7 @@ def _rank_multihop(query: str, limit: int) -> tuple[list[dict], list[float] | No
 
 
 _FWD_BONUS = 1.0 / (_RRF_K + 1)  # forward-bet neighbor gets one top-rank RRF vote
-_FWD_SEEDS = 3                    # trajectory anchor = top-N already-admitted items
+_FWD_SEEDS = 3  # trajectory anchor = top-N already-admitted items
 
 
 def _rank_fwd(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
@@ -544,7 +625,7 @@ def _rank_fwd(query: str, limit: int) -> tuple[list[dict], list[float] | None]:
         if hid in pool:
             rrf[hid] = rrf.get(hid, 0.0) + _FWD_BONUS  # already retrieved: boost
         else:
-            mem = _fetch_memory(hid)                    # missed by query: inject
+            mem = _fetch_memory(hid)  # missed by query: inject
             if mem and mem.get("text"):
                 pool[hid] = mem
                 rrf[hid] = _FWD_BONUS
@@ -595,7 +676,9 @@ def bootstrap(limit: int, strategy: str = "") -> dict[str, list[str]]:
         if not hits:
             results2 = recall(item["query"], limit, strategy)
             hits = [r for r in results2 if sig in r.get("text", "").lower()]
-        ids = [h["id"] for h in hits[:3]]  # top-3 ranked; avoids IDCG inflation from broad signatures
+        ids = [
+            h["id"] for h in hits[:3]
+        ]  # top-3 ranked; avoids IDCG inflation from broad signatures
         gold_ids[item["desc"]] = ids
         status = f"{GREEN}found {len(ids)} gold(s){RESET}" if ids else f"{RED}NOT FOUND{RESET}"
         print(f"  {item['desc']:35} {status}")
@@ -620,8 +703,10 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     hyb = c2_full.get("results", [])
     hyb_platt = [_platt(h.get("similarity", 0.0)) for h in hyb]
     hyb_ids = [h["id"] for h in hyb]
-    hyb_gold = sorted({i for i, h in enumerate(hyb) if sig in h.get("text", "").lower()}
-                      | {hyb_ids.index(g) for g in ids if g in hyb_ids})
+    hyb_gold = sorted(
+        {i for i, h in enumerate(hyb) if sig in h.get("text", "").lower()}
+        | {hyb_ids.index(g) for g in ids if g in hyb_ids}
+    )
     result_ids = [r["id"] for r in results]
     result_texts = [r.get("text", "").lower() for r in results]
 
@@ -639,8 +724,8 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
     score = ndcg(positions, n_gold, limit)
 
     # Abstain signals — two distinct triggers, do not collapse
-    epistemic_abstain = False   # cross-encoder unconfident (w ≤ threshold)
-    band_abstain = False        # gold/non-gold scores too close to trust ranking
+    epistemic_abstain = False  # cross-encoder unconfident (w ≤ threshold)
+    band_abstain = False  # gold/non-gold scores too close to trust ranking
     gold_max_score = None
     if scores and positions:
         gold_scores = [scores[p] for p in positions if p < len(scores)]
@@ -675,7 +760,9 @@ def grade_one(item: dict, gold_ids: dict, limit: int, strategy: str = "") -> dic
         "hyb_platt": hyb_platt,
         "hyb_gold_positions": hyb_gold,
         "g_entropy": g_entropy(scores) if scores else 0.0,
-        "s_entropy": s_entropy_from_embeddings(result_ids) if result_ids else (0.0 if _HAS_NUMPY else None),
+        "s_entropy": s_entropy_from_embeddings(result_ids)
+        if result_ids
+        else (0.0 if _HAS_NUMPY else None),
     }
 
 
@@ -683,18 +770,30 @@ def main():
     ap = argparse.ArgumentParser(description="G0 recall grader (nDCG@10)")
     ap.add_argument("--bootstrap", action="store_true", help="discover gold IDs and save")
     ap.add_argument("--limit", type=int, default=20)
-    ap.add_argument("--bootstrap-limit", type=int, default=640, help="depth for bootstrap (default 640)")
+    ap.add_argument(
+        "--bootstrap-limit", type=int, default=640, help="depth for bootstrap (default 640)"
+    )
     ap.add_argument("--min", type=float, default=0.7)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-reranker", action="store_true", help="skip cross-encoder re-ranking")
-    ap.add_argument("--strategy", default="hybrid", help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank). Default hybrid = what prompt-core.sh production recall uses; measured strict superset of pure-semantic on the golden set (pass -1 abstain +2, 0 regressions).")
-    ap.add_argument("--c2", action="store_true",
-                    help="C2 calibration report: bin queries by KNOWN/THIN/UNKNOWN, "
-                         "verify gold-hit-rate is monotonic; exit 1 if miscalibrated")
-    ap.add_argument("--ignition", action="store_true",
-                    help="ignition A/B on one shared hybrid pool per query: baseline "
-                         "top-3 admit vs per-item bimodal admit (Platt >= C2 KNOWN cut); "
-                         "reports admitted-are-gold precision + gold coverage; exit 1 on kill")
+    ap.add_argument(
+        "--strategy",
+        default="hybrid",
+        help="recall strategy: 'hybrid'|'bm25'|'field' or 'rrf' (multi-strategy RRF+rerank). Default hybrid = what prompt-core.sh production recall uses; measured strict superset of pure-semantic on the golden set (pass -1 abstain +2, 0 regressions).",
+    )
+    ap.add_argument(
+        "--c2",
+        action="store_true",
+        help="C2 calibration report: bin queries by KNOWN/THIN/UNKNOWN, "
+        "verify gold-hit-rate is monotonic; exit 1 if miscalibrated",
+    )
+    ap.add_argument(
+        "--ignition",
+        action="store_true",
+        help="ignition A/B on one shared hybrid pool per query: baseline "
+        "top-3 admit vs per-item bimodal admit (Platt >= C2 KNOWN cut); "
+        "reports admitted-are-gold precision + gold coverage; exit 1 on kill",
+    )
     a = ap.parse_args()
     if a.no_reranker:
         global _reranker
@@ -702,9 +801,13 @@ def main():
 
     if a.bootstrap:
         blimit = a.bootstrap_limit
-        print(f"{BOLD}Bootstrapping gold memory IDs (limit={blimit}, strategy={a.strategy or 'default'})...{RESET}")
+        print(
+            f"{BOLD}Bootstrapping gold memory IDs (limit={blimit}, strategy={a.strategy or 'default'})...{RESET}"
+        )
         gold_ids = bootstrap(blimit, a.strategy)
-        GOLD_IDS_PATH.write_text(json.dumps({"version": GOLDEN_VERSION, "ids": gold_ids}, indent=2) + "\n")
+        GOLD_IDS_PATH.write_text(
+            json.dumps({"version": GOLDEN_VERSION, "ids": gold_ids}, indent=2) + "\n"
+        )
         print(f"\n{GREEN}Saved: {GOLD_IDS_PATH}{RESET}")
         found = sum(1 for v in gold_ids.values() if v)
         print(f"{found}/{len(GOLDEN_SET)} queries have gold IDs.")
@@ -735,9 +838,15 @@ def main():
             rate = h3 / len(b) if b else None
             rates.append(rate)
             n = len(b)
-            print(f"  {tag:8} n={n:2d}  hit@3={h3}/{n} ({(h3/n if n else 0):.2f})  hit@10={h10}/{n}")
+            print(
+                f"  {tag:8} n={n:2d}  hit@3={h3}/{n} ({(h3 / n if n else 0):.2f})  hit@10={h10}/{n}"
+            )
             for r in b:
-                mark = GREEN + "+" + RESET if any(p < 3 for p in r["gold_positions"]) else RED + "-" + RESET
+                mark = (
+                    GREEN + "+" + RESET
+                    if any(p < 3 for p in r["gold_positions"])
+                    else RED + "-" + RESET
+                )
                 print(f"    {mark} maxrel={r['c2_maxrel']:.3f} {r['desc'][:40]}")
         probe_tags = []
         for q in C2_PROBES:
@@ -745,7 +854,9 @@ def main():
             tag = c2_tag(full.get("max_relevance", 0.0), len(full.get("results", [])))
             probe_tags.append(tag)
             color = GREEN if tag == "UNKNOWN" else RED
-            print(f"  probe {color}{tag:8}{RESET} maxrel={full.get('max_relevance', 0.0):.3f} {q[:44]!r}")
+            print(
+                f"  probe {color}{tag:8}{RESET} maxrel={full.get('max_relevance', 0.0):.3f} {q[:44]!r}"
+            )
         present = [r for r in rates if r is not None]
         monotonic = all(a_ >= b_ for a_, b_ in zip(present, present[1:]))
         probes_ok = all(t != "KNOWN" for t in probe_tags)
@@ -765,26 +876,49 @@ def main():
             gold = set(r["hyb_gold_positions"])
             base = list(range(min(3, len(r["hyb_platt"]))))
             adm, gap = ignition_admit(r["hyb_platt"])
-            b_adm += len(base); b_gold += len(gold & set(base))
-            t_adm += len(adm);  t_gold += len(gold & set(adm)); t_gap += len(gap)
-            b_hits += bool(gold & set(base)); t_hits += bool(gold & set(adm))
+            b_adm += len(base)
+            b_gold += len(gold & set(base))
+            t_adm += len(adm)
+            t_gold += len(gold & set(adm))
+            t_gap += len(gap)
+            b_hits += bool(gold & set(base))
+            t_hits += bool(gold & set(adm))
             if not adm:
                 no_ignite.append(r["desc"])
             if not a.quiet:
-                print(f"  base {len(gold & set(base))}/{len(base)}  ign {len(gold & set(adm))}/{len(adm)}"
-                      f" gap:{len(gap)}  maxrel={r['c2_maxrel']:.3f}  {r['desc'][:44]}")
+                print(
+                    f"  base {len(gold & set(base))}/{len(base)}  ign {len(gold & set(adm))}/{len(adm)}"
+                    f" gap:{len(gap)}  maxrel={r['c2_maxrel']:.3f}  {r['desc'][:44]}"
+                )
         n = len(records)
-        pool_ndcg = sum(ndcg(r["hyb_gold_positions"], max(len(r["gold_ids"]), len(r["hyb_gold_positions"]), 1), 10)
-                        for r in records) / n if n else 0.0
+        pool_ndcg = (
+            sum(
+                ndcg(
+                    r["hyb_gold_positions"],
+                    max(len(r["gold_ids"]), len(r["hyb_gold_positions"]), 1),
+                    10,
+                )
+                for r in records
+            )
+            / n
+            if n
+            else 0.0
+        )
         bp = b_gold / b_adm if b_adm else 0.0
         tp = t_gold / t_adm if t_adm else 0.0
         print(f"\n{BOLD}Ignition A/B (n={n}, shared hybrid pool, no-rerank){RESET}")
         print(f"  nDCG@10 (identical both arms): {pool_ndcg:.4f}")
-        print(f"  baseline top-3 : precision {b_gold}/{b_adm} ({bp:.3f})  coverage {b_hits}/{n} ({b_hits/n:.3f})")
-        print(f"  ignition       : precision {t_gold}/{t_adm} ({tp:.3f})  coverage {t_hits}/{n} ({t_hits/n:.3f})"
-              f"  dead-band items {t_gap}")
+        print(
+            f"  baseline top-3 : precision {b_gold}/{b_adm} ({bp:.3f})  coverage {b_hits}/{n} ({b_hits / n:.3f})"
+        )
+        print(
+            f"  ignition       : precision {t_gold}/{t_adm} ({tp:.3f})  coverage {t_hits}/{n} ({t_hits / n:.3f})"
+            f"  dead-band items {t_gap}"
+        )
         if no_ignite:
-            print(f"  no-ignition queries ({len(no_ignite)}): " + "; ".join(d[:32] for d in no_ignite))
+            print(
+                f"  no-ignition queries ({len(no_ignite)}): " + "; ".join(d[:32] for d in no_ignite)
+            )
         ok = tp > bp and t_hits >= b_hits
         verdict = GREEN + "PASS" + RESET if ok else RED + "KILL" + RESET
         print(f"\n{BOLD}{verdict}{RESET} precision_up={tp > bp} coverage_kept={t_hits >= b_hits}")
@@ -811,10 +945,12 @@ def main():
     # Canonical baseline config (frozen 2026-07-07): v6 golden / reranker on /
     # limit=10. The cross-encoder stalls at depth-20 (>9min), so limit=20 is NOT
     # a routine baseline. Never mix limits when comparing runs.
-    canonical = (not a.no_reranker and a.limit == 10)
+    canonical = not a.no_reranker and a.limit == 10
     if not canonical and not a.quiet:
-        print(f"WARNING: non-canonical config (baseline = v{GOLDEN_VERSION}/reranker/limit=10); "
-              f"this run: {'no-reranker' if a.no_reranker else 'reranker'}/limit={a.limit}")
+        print(
+            f"WARNING: non-canonical config (baseline = v{GOLDEN_VERSION}/reranker/limit=10); "
+            f"this run: {'no-reranker' if a.no_reranker else 'reranker'}/limit={a.limit}"
+        )
 
     report = {
         "ts": ts,
@@ -846,33 +982,55 @@ def main():
                 f"nDCG={r['ndcg']:.3f} gold_score={r.get('gold_max_score') or 'n/a'}"
             )
             subprocess.run(
-                ["chitta", "remember", "--content", gap_content,
-                 "--realm", "project:cc-soul", "--type", "wisdom",
-                 "--tags", "gap,abstain,grader", "--visibility", "1"],
-                capture_output=True, timeout=10,
+                [
+                    "chitta",
+                    "remember",
+                    "--content",
+                    gap_content,
+                    "--realm",
+                    "project:cc-soul",
+                    "--type",
+                    "wisdom",
+                    "--tags",
+                    "gap,abstain,grader",
+                    "--visibility",
+                    "1",
+                ],
+                capture_output=True,
+                timeout=10,
             )
 
     if not a.quiet:
         for r in records:
             if r["abstain"]:
                 reason = "epistemic" if r["epistemic_abstain"] else "band"
-                score_str = f"w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else "w=?"
+                score_str = (
+                    f"w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else "w=?"
+                )
                 pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
-                print(f"{YELLOW}[ABSTAIN/{reason}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}  {score_str}")
+                print(
+                    f"{YELLOW}[ABSTAIN/{reason}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}  {score_str}"
+                )
             else:
                 color = GREEN if r["pass"] else RED
                 mark = "PASS" if r["pass"] else "FAIL"
                 pos_str = str(r["gold_positions"]) if r["gold_positions"] else "not found"
                 no_gold = f"{YELLOW}(no gold IDs){RESET}" if not r["n_gold"] else ""
                 sig_tag = f"{DIM}[sig]{RESET}" if r.get("sig_fallback") else ""
-                score_tag = f"  w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else ""
-                print(f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}{score_tag} {no_gold}{sig_tag}")
+                score_tag = (
+                    f"  w={r['gold_max_score']:.2f}" if r["gold_max_score"] is not None else ""
+                )
+                print(
+                    f"{color}[{mark}]{RESET} {r['query']!r:45} nDCG={r['ndcg']:.3f}  pos={pos_str}{score_tag} {no_gold}{sig_tag}"
+                )
         verdict = GREEN if mean_ndcg >= a.min else RED
         print(f"\n{BOLD}{verdict}mean nDCG@{a.limit} = {mean_ndcg:.3f}{RESET}  (min={a.min})")
         if n_abstain:
             verdict2 = GREEN if mean_ndcg_active >= a.min else RED
-            print(f"  active (excl. {n_abstain} abstain): {BOLD}{verdict2}{mean_ndcg_active:.3f}{RESET}  "
-                  f"pass={n_pass} fail={n_fail} abstain={n_abstain}")
+            print(
+                f"  active (excl. {n_abstain} abstain): {BOLD}{verdict2}{mean_ndcg_active:.3f}{RESET}  "
+                f"pass={n_pass} fail={n_fail} abstain={n_abstain}"
+            )
         print(f"report: {RESULTS_PATH}")
 
     print(f"SCORE={mean_ndcg:.4f}")

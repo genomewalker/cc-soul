@@ -38,7 +38,7 @@ ToolResult FieldRpcHandler::tool_file_index_session(const json& params) {
         {{"session_id", session_id}, {"status", "ok"}});
 }
 
-ToolResult FieldRpcHandler::tool_file_index_all(const json& params) {
+ToolResult FieldRpcHandler::tool_file_index_all(const json&) {
     field_store_->emit_event("file_index", "all", "", "{}");
     return ToolResult::ok("File index all event emitted", {{"status", "ok"}});
 }

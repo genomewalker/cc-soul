@@ -18,6 +18,7 @@
 //   --toon              CLI mode: output TOON format (compact, shell-friendly)
 
 #include <chitta/socket_client.hpp>
+#include <chitta/tool_spec.hpp>
 #include <chitta/rpc/sandbox.hpp>  // append_line_atomic
 #include <unistd.h>  // getppid
 #include <fstream>
@@ -61,7 +62,6 @@ std::string escape_value(const std::string& s) {
     return result;
 }
 
-// Convert JSON value to TOON string representation
 std::string value_to_string(const nlohmann::json& v) {
     if (v.is_null()) return "";
     if (v.is_boolean()) return v.get<bool>() ? "true" : "false";
@@ -76,7 +76,6 @@ std::string value_to_string(const nlohmann::json& v) {
     return v.dump();
 }
 
-// Encode JSON to TOON format
 std::string encode(const nlohmann::json& j, int indent = 0) {
     std::string result;
     std::string prefix(indent, ' ');
@@ -153,19 +152,11 @@ std::string encode(const nlohmann::json& j, int indent = 0) {
 
 }  // namespace toon
 
-// Tool parameter specification
-struct ToolParam {
-    const char* name;
-    const char* description;
-    bool required;
-    const char* default_val;  // nullptr if no default
-};
-
-struct ToolSpec {
-    const char* name;
-    const char* description;
-    std::vector<ToolParam> params;
-};
+// Tool parameter spec types and the spec-driven coercion rules live in
+// chitta/tool_spec.hpp so tool_spec_test exercises the shipped code.
+using chitta::ToolParam;
+using chitta::ToolSpec;
+using chitta::coerce_bool_params;
 
 // Tool specifications - only includes tools implemented in daemon
 static const std::vector<ToolSpec> TOOL_SPECS = {
@@ -991,7 +982,6 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {}},
 };
 
-// Build set of known tools from specs
 static std::set<std::string> build_known_tools() {
     std::set<std::string> tools;
     for (const auto& spec : TOOL_SPECS) {
@@ -1002,7 +992,6 @@ static std::set<std::string> build_known_tools() {
 
 static const std::set<std::string> KNOWN_TOOLS = build_known_tools();
 
-// Find tool spec by name
 static const ToolSpec* find_tool_spec(const std::string& name) {
     for (const auto& spec : TOOL_SPECS) {
         if (spec.name == name) return &spec;
@@ -1010,7 +999,6 @@ static const ToolSpec* find_tool_spec(const std::string& name) {
     return nullptr;
 }
 
-// Print help for a specific tool
 static void print_tool_help(const std::string& tool) {
     const ToolSpec* spec = find_tool_spec(tool);
     if (!spec) {
@@ -1046,7 +1034,6 @@ static void print_tool_help(const std::string& tool) {
     std::cerr << "\n";
 }
 
-// Get program name from path (strip directory)
 static const char* prog_name(const char* path) {
     const char* last = path;
     for (const char* p = path; *p; ++p) {
@@ -1105,7 +1092,6 @@ void print_usage(const char* prog) {
               << "  --help              Show this help message\n";
 }
 
-// Output format enum
 enum class OutputFormat { Text, Json, Toon, TextOnly };
 
 // CLI mode: invoke tool directly
@@ -1210,6 +1196,7 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     // Validate required parameters
     const ToolSpec* spec = find_tool_spec(tool);
     if (spec) {
+        coerce_bool_params(*spec, args);
         std::vector<std::string> missing;
         for (const auto& p : spec->params) {
             if (p.required && !args.contains(p.name)) {
@@ -1263,15 +1250,6 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         args.erase("kind");
     }
 
-    // memory_outcome requires a JSON boolean, but the generic arg parser only
-    // types numerics — coerce "true"/"false" so `--success true` works.
-    if (tool == "memory_outcome" && args.contains("success") && args["success"].is_string()) {
-        const std::string& sv = args["success"].get_ref<const std::string&>();
-        if (sv == "true") args["success"] = true;
-        else if (sv == "false") args["success"] = false;
-    }
-
-    // Send tool call
     json tool_req = {
         {"jsonrpc", "2.0"},
         {"method", "tools/call"},
@@ -1288,7 +1266,6 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         return 1;
     }
 
-    // Parse and output result
     try {
         // DEBUG: Print raw response for troubleshooting
         if (std::getenv("CHITTA_DEBUG")) {
@@ -1403,7 +1380,6 @@ int run_thin_client(const std::string& socket_path) {
                 std::cout << *response << "\n";
                 std::cout.flush();
             } else {
-                // Return error to client
                 std::cout << R"({"jsonrpc":"2.0","error":{"code":-32603,"message":"Daemon connection lost"},"id":null})" << "\n";
                 std::cout.flush();
             }

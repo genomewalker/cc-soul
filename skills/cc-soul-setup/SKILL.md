@@ -1,6 +1,6 @@
 ---
 name: cc-soul-setup
-description: Build cc-soul from source (requires cmake, make, C++ compiler)
+description: Build chitta from source (requires cmake, make, a C++20 compiler)
 execution: inline
 ---
 

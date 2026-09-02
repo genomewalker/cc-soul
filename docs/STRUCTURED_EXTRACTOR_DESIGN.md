@@ -1,5 +1,11 @@
 # STRUCTURED_EXTRACTOR_DESIGN.md
 
+> **Design document, not a description of shipped behaviour. Status as of
+> 2026-09-02.** Distillation does now run natively inside the daemon rather than
+> through a hook-invoked script, which is the direction this design argued for.
+> Whether the in-hook regex scan it proposes retiring has actually been retired
+> has not been re-verified; treat the file references below as of their writing.
+
 ## Context
 
 `hooks/stop-hook.sh` currently performs regex-based learning extraction from the last assistant message: it scans for `[SOLUTION] [GOTCHA] [PREFERENCE] [DECISION] [FAILURE] [PATTERN] [LEARN] [CORRECTION] [EVENT]` (see `hooks/stop-hook.sh:173`) plus `[USED:id]` feedback (`hooks/stop-hook.sh:187`, regex at `:202`) and `[TRIPLET]` (`:265`). The comment header at `:8` enumerates the contract. This design replaces the typed-marker extraction path (Tier-1 learning write) with a structured LLM-driven extractor. The `[USED:id]` strengthening path and `[TRIPLET]` connect path are NOT affected (they carry IDs, not prose).

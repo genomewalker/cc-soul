@@ -66,39 +66,6 @@ realm_detect_once() {
     REALM="$_REALM_CACHE"
 }
 
-safe_queue_write() {
-    local tool="$1"
-    local args="$2"
-    queue_write "$tool" "$args" && return 0
-    sleep 0.05
-    queue_write "$tool" "$args"
-}
-
-record_ingest_metric() {
-    local success="$1" # true|false
-    [[ -f "$METRICS_FILE" ]] || printf '%s\n' '{"turns_total":0,"turns_ingested":0}' > "$METRICS_FILE"
-    if [[ "$success" == "true" ]]; then
-        jq '.turns_total += 1 | .turns_ingested += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
-    else
-        jq '.turns_total += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
-    fi
-    if [[ -s "${METRICS_FILE}.tmp" ]]; then
-        mv "${METRICS_FILE}.tmp" "$METRICS_FILE"
-    else
-        rm -f "${METRICS_FILE}.tmp"
-    fi
-
-    local total ingested pct
-    total=$(jq -r '.turns_total // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
-    ingested=$(jq -r '.turns_ingested // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
-    if [[ "$total" -gt 0 ]]; then
-        pct=$(( ingested * 100 / total ))
-        if [[ "$total" -ge 20 && "$pct" -lt 95 ]]; then
-            printf '%s ingest_rate=%s%% turns=%s ingested=%s\n' "$(date -Is)" "$pct" "$total" "$ingested" >> "$ALERT_FILE"
-        fi
-    fi
-}
-
 # Parse input - Claude Code sends JSON with session_id and prompt (gracefully handle malformed input)
 INPUT=$(cat)
 # Try to extract session_id from JSON first (most reliable source)
@@ -750,7 +717,7 @@ _drop_cap=$(( _n - ${#_sel[@]} ))
 for i in "${_sel[@]}"; do
     reason="${_cand_reason[$i]}"; line="${_cand_line[$i]}"
     # Truncate and add, tagged with admission reason
-    OUTPUT="$OUTPUT[$reason]${line:0:150}
+    OUTPUT="${OUTPUT}[$reason]${line:0:150}
 "
     ((++COUNT))
     case "$reason" in
@@ -901,6 +868,15 @@ fi
 
 # v6.1: Predicate re-falsification — fire background predicate_run for recalled
 # memories (confidence decay handled by store.rs). Surface cached STALE warnings.
+#
+# ceiling: this block is unreachable. `_sus_ids` is built entirely inside the
+# `( ... )` subshell above, so it is always unset here and the guard is always
+# false — no predicate_run has ever fired from the prompt hook. Reported by
+# ShellCheck as SC2030/SC2031 on 2026-09-02. Left as-is deliberately: enabling
+# it adds up to 10 daemon round-trips to every prompt, which is a latency
+# change to measure on its own, not to smuggle into a cleanup.
+# upgrade: hoist the accumulation out of the subshell (or have it write
+# `$MIND_PATH/.sus_ids_$SESSION_ID`), then re-benchmark the prompt path.
 if [[ -n "${_sus_ids:-}" && "${_sus_ids:-}" != "[]" ]]; then
     _pred_mids=$(echo "$_sus_ids" | tr -d '[]' | tr ',' '\n' | grep -E '^[0-9]+$' | head -10)
     _stale_warn=""
@@ -1289,7 +1265,7 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
     NOTIFY_FILE="${MIND_PATH}/.msg_notify/${MSG_SESSION_ID}"
     if [[ -f "$NOTIFY_FILE" && -s "$NOTIFY_FILE" ]]; then
         FAST_MSGS=$(cat "$NOTIFY_FILE" 2>/dev/null || true)
-        > "$NOTIFY_FILE"  # Clear after reading
+        : > "$NOTIFY_FILE"  # Clear after reading
         if [[ -n "$FAST_MSGS" ]]; then
             CROSS_SESSION_MSGS="${FAST_MSGS}"
         fi

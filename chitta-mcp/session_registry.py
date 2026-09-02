@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -21,8 +22,10 @@ from task_ledger import (  # noqa: E402
     session_bind,
     session_close,
     session_get,
-    session_list as ledger_session_list,
     session_touch,
+)
+from task_ledger import (
+    session_list as ledger_session_list,
 )
 
 CHITTA_BIN = os.environ.get("CHITTA_BIN", str(Path.home() / ".claude" / "bin" / "chitta"))
@@ -38,8 +41,9 @@ def _read_json_stdin() -> dict[str, Any]:
         return {}
 
 
-def _run_chitta(args: list[str], cwd: str | None = None,
-                timeout_seconds: float = 2.0) -> dict[str, Any] | None:
+def _run_chitta(
+    args: list[str], cwd: str | None = None, timeout_seconds: float = 2.0
+) -> dict[str, Any] | None:
     try:
         proc = subprocess.run(
             [CHITTA_BIN, *args, "--json"],
@@ -75,8 +79,7 @@ def _codex_candidates(session_id: str) -> list[Path]:
     return list(root.rglob(f"*{session_id}.jsonl")) if root.is_dir() else []
 
 
-def resolve_transcript_path(session_id: str, client: str,
-                            supplied: str = "") -> str:
+def resolve_transcript_path(session_id: str, client: str, supplied: str = "") -> str:
     if supplied and Path(supplied).is_file():
         return str(Path(supplied).resolve())
     if client == "claude":
@@ -99,23 +102,45 @@ def _cwd_from_codex_transcript(path: str) -> str:
     return ""
 
 
-def _ancestor_client_pid(client: str) -> int:
-    """Find the long-lived Claude/Codex ancestor instead of the hook subprocess."""
+def iter_ancestor_pids(max_depth: int = 32) -> Iterator[int]:
+    """Yield this process's ancestor PIDs, nearest first, starting at the parent.
+
+    Reads the fourth field of /proc/<pid>/stat, skipping past the comm field —
+    a process name may itself contain spaces or parentheses, so the parse starts
+    after the LAST ')'. Stops at init, at a cycle, at max_depth, or as soon as
+    /proc stops answering.
+    """
+    seen: set[int] = set()
     pid = os.getppid()
-    wanted = "claude" if client == "claude" else "codex"
-    for _ in range(32):
-        if pid <= 1:
-            break
+    for _ in range(max_depth):
+        if pid <= 1 or pid in seen:
+            return
+        seen.add(pid)
+        yield pid
         try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(
-                "utf-8", "replace"
-            ).lower()
-            if wanted in cmdline and "session_registry.py" not in cmdline:
-                return pid
             stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
             pid = int(stat[stat.rfind(")") + 2 :].split()[1])
         except (OSError, ValueError, IndexError):
+            return
+
+
+def _ancestor_client_pid(client: str) -> int:
+    """Find the long-lived Claude/Codex ancestor instead of the hook subprocess."""
+    wanted = "claude" if client == "claude" else "codex"
+    for pid in iter_ancestor_pids():
+        try:
+            cmdline = (
+                Path(f"/proc/{pid}/cmdline")
+                .read_bytes()
+                .replace(b"\0", b" ")
+                .decode("utf-8", "replace")
+                .lower()
+            )
+        except OSError:
+            # Process exited mid-walk; the chain above it is no longer useful.
             break
+        if wanted in cmdline and "session_registry.py" not in cmdline:
+            return pid
     return os.getppid()
 
 
@@ -173,11 +198,17 @@ def register(input_data: dict[str, Any], client: str) -> dict[str, Any]:
         "metadata": metadata,
     }
     args = [
-        "session_register", "--session_id", session_id,
-        "--realm", realm,
-        "--pid", str(pid),
-        "--project_dir", project_dir,
-        "--metadata", json.dumps(metadata, separators=(",", ":")),
+        "session_register",
+        "--session_id",
+        session_id,
+        "--realm",
+        realm,
+        "--pid",
+        str(pid),
+        "--project_dir",
+        project_dir,
+        "--metadata",
+        json.dumps(metadata, separators=(",", ":")),
     ]
     if transcript_path:
         args.extend(["--transcript_path", transcript_path])
@@ -186,16 +217,27 @@ def register(input_data: dict[str, Any], client: str) -> dict[str, Any]:
     transcript_result = None
     transcript_queued = False
     if transcript_path:
-        transcript_result = _run_chitta([
-            "transcript_register", "--session_id", session_id,
-            "--transcript_path", transcript_path, "--realm", realm,
-        ], cwd=project_dir)
+        transcript_result = _run_chitta(
+            [
+                "transcript_register",
+                "--session_id",
+                session_id,
+                "--transcript_path",
+                transcript_path,
+                "--realm",
+                realm,
+            ],
+            cwd=project_dir,
+        )
         if transcript_result is None:
-            transcript_queued = _queue_tool("transcript_register", {
-                "session_id": session_id,
-                "transcript_path": transcript_path,
-                "realm": realm,
-            })
+            transcript_queued = _queue_tool(
+                "transcript_register",
+                {
+                    "session_id": session_id,
+                    "transcript_path": transcript_path,
+                    "realm": realm,
+                },
+            )
     session_bind(
         session_id=session_id,
         thread_id=thread_id or None,
@@ -207,9 +249,9 @@ def register(input_data: dict[str, Any], client: str) -> dict[str, Any]:
     lease = lease_claim(thread_id, session_id) if thread_id else None
     return {
         "registered": daemon_result is not None or daemon_queued,
-        "registration_mode": "direct" if daemon_result is not None else (
-            "queued" if daemon_queued else "failed"
-        ),
+        "registration_mode": "direct"
+        if daemon_result is not None
+        else ("queued" if daemon_queued else "failed"),
         "session_id": session_id,
         "client": client,
         "model": model,
@@ -220,9 +262,9 @@ def register(input_data: dict[str, Any], client: str) -> dict[str, Any]:
         "thread_id": thread_id,
         "lease": lease,
         "transcript_registered": transcript_result is not None or transcript_queued,
-        "transcript_registration_mode": "direct" if transcript_result is not None else (
-            "queued" if transcript_queued else "failed"
-        ),
+        "transcript_registration_mode": "direct"
+        if transcript_result is not None
+        else ("queued" if transcript_queued else "failed"),
     }
 
 
@@ -266,13 +308,20 @@ def heartbeat(input_data: dict[str, Any], queued: bool = False) -> dict[str, Any
     if queued:
         heartbeat_ok = _queue_heartbeat(session_id, metadata)
     else:
-        heartbeat_ok = _run_chitta([
-            "session_heartbeat", "--session_id", session_id,
-            "--metadata", json.dumps(metadata, separators=(",", ":")),
-        ]) is not None
+        heartbeat_ok = (
+            _run_chitta(
+                [
+                    "session_heartbeat",
+                    "--session_id",
+                    session_id,
+                    "--metadata",
+                    json.dumps(metadata, separators=(",", ":")),
+                ]
+            )
+            is not None
+        )
     session_touch(session_id)
-    return {"heartbeat": heartbeat_ok, "queued": queued,
-            "session_id": session_id, **metadata}
+    return {"heartbeat": heartbeat_ok, "queued": queued, "session_id": session_id, **metadata}
 
 
 def close(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -281,7 +330,8 @@ def close(input_data: dict[str, Any]) -> dict[str, Any]:
         return {"closed": False, "reason": "missing_session_id"}
     result = _run_chitta(["session_deregister", "--session_id", session_id])
     queued = result is None and _queue_tool(
-        "session_deregister", {"session_id": session_id},
+        "session_deregister",
+        {"session_id": session_id},
     )
     session_close(session_id, str(input_data.get("status") or "ended"))
     return {

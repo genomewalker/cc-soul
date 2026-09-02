@@ -97,6 +97,136 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
 
-      - name: Check shell scripts
+      # Parse check first: a syntax error makes every later result meaningless.
+      - name: Parse all shell scripts
         run: |
-          shellcheck scripts/*.sh setup.sh || true
+          rc=0
+          while IFS= read -r f; do
+            bash -n "$f" || rc=1
+          done < <(git ls-files '*.sh')
+          exit $rc
+
+      # Config lives in .shellcheckrc (severity floor and the two justified
+      # excludes). No `|| true` — this gate is green and must stay green.
+      - name: Check shell scripts
+        run: shellcheck -x --severity=warning hooks/*.sh scripts/*.sh
+
+  test-hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Run hook tests
+        run: |
+          rc=0
+          for t in hooks/tests/test_*.sh; do
+            echo "::group::$t"
+            bash "$t" || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run hook python tests
+        run: python3 -m unittest discover -s hooks/tests -p 'test_*.py' -v
+
+      - name: Run chitta-mcp tests
+        working-directory: chitta-mcp
+        run: python3 -m unittest discover tests -v
+
+  lint-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Pinned: an unpinned linter turns an upstream release into a red build
+      # on an unrelated PR. Bump deliberately, same as the shellcheck config.
+      - name: Install ruff
+        run: pip install 'ruff==0.14.10'
+
+      # Config lives in ruff.toml at the repo root. Scope is the Python that
+      # ships with the plugin; scripts/ and benchmarks/ fixtures are excluded
+      # there. No `|| true` — this gate is green and must stay green.
+      - name: Lint
+        run: ruff check chitta-mcp hooks benchmarks/smriti
+
+      - name: Check formatting
+        run: ruff format --check chitta-mcp hooks benchmarks/smriti
+
+      # Catches syntax errors in modules no test imports.
+      - name: Byte-compile
+        run: python3 -m compileall -q chitta-mcp hooks benchmarks/smriti
+
+      # The MCP SDK is not installed in test-hooks, so the composite-handler
+      # snapshot skips there. Install it here so the guard actually runs.
+      - name: Install MCP SDK
+        run: pip install 'mcp>=1.0.0'
+
+      - name: Composite handler-map snapshot
+        working-directory: chitta-mcp
+        run: python3 -m unittest tests.test_recall_gateway -v
+
+      # The hooks and the standalone chitta-mcp modules run under
+      # `#!/usr/bin/env python3`, which on the deployment hosts is 3.9. That is
+      # the real floor, so it gets a real interpreter here.
+      - name: Set up the 3.9 deployment floor
+        id: py39
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      # compileall is NOT sufficient: `dict | None` in an annotation parses on
+      # 3.9 and only raises TypeError when the module is imported. Missing
+      # third-party deps are expected here and are reported, not failed on;
+      # a SyntaxError or TypeError is a genuine version regression.
+      - name: Import smoke test on the 3.9 floor
+        run: |
+          "${{ steps.py39.outputs.python-path }}" - <<'SMOKE'
+          import importlib.util, pathlib, sys
+
+          sys.path.insert(0, "chitta-mcp")
+          targets = [p for p in sorted(pathlib.Path("chitta-mcp").rglob("*.py"))
+                     if "__pycache__" not in str(p) and p.name != "tools_static.py"]
+          targets += sorted(pathlib.Path("hooks").glob("*.py"))
+
+          failures, skipped = [], []
+          for path in targets:
+              name = "smoke_" + path.stem.replace("-", "_")
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              try:
+                  spec.loader.exec_module(module)
+              except SystemExit:
+                  pass
+              except (SyntaxError, TypeError) as exc:
+                  failures.append("%s: %s: %s" % (path, type(exc).__name__, exc))
+              except BaseException as exc:
+                  skipped.append("%s (%s)" % (path, type(exc).__name__))
+
+          try:
+              import soul_repl  # noqa: F401  — package import, not reachable by file path
+          except (SyntaxError, TypeError) as exc:
+              failures.append("soul_repl: %s: %s" % (type(exc).__name__, exc))
+          except BaseException as exc:
+              skipped.append("soul_repl (%s)" % type(exc).__name__)
+
+          print("checked %d modules on %s" % (len(targets), sys.version.split()[0]))
+          for s in skipped:
+              print("  skipped (missing dep or import-time side effect): " + s)
+          if failures:
+              print("PYTHON-VERSION FAILURES (3.10+ syntax in code that runs on 3.9):")
+              for f in failures:
+                  print("  " + f)
+              sys.exit(1)
+          print("all modules import on the 3.9 floor")
+          SMOKE

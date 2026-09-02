@@ -804,7 +804,7 @@ ToolResult FieldRpcHandler::tool_theme_recall(const json& params) {
         {{"results", hits_to_results_json(hits)}});
 }
 
-ToolResult FieldRpcHandler::tool_theme_stats(const json& params) {
+ToolResult FieldRpcHandler::tool_theme_stats(const json&) {
     auto hits = field_store_->recall_by_kind("theme", 1000);
     return ToolResult::ok("Theme stats", {{"total_themes", hits.size()}});
 }
@@ -1143,9 +1143,7 @@ ToolResult FieldRpcHandler::tool_spectral_drift(const json&) {
 
 ToolResult FieldRpcHandler::tool_compact_wal(const json&) {
     if (!field_store_) return ToolResult::error("field store unavailable");
-    // cf_compact_wal saves full snapshot then deletes covered WAL segments
-    extern int64_t cf_compact_wal(void*);
-    // Use via FieldStore method
+    // Saves a full snapshot, then deletes the WAL segments it covers.
     auto raw = field_store_->compact_wal();
     if (raw < 0) return ToolResult::error("compaction failed");
     std::string msg = "WAL compacted: snapshot saved, " + std::to_string(raw) + " segment(s) deleted";

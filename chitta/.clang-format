@@ -1,0 +1,45 @@
+# Describes the style the tree already has — 4-space indent, 100 columns,
+# attached braces, short single-statement ifs kept on one line. Adopted as a
+# format-what-you-touch tool, NOT a mass reformat: reformatting the whole tree
+# would bury every future diff and destroy `git blame` on the post-mortem
+# comments this codebase relies on.
+Language: Cpp
+BasedOnStyle: LLVM
+
+ColumnLimit: 100
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+UseTab: Never
+
+# `if (x) return;` and `void f() {}` are pervasive here and stay.
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortFunctionsOnASingleLine: All
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+
+# The tree aligns runs of trailing `//` notes and of `=` in spec/const tables.
+AlignTrailingComments: true
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: false
+AlignAfterOpenBracket: Align
+
+BreakBeforeBraces: Attach
+PointerAlignment: Left
+DerivePointerAlignment: false
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+# Include blocks are hand-ordered (project headers deliberately follow the
+# FFI/system ones in places); leave them where the author put them.
+SortIncludes: Never
+ReflowComments: false
+
+# NEVER run clang-format over include/chitta/rpc/handlers/*.hpp. Those are not
+# standalone headers — each is #included partway INTO the FieldRpcHandler class
+# body, so the formatter sees unbalanced braces, treats the file as top-level,
+# and re-indents every line. Measured 2026-09-02: it rewrites ~89% of
+# field_memory_recall.hpp.

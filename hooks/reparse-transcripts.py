@@ -8,20 +8,22 @@ from pathlib import Path
 
 QUEUE_FILE = "/tmp/chitta-queue.jsonl"
 
+
 def parse_transcript(filepath: Path) -> tuple[int, int]:
     """Parse a single transcript file, return (user_count, assistant_count)."""
     session_id = filepath.stem
 
     # Validate UUID format
     import re
-    if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id):
+
+    if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", session_id):
         return 0, 0
 
     user_count = 0
     assistant_count = 0
     turn_index = 0
 
-    with open(filepath) as f, open(QUEUE_FILE, 'a') as queue:
+    with open(filepath) as f, open(QUEUE_FILE, "a") as queue:
         for line in f:
             if not line.strip():
                 continue
@@ -31,13 +33,13 @@ def parse_transcript(filepath: Path) -> tuple[int, int]:
             except json.JSONDecodeError:
                 continue
 
-            msg_type = data.get('type')
-            if msg_type not in ('user', 'assistant'):
+            msg_type = data.get("type")
+            if msg_type not in ("user", "assistant"):
                 continue
 
             turn_index += 1
-            message = data.get('message', {})
-            content_raw = message.get('content', '')
+            message = data.get("message", {})
+            content_raw = message.get("content", "")
 
             # Extract text content
             if isinstance(content_raw, str):
@@ -45,19 +47,19 @@ def parse_transcript(filepath: Path) -> tuple[int, int]:
             elif isinstance(content_raw, list):
                 texts = []
                 for item in content_raw:
-                    if isinstance(item, dict) and item.get('type') == 'text':
-                        texts.append(item.get('text', ''))
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        texts.append(item.get("text", ""))
                     elif isinstance(item, str):
                         texts.append(item)
-                content = '\n'.join(texts)
+                content = "\n".join(texts)
             else:
-                content = ''
+                content = ""
 
             # Skip empty
             if len(content) < 3:
                 continue
 
-            if msg_type == 'user':
+            if msg_type == "user":
                 user_count += 1
             else:
                 assistant_count += 1
@@ -69,10 +71,10 @@ def parse_transcript(filepath: Path) -> tuple[int, int]:
                     "session_id": session_id,
                     "role": msg_type,
                     "content": content,
-                    "turn_index": turn_index
-                }
+                    "turn_index": turn_index,
+                },
             }
-            queue.write(json.dumps(entry) + '\n')
+            queue.write(json.dumps(entry) + "\n")
 
     return user_count, assistant_count
 
@@ -82,9 +84,9 @@ def main():
     print(f"Queue file: {QUEUE_FILE}", file=sys.stderr)
 
     # Clear queue
-    open(QUEUE_FILE, 'w').close()
+    open(QUEUE_FILE, "w").close()
 
-    projects_dir = Path.home() / '.claude' / 'projects'
+    projects_dir = Path.home() / ".claude" / "projects"
     if not projects_dir.exists():
         print("No projects directory found", file=sys.stderr)
         return
@@ -97,10 +99,13 @@ def main():
         if not project_dir.is_dir():
             continue
 
-        for jsonl_file in project_dir.glob('*.jsonl'):
+        for jsonl_file in project_dir.glob("*.jsonl"):
             user_count, assistant_count = parse_transcript(jsonl_file)
             if user_count > 0 or assistant_count > 0:
-                print(f"  {jsonl_file.stem}: {user_count} user + {assistant_count} assistant", file=sys.stderr)
+                print(
+                    f"  {jsonl_file.stem}: {user_count} user + {assistant_count} assistant",
+                    file=sys.stderr,
+                )
                 total_files += 1
                 total_user += user_count
                 total_assistant += assistant_count
@@ -114,5 +119,5 @@ def main():
     print("\nDaemon will process queue automatically.", file=sys.stderr)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

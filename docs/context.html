@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Context Management — cc-soul</title>
-<meta name="description" content="Memory-aware context management in cc-soul. How chitta scores conversation turns against what it already knows — dropping safely-learned content, preserving novel signal.">
+<title>Context Management — chitta</title>
+<meta name="description" content="Memory-aware context management in chitta. How chitta scores conversation turns against what it already knows — dropping safely-learned content, preserving novel signal.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Context Management — cc-soul">
+<meta property="og:title" content="Context Management — chitta">
 <meta property="og:description" content="Memory-aware context compaction: drop what the soul already knows, keep what's novel.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Context Management — cc-soul">
+<meta name="twitter:title" content="Context Management — chitta">
 <meta name="twitter:description" content="Memory-aware context compaction: drop what the soul already knows, keep what's novel.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -179,15 +179,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html" class="active">Context</a></li>
@@ -195,9 +196,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -208,6 +210,7 @@
     <div class="page-header-badge reveal">Context Management</div>
     <h1 class="reveal reveal-delay-1">The soul knows what it already knows.</h1>
     <p class="page-header-sub reveal reveal-delay-2">Generic compaction drops tokens. Chitta drops turns whose knowledge is already in memory — keeping what&rsquo;s novel, releasing what&rsquo;s learned.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -351,7 +354,7 @@
             <tr><td>messages</td><td>array</td><td>yes</td><td>Conversation turns <code>[{role, content}]</code> — OpenAI/Claude format</td></tr>
             <tr><td>query</td><td>string</td><td>no</td><td>Upcoming task hint — biases semantic scoring toward what&rsquo;s needed next</td></tr>
             <tr><td>target_ratio</td><td>float</td><td>no</td><td>Fraction of tokens to <strong>keep</strong> (default: 0.4, range: 0.05–1.0)</td></tr>
-            <tr><td>distill_novel</td><td>boolean</td><td>no</td><td>Reserved — distill novel drops into memories before removing (coming soon)</td></tr>
+            <tr><td>distill_novel</td><td>boolean</td><td>no</td><td>Distil messages that are about to be dropped and whose content is not already covered by memory, into soul memories first. The pass is implemented in <code>compact.cpp</code> and needs an embedder; the published schema still labels the parameter reserved, so treat it as unsupported until that label is removed</td></tr>
           </tbody>
         </table>
       </div>
@@ -439,10 +442,10 @@ echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name
 <footer class="footer">
   <div class="container">
     <div class="footer-inner">
-      <div class="footer-brand">cc<span>-</span>soul</div>
+      <div class="footer-brand">chitta</div>
       <p class="footer-tagline">persistent memory for Claude Code</p>
       <div class="footer-links">
-        <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
         <a href="getting-started.html">Get Started</a>
         <a href="tools.html">Tools</a>
         <a href="hooks.html">Hooks</a>

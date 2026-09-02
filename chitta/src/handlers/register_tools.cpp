@@ -6,11 +6,11 @@
 namespace chitta {
 
 void FieldRpcHandler::register_tools() {
-    // TODO(sandbox): extend CHITTA_SANDBOX guard (CONTRACTS.md §8) beyond
-    // `remember` to the remaining write-class RPCs: checkpoint, realm_add,
-    // learn_outcome, forget, connect, strengthen, weaken, observe,
-    // memory_edit (if/when added). See sandbox.hpp + tool_remember for the
-    // reference wiring.
+    // ceiling: CHITTA_SANDBOX (CONTRACTS.md §8) guards only `remember`, so a
+    // sandboxed caller can still mutate the store through the other write-class
+    // RPCs — checkpoint, realm_add, learn_outcome, forget, connect, strengthen,
+    // weaken, observe, memory_edit; upgrade: wire each through the same
+    // sandbox.hpp gate tool_remember uses. (2026-09-02)
     // ── Memory tools ────────────────────────────────────────────────────
     register_memory_core_tools();
     register_code_intel_tools();

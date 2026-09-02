@@ -50,9 +50,22 @@ def validate_against_schema(instance, schema, path="$"):
     a path on any violation; raises NotImplementedError on a schema keyword
     it doesn't know, so a schema change fails loudly instead of silently
     passing unchecked."""
-    known = {"$schema", "$id", "title", "description", "type", "required",
-             "properties", "additionalProperties", "pattern", "minLength",
-             "items", "minItems", "enum", "minimum"}
+    known = {
+        "$schema",
+        "$id",
+        "title",
+        "description",
+        "type",
+        "required",
+        "properties",
+        "additionalProperties",
+        "pattern",
+        "minLength",
+        "items",
+        "minItems",
+        "enum",
+        "minimum",
+    }
     unknown = set(schema) - known
     if unknown:
         raise NotImplementedError(f"{path}: unsupported schema keyword(s): {unknown}")
@@ -72,20 +85,28 @@ def validate_against_schema(instance, schema, path="$"):
     elif stype == "array":
         assert isinstance(instance, list), f"{path}: expected array, got {type(instance).__name__}"
         if "minItems" in schema:
-            assert len(instance) >= schema["minItems"], f"{path}: fewer than minItems={schema['minItems']}"
+            assert len(instance) >= schema["minItems"], (
+                f"{path}: fewer than minItems={schema['minItems']}"
+            )
         if "items" in schema:
             for i, item in enumerate(instance):
                 validate_against_schema(item, schema["items"], f"{path}[{i}]")
     elif stype == "string":
         assert isinstance(instance, str), f"{path}: expected string, got {type(instance).__name__}"
         if "minLength" in schema:
-            assert len(instance) >= schema["minLength"], f"{path}: shorter than minLength={schema['minLength']}"
+            assert len(instance) >= schema["minLength"], (
+                f"{path}: shorter than minLength={schema['minLength']}"
+            )
         if "pattern" in schema:
-            assert re.match(schema["pattern"], instance), f"{path}: {instance!r} doesn't match {schema['pattern']!r}"
+            assert re.match(schema["pattern"], instance), (
+                f"{path}: {instance!r} doesn't match {schema['pattern']!r}"
+            )
         if "enum" in schema:
             assert instance in schema["enum"], f"{path}: {instance!r} not in {schema['enum']}"
     elif stype == "integer":
-        assert isinstance(instance, int) and not isinstance(instance, bool), f"{path}: expected integer"
+        assert isinstance(instance, int) and not isinstance(instance, bool), (
+            f"{path}: expected integer"
+        )
         if "minimum" in schema:
             assert instance >= schema["minimum"], f"{path}: below minimum={schema['minimum']}"
     elif stype is None:
@@ -269,7 +290,9 @@ class TestTaskCorpus(unittest.TestCase):
     def test_every_task_has_a_solution_dir(self):
         for task_dir in self.task_dirs:
             with self.subTest(task=task_dir.name):
-                self.assertTrue((task_dir / "solution").is_dir(), f"{task_dir.name} has no solution/")
+                self.assertTrue(
+                    (task_dir / "solution").is_dir(), f"{task_dir.name} has no solution/"
+                )
 
     def test_every_task_has_a_hidden_dir(self):
         for task_dir in self.task_dirs:
@@ -286,7 +309,8 @@ class TestTaskCorpus(unittest.TestCase):
                 validate_against_schema(task, self.schema)
                 self.assertEqual(task["id"], task_dir.name)
                 self.assertNotIn(
-                    task["planted_memories"][0]["content"][:20].lower(), task["prompt"].lower(),
+                    task["planted_memories"][0]["content"][:20].lower(),
+                    task["prompt"].lower(),
                     f"{task_dir.name}: prompt appears to quote the planted memory verbatim",
                 )
 
@@ -313,7 +337,8 @@ class TestTaskCorpus(unittest.TestCase):
                     low = text.lower()
                     for term in terms:
                         self.assertNotIn(
-                            term, low,
+                            term,
+                            low,
                             f"{task_dir.name}: leaked term {term!r} found in visible {where}",
                         )
 
@@ -329,7 +354,8 @@ class TestTaskCorpus(unittest.TestCase):
                 for f in fixture_dir.rglob("test_*.py"):
                     text = f.read_text()
                     self.assertNotIn(
-                        "def test", text,
+                        "def test",
+                        text,
                         f"{task_dir.name}: visible {f.relative_to(task_dir)} defines a test "
                         f"-- move it to hidden/ instead",
                     )
@@ -346,20 +372,24 @@ class TestTaskCorpus(unittest.TestCase):
                 workdir = runner.materialize_fixture(task, task_dir)
                 try:
                     runner.apply_hidden_checks(task_dir, workdir)
-                    pre = subprocess.run(task["check_cmd"], shell=True, cwd=workdir,
-                                          capture_output=True, text=True)
+                    pre = subprocess.run(
+                        task["check_cmd"], shell=True, cwd=workdir, capture_output=True, text=True
+                    )
                     self.assertNotEqual(
-                        pre.returncode, 0,
+                        pre.returncode,
+                        0,
                         f"{task_dir.name}: check_cmd passed on the UNTOUCHED fixture -- "
                         f"broken invariant (README 'Threats to validity'). "
                         f"stdout={pre.stdout!r} stderr={pre.stderr!r}",
                     )
 
                     shutil.copytree(task_dir / "solution", workdir, dirs_exist_ok=True)
-                    post = subprocess.run(task["check_cmd"], shell=True, cwd=workdir,
-                                           capture_output=True, text=True)
+                    post = subprocess.run(
+                        task["check_cmd"], shell=True, cwd=workdir, capture_output=True, text=True
+                    )
                     self.assertEqual(
-                        post.returncode, 0,
+                        post.returncode,
+                        0,
                         f"{task_dir.name}: check_cmd still fails after applying solution/. "
                         f"stdout={post.stdout!r} stderr={post.stderr!r}",
                     )
@@ -379,7 +409,9 @@ class TestDryRun(unittest.TestCase):
             with redirect_stdout(buf):
                 out_path = runner.run_all(
                     tasks_dir=SMRITI_DIR / "tasks",
-                    task_ids=[p.name for p in sorted((SMRITI_DIR / "tasks").iterdir()) if p.is_dir()],
+                    task_ids=[
+                        p.name for p in sorted((SMRITI_DIR / "tasks").iterdir()) if p.is_dir()
+                    ],
                     conditions=["off", "on"],
                     agent=runner.ClaudeCodeAdapter(dry_run=True),
                     output_dir=output_dir,
@@ -402,8 +434,16 @@ class TestDryRun(unittest.TestCase):
 class TestRunnerRefusesSilentSingleTrial(unittest.TestCase):
     def test_cli_requires_explicit_trials(self):
         result = subprocess.run(
-            [sys.executable, str(SMRITI_DIR / "runner.py"), "--task", "example-001", "--agent", "echo"],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                str(SMRITI_DIR / "runner.py"),
+                "--task",
+                "example-001",
+                "--agent",
+                "echo",
+            ],
+            capture_output=True,
+            text=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--trials", result.stderr)
@@ -511,13 +551,13 @@ class TestMUI(unittest.TestCase):
     def test_score_pairs_by_matching_trial_and_reports_the_two_components(self):
         records = [
             self._rec("t1", "off", 0, False, 1000, None),
-            self._rec("t1", "on", 0, True, 800, True),      # sr_lift
+            self._rec("t1", "on", 0, True, 800, True),  # sr_lift
             self._rec("t1", "off", 1, True, 2000, None),
-            self._rec("t1", "on", 1, True, 900, True),       # cost (2000 >= 1.5*900)
+            self._rec("t1", "on", 1, True, 900, True),  # cost (2000 >= 1.5*900)
             self._rec("t2", "off", 0, False, 500, None),
-            self._rec("t2", "on", 0, True, 400, False),      # unconfirmed -> no credit
+            self._rec("t2", "on", 0, True, 400, False),  # unconfirmed -> no credit
             self._rec("t3", "off", 0, True, 500, None),
-            self._rec("t3", "on", 0, False, 400, True),      # on failed -> no credit
+            self._rec("t3", "on", 0, False, 400, True),  # on failed -> no credit
         ]
         report = scorer.score(records)
         headline = report["headline"]

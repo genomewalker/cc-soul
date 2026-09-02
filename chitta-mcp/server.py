@@ -12,76 +12,24 @@ Includes composite tools for token-efficient code intelligence:
 - smart_context: Task-aware context assembly
 """
 
-import os
-import json
-import socket
-from pathlib import Path
+from __future__ import annotations
+
 import asyncio
+import datetime
+import hashlib
 import itertools
+import json
 import logging
+import os
 import re
+import socket
+import subprocess
 import threading
-from typing import Optional, Dict, Any, List
+import time
 from concurrent.futures import ThreadPoolExecutor
-
-# Cross-encoder reranker — loaded once on first use
-_reranker = None
-_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-_RERANK_FETCH_MUL = 4
-_RERANK_MAX_LEN = int(os.environ.get("CHITTA_RERANK_MAX_LEN", "128"))
-# INT8 ONNX backend: rerank runs on onnxruntime CPU instead of torch when an
-# export dir (model_int8.onnx + tokenizer) is present. CHITTA_RERANK_ONNX_DIR
-# overrides; otherwise auto-detect ~/.claude/models/rerank-onnx. Falls back to
-# torch CrossEncoder if neither the dir nor onnxruntime is available.
-# Measured e2e (dev): L-6 INT8 @ 8 threads, max_len=128 → ~500ms median/recall,
-# multihop nDCG@20 0.688 (+0.146 vs 0.542 native), single_hop 0.852 (flat).
-def _resolve_onnx_dir():
-    d = os.environ.get("CHITTA_RERANK_ONNX_DIR", "")
-    if d:
-        return d
-    default = os.path.expanduser("~/.claude/models/rerank-onnx")
-    return default if os.path.isdir(default) else ""
-_RERANK_ONNX_DIR = _resolve_onnx_dir()
-
-class _OnnxReranker:
-    """onnxruntime-backed cross-encoder. Same .predict(pairs) contract as CrossEncoder."""
-    def __init__(self, model_dir):
-        import onnxruntime as ort
-        from transformers import AutoTokenizer
-        self._tok = AutoTokenizer.from_pretrained(model_dir)
-        so = ort.SessionOptions()
-        so.intra_op_num_threads = int(os.environ.get("CHITTA_RERANK_THREADS", "8"))
-        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        self._sess = ort.InferenceSession(
-            os.path.join(model_dir, "model_int8.onnx"), so,
-            providers=["CPUExecutionProvider"])
-        self._innames = {i.name for i in self._sess.get_inputs()}
-
-    def predict(self, pairs):
-        if not pairs:
-            return []
-        enc = self._tok([p[0] for p in pairs], [p[1] for p in pairs],
-                        padding=True, truncation=True,
-                        max_length=_RERANK_MAX_LEN, return_tensors="np")
-        feed = {k: v for k, v in enc.items() if k in self._innames}
-        return self._sess.run(None, feed)[0][:, 0]
-
-def _get_reranker():
-    global _reranker
-    if _reranker is not None:
-        return _reranker if _reranker is not False else None
-    try:
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            if _RERANK_ONNX_DIR and os.path.isdir(_RERANK_ONNX_DIR):
-                _reranker = _OnnxReranker(_RERANK_ONNX_DIR)
-            else:
-                from sentence_transformers import CrossEncoder
-                _reranker = CrossEncoder(_RERANKER_MODEL)
-    except Exception:
-        _reranker = False
-    return _reranker if _reranker is not False else None
+from http.client import HTTPException
+from pathlib import Path
+from typing import Any
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -93,12 +41,16 @@ logging.getLogger("mcp").setLevel(logging.ERROR)
 logger = logging.getLogger("chitta-mcp")
 logger.setLevel(logging.WARNING)
 
-from mcp.server import Server, InitializationOptions
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, ServerCapabilities, ToolsCapability
-
-from tools_static import TOOLS, COMPOSITE_TOOLS
-from mcp.types import Tool
+from mcp.server import InitializationOptions, Server  # noqa: E402
+from mcp.server.stdio import stdio_server  # noqa: E402
+from mcp.types import (  # noqa: E402
+    ServerCapabilities,
+    TextContent,
+    Tool,
+    ToolsCapability,
+)
+from recall_gateway import RERANK_FETCH_MUL, get_reranker, rrf_merge  # noqa: E402
+from tools_static import COMPOSITE_TOOLS, TOOLS  # noqa: E402
 
 # Tools to HIDE from tools/list (still callable, just not listed)
 # Goal: Expose only ~30 essential tools to save context tokens
@@ -109,35 +61,77 @@ from mcp.types import Tool
 
 INTERNAL_TOOLS = {
     # Maintenance
-    "cleanup", "cleanup_code_wisdom", "hygiene_run", "hygiene_stats",
-    "consolidation_scan", "consolidation_merge", "consolidation_auto",
-    "batch_forget", "sql_query", "migrate_vss", "reembed_memories",
-    "dedupe_symbols", "background_run_cycle", "background_schedule", "background_status",
+    "cleanup",
+    "cleanup_code_wisdom",
+    "hygiene_run",
+    "hygiene_stats",
+    "consolidation_scan",
+    "consolidation_merge",
+    "consolidation_auto",
+    "batch_forget",
+    "sql_query",
+    "migrate_vss",
+    "reembed_memories",
+    "dedupe_symbols",
+    "background_run_cycle",
+    "background_schedule",
+    "background_status",
     # Metacognition internals
-    "metacognition_corrections", "metacognition_outcomes", "metacognition_evaluate",
-    "distill_status", "enrichment_status", "epiplexity_check",
+    "metacognition_corrections",
+    "metacognition_outcomes",
+    "metacognition_evaluate",
+    "distill_status",
+    "enrichment_status",
+    "epiplexity_check",
     # Code intel internals
-    "clear_codebase", "clear_triplets", "describe_symbol", "extract_symbols",
-    "file_dependents", "file_imports", "resolve_callsites", "embed_symbols",
-    "restore_code_intel_confidence", "ssl_convert", "subconscious_stats",
+    "clear_codebase",
+    "clear_triplets",
+    "describe_symbol",
+    "extract_symbols",
+    "file_dependents",
+    "file_imports",
+    "resolve_callsites",
+    "embed_symbols",
+    "restore_code_intel_confidence",
+    "ssl_convert",
+    "subconscious_stats",
     # Suggestions
-    "suggestion_count", "suggestion_pending", "suggestion_resolve", "suggestion_track",
+    "suggestion_count",
+    "suggestion_pending",
+    "suggestion_resolve",
+    "suggestion_track",
     # Transcripts
-    "transcript_get", "transcript_list", "transcript_parse", "transcript_register",
-    "transcript_remove", "transcript_search", "transcript_update",
+    "transcript_get",
+    "transcript_list",
+    "transcript_parse",
+    "transcript_register",
+    "transcript_remove",
+    "transcript_search",
+    "transcript_update",
     # Import/export
-    "type_hierarchy", "version_check", "export_soul", "import_soul",
+    "type_hierarchy",
+    "version_check",
+    "export_soul",
+    "import_soul",
     # Research internals
-    "connect_batch", "research_cycle", "research_store", "research_topics",
+    "connect_batch",
+    "research_cycle",
+    "research_store",
+    "research_topics",
     # Write-gate
     "write_gate_stats",
     # Symbol event log
     "symbol_event_log",
     "mark_memory_invalidated",
     # Daemon internals
-    "cycle", "anticipation_gate_status", "anticipation_record_outcome",
-    "session_register", "session_heartbeat", "session_deregister",
-    "msg_ack", "msg_ack_all",
+    "cycle",
+    "anticipation_gate_status",
+    "anticipation_record_outcome",
+    "session_register",
+    "session_heartbeat",
+    "session_deregister",
+    "msg_ack",
+    "msg_ack_all",
     # SUS metrics (hook-facing, not Claude-facing)
     "log_exposure",
     # Feedback loop health diagnostics
@@ -150,138 +144,360 @@ INTERNAL_TOOLS = {
 
 ADVANCED_TOOLS = {
     # Memory manipulation
-    "strengthen", "weaken", "tag", "update", "get", "query_graph", "expand_memory",
+    "strengthen",
+    "weaken",
+    "tag",
+    "update",
+    "get",
+    "query_graph",
+    "expand_memory",
     # Realms
-    "realm_add", "realm_detect", "realm_get", "realm_list", "realm_remove", "realm_set", "realm_visibility",
+    "realm_add",
+    "realm_detect",
+    "realm_get",
+    "realm_list",
+    "realm_remove",
+    "realm_set",
+    "realm_visibility",
     # Goals
-    "goal_set", "goal_get", "goal_list", "goal_complete", "goal_progress",
+    "goal_set",
+    "goal_get",
+    "goal_list",
+    "goal_complete",
+    "goal_progress",
     # Habits
-    "habit_observe", "habit_match", "habit_list", "habit_strengthen", "habit_weaken",
+    "habit_observe",
+    "habit_match",
+    "habit_list",
+    "habit_strengthen",
+    "habit_weaken",
     # Anticipation
-    "anticipation_predict", "anticipation_observe", "anticipation_list", "anticipation_success", "anticipation_filter",
+    "anticipation_predict",
+    "anticipation_observe",
+    "anticipation_list",
+    "anticipation_success",
+    "anticipation_filter",
     # Calibration
-    "calibration_record", "calibration_score",
+    "calibration_record",
+    "calibration_score",
     # User profile
-    "profile_get", "profile_observe", "profile_update",
+    "profile_get",
+    "profile_observe",
+    "profile_update",
     # Curiosity
-    "curiosity_gaps", "curiosity_note_gap", "curiosity_resolve",
+    "curiosity_gaps",
+    "curiosity_note_gap",
+    "curiosity_resolve",
     # Narrative
-    "narrative_history", "narrative_log", "narrative_status",
+    "narrative_history",
+    "narrative_log",
+    "narrative_status",
     # Context Repository (Letta-inspired)
-    "memory_history", "memory_revert", "pin_memory", "unpin_memory", "list_pinned",
-    "memory_lock", "memory_unlock", "memory_lock_status",
-    "propose_change", "list_merge_queue", "resolve_merge",
+    "memory_history",
+    "memory_revert",
+    "pin_memory",
+    "unpin_memory",
+    "list_pinned",
+    "memory_lock",
+    "memory_unlock",
+    "memory_lock_status",
+    "propose_change",
+    "list_merge_queue",
+    "resolve_merge",
     # Ledger (session checkpoints)
-    "ledger_save", "ledger_get", "ledger_list", "ledger_load", "ledger_delete",
+    "ledger_save",
+    "ledger_get",
+    "ledger_list",
+    "ledger_load",
+    "ledger_delete",
     # Episodes
-    "create_episode", "episode_cluster_status", "get_turns",
+    "create_episode",
+    "episode_cluster_status",
+    "get_turns",
     # Themes
-    "theme_assign_orphans", "theme_get", "theme_list", "theme_maintain", "theme_recall", "theme_stats",
+    "theme_assign_orphans",
+    "theme_get",
+    "theme_list",
+    "theme_maintain",
+    "theme_recall",
+    "theme_stats",
     # Long tasks
-    "long_task_active", "long_task_complete", "long_task_evaluate", "long_task_event",
-    "long_task_get", "long_task_snapshot", "long_task_start", "long_task_update",
+    "long_task_active",
+    "long_task_complete",
+    "long_task_evaluate",
+    "long_task_event",
+    "long_task_get",
+    "long_task_snapshot",
+    "long_task_start",
+    "long_task_update",
     # Messaging
-    "msg_history", "msg_inbox", "msg_send", "msg_respond", "msg_ack", "msg_ack_all",
-    "session_list", "session_sync",
+    "msg_history",
+    "msg_inbox",
+    "msg_send",
+    "msg_respond",
+    "msg_ack",
+    "msg_ack_all",
+    "session_list",
+    "session_sync",
     # Explore tools (RLM-style)
-    "explore_expand", "explore_neighbors", "explore_peek", "explore_recall",
+    "explore_expand",
+    "explore_neighbors",
+    "explore_peek",
+    "explore_recall",
     # Claims/entities
-    "get_entities", "get_policies", "get_relationship_events", "query_claims",
+    "get_entities",
+    "get_policies",
+    "get_relationship_events",
+    "query_claims",
     # Learning — individual learn_* tools replaced by unified `learn` gateway
-    "learn_analysis", "learn_approach", "learn_codebase", "learn_correction",
-    "learn_insight", "learn_milestone", "learn_outcome", "learn_preference",
+    "learn_analysis",
+    "learn_approach",
+    "learn_codebase",
+    "learn_correction",
+    "learn_insight",
+    "learn_milestone",
+    "learn_outcome",
+    "learn_preference",
     # Research — individual research_* tools replaced by unified `research` gateway
-    "research_cycle", "research_store", "research_topics",
+    "research_cycle",
+    "research_store",
+    "research_topics",
     # Recall variants — replaced by unified `recall` with strategy param
-    "recall_by_priority", "recall_temporal", "recall_temporal_events", "hybrid_recall", "smart_recall",
+    "recall_by_priority",
+    "recall_temporal",
+    "recall_temporal_events",
+    "hybrid_recall",
+    "smart_recall",
     # Sadhana — individual sadhana_* tools replaced by unified `sadhana` gateway
-    "sadhana_checkpoint", "sadhana_list", "sadhana_pause", "sadhana_resume",
-    "sadhana_set_goal", "sadhana_set_interval", "sadhana_set_model",
-    "sadhana_start", "sadhana_status", "sadhana_stop",
+    "sadhana_checkpoint",
+    "sadhana_list",
+    "sadhana_pause",
+    "sadhana_resume",
+    "sadhana_set_goal",
+    "sadhana_set_interval",
+    "sadhana_set_model",
+    "sadhana_start",
+    "sadhana_status",
+    "sadhana_stop",
     # Triplets — individual tools replaced by unified `triplets` gateway
-    "connect_temporal", "query_triplets_temporal", "triplet_history",
+    "connect_temporal",
+    "query_triplets_temporal",
+    "triplet_history",
     # Memory edit — individual tools replaced by unified `memory_edit` gateway
-    "set_memory_type", "set_priority_tier",
+    "set_memory_type",
+    "set_priority_tier",
     # Maintenance — move to hidden
-    "rebuild_fts_index", "compact_wal", "health_check", "memory_type_stats", "expand_query",
-    "distill_set_model", "cooccurrence_graph", "find_near_duplicates", "labile_memories_top",
-    "consolidate_similar", "queue_status", "resonance_stats", "route_stats",
+    "rebuild_fts_index",
+    "compact_wal",
+    "health_check",
+    "memory_type_stats",
+    "expand_query",
+    "distill_set_model",
+    "cooccurrence_graph",
+    "find_near_duplicates",
+    "labile_memories_top",
+    "consolidate_similar",
+    "queue_status",
+    "resonance_stats",
+    "route_stats",
     # Dream management (start/wander/list/status stay accessible via dream skill)
-    "dream_start", "dream_wander", "dream_list", "dream_status", "dream_force_woke",
+    "dream_start",
+    "dream_wander",
+    "dream_list",
+    "dream_status",
+    "dream_force_woke",
     # Probe / calibration
-    "probe_calibrate", "probe_seed", "probe_status", "behavioral_probe",
+    "probe_calibrate",
+    "probe_seed",
+    "probe_status",
+    "behavioral_probe",
     # Sadhana (use sadhana gateway)
     "sadhana_set_max_turns",
     # Trajectory compaction (Latent Briefing)
     "trajectory_compact",
     # Misc advanced
-    "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
-    "full_resonate", "grow", "connect", "query",
+    "insight_global",
+    "insight_promote",
+    "list_aspects",
+    "list_by_aspect",
+    "full_resonate",
+    "grow",
+    "connect",
+    "query",
     # File Time Machine
-    "file_timeline", "file_at_time", "file_restore", "file_index_session",
+    "file_timeline",
+    "file_at_time",
+    "file_restore",
+    "file_index_session",
     # SUS metrics
     "get_sus_metrics",
     # Ingest, Wiki, Training export
-    "ingest_source", "wiki_export", "health_check_start", "export_training_pairs",
+    "ingest_source",
+    "wiki_export",
+    "health_check_start",
+    "export_training_pairs",
     # Skill registry
-    "skill_upload", "skill_read", "skill_list", "skill_search", "skill_deprecate",
+    "skill_upload",
+    "skill_read",
+    "skill_list",
+    "skill_search",
+    "skill_deprecate",
     # Agent registry
-    "agent_upsert", "agent_get", "agent_list", "agent_disable",
+    "agent_upsert",
+    "agent_get",
+    "agent_list",
+    "agent_disable",
     # Layer 1: Executable Constraints
-    "assert_fact", "retract_fact", "query_unify", "query_chain",
-    "explain_fact", "branch_create", "branch_resolve",
+    "assert_fact",
+    "retract_fact",
+    "query_unify",
+    "query_chain",
+    "explain_fact",
+    "branch_create",
+    "branch_resolve",
     # Layer 2: Trigger Tissue
-    "trigger_add", "trigger_list", "trigger_fire", "trigger_dismiss",
+    "trigger_add",
+    "trigger_list",
+    "trigger_fire",
+    "trigger_dismiss",
     # Layer 3: Predictive Memory
     "predict_needed",
     # Layer 4: Surprise Memory
-    "record_surprise", "query_surprises", "get_blind_spots", "surprise_stats",
+    "record_surprise",
+    "query_surprises",
+    "get_blind_spots",
+    "surprise_stats",
     # Layer 5: Epistemic Debt
-    "register_debt", "resolve_debt", "defer_debt", "query_debts",
-    "get_fragile_decisions", "debt_stats",
+    "register_debt",
+    "resolve_debt",
+    "defer_debt",
+    "query_debts",
+    "get_fragile_decisions",
+    "debt_stats",
     # Layer 6: Integration Kernel
-    "record_feedback", "get_source_weights", "update_source_weight",
+    "record_feedback",
+    "get_source_weights",
+    "update_source_weight",
     "integration_stats",
     # Autonomous Learning (Moves 1-6)
     "surprise_learning_stats",
-    "upsert_wisdom_candidate", "update_wisdom_lifecycle",
-    "query_wisdom_candidates", "wisdom_promotion_stats",
+    "upsert_wisdom_candidate",
+    "update_wisdom_lifecycle",
+    "query_wisdom_candidates",
+    "wisdom_promotion_stats",
     "attach_debt_evidence",
-    "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights",
+    "update_scorer_model",
+    "learned_scorer_stats",
+    "effective_scorer_weights",
     # Layer 7: Intervention Ledger
-    "start_intervention", "add_observation", "close_intervention",
-    "record_attribution", "query_interventions", "get_intervention",
-    "intervention_stats", "list_open_interventions",
+    "start_intervention",
+    "add_observation",
+    "close_intervention",
+    "record_attribution",
+    "query_interventions",
+    "get_intervention",
+    "intervention_stats",
+    "list_open_interventions",
     # Layer 8: Agent Protocol Memory
-    "register_task", "update_task", "add_delegation", "link_evidence",
-    "add_probe", "resolve_probe", "set_criterion",
-    "get_task", "query_tasks", "agent_protocol_stats",
+    "register_task",
+    "update_task",
+    "add_delegation",
+    "link_evidence",
+    "add_probe",
+    "resolve_probe",
+    "set_criterion",
+    "get_task",
+    "query_tasks",
+    "agent_protocol_stats",
     # Layer 9: Wisdom Homeostasis
-    "enroll_wisdom_lineage", "transition_wisdom_lineage", "close_rederive",
-    "query_wisdom_lineages", "get_wisdom_lineage", "wisdom_lineage_stats",
-    "tick_lineage_staleness", "lineage_expiry_check",
+    "enroll_wisdom_lineage",
+    "transition_wisdom_lineage",
+    "close_rederive",
+    "query_wisdom_lineages",
+    "get_wisdom_lineage",
+    "wisdom_lineage_stats",
+    "tick_lineage_staleness",
+    "lineage_expiry_check",
     # Contradiction detection (legacy query tools)
-    "why_active", "what_superseded", "show_conflicts",
+    "why_active",
+    "what_superseded",
+    "show_conflicts",
     # CEC: Event tape + CDAWG + Sequitur (Phase 1-6)
-    "log_event", "recall_last_action", "recall_failure_pattern", "recall_causal_antecedent",
-    "recall_hdcbind", "consolidation_pass", "recall_counterfactual", "refutation_stats",
-    "recall_motif_value", "executor_flush", "list_policies",
-    "recall_true_counterfactual", "hypothesis_probes", "turiya_status", "tape_stats",
-    "verbalize_rules", "queue_experiments", "fep_status", "routed_recall",
-    "witness_memory", "reconcile_pass", "harvest_scope", "seed_hdc_geometry",
+    "log_event",
+    "recall_last_action",
+    "recall_failure_pattern",
+    "recall_causal_antecedent",
+    "recall_hdcbind",
+    "consolidation_pass",
+    "recall_counterfactual",
+    "refutation_stats",
+    "recall_motif_value",
+    "executor_flush",
+    "list_policies",
+    "recall_true_counterfactual",
+    "hypothesis_probes",
+    "turiya_status",
+    "tape_stats",
+    "verbalize_rules",
+    "queue_experiments",
+    "fep_status",
+    "routed_recall",
+    "witness_memory",
+    "reconcile_pass",
+    "harvest_scope",
+    "seed_hdc_geometry",
     # Hint enricher
     "run_hint_enricher",
     # Interaction ledger (v6.0)
-    "ledger_append", "ledger_query", "ledger_compile", "ledger_contradictions",
+    "ledger_append",
+    "ledger_query",
+    "ledger_compile",
+    "ledger_contradictions",
     "ledger_health",
     # Falsifiable memories / predicate store (v6.1)
-    "predicate_attach", "predicate_run", "predicate_list",
+    "predicate_attach",
+    "predicate_run",
+    "predicate_list",
     # Span lane maintenance (span_query stays listed; these are backfill/diagnostics)
-    "span_backfill", "span_backfill_memories", "span_stats",
+    "span_backfill",
+    "span_backfill_memories",
+    "span_stats",
 }
 
 # Combined set of tools to hide from listing (but still callable)
 HIDDEN_TOOLS = INTERNAL_TOOLS | ADVANCED_TOOLS
+
+
+def inject_message_session(tool: str, args: dict) -> str | None:
+    """Stamp the calling session onto a messaging call, mutating `args` in place.
+
+    Returns an error string when the session cannot be resolved, otherwise None.
+    Fail closed rather than forwarding: the daemon would fall back to its own
+    get_session_id(), which reads chittad's environment and not the caller's, and
+    would silently store and read messages under session_id="".
+
+    Both entry points to the daemon — the `advanced` gateway and call_tool —
+    need this, so it lives in one place.
+    """
+    if tool not in MSG_TOOLS or args.get("session_id"):
+        return None
+    # use_cache=False forces a fresh PPID lookup, which is what makes this
+    # correct across a session resume.
+    sid = get_current_session_id(use_cache=False)
+    if not sid:
+        return (
+            "Error: could not determine this session's ID for messaging. "
+            "Pass session_id explicitly, or call session_register first."
+        )
+    args["session_id"] = sid
+    # msg_send names the same value sender_session_id.
+    if tool == "msg_send" and not args.get("sender_session_id"):
+        args["sender_session_id"] = sid
+        if not args.get("sender_realm"):
+            realm = get_current_realm()
+            if realm:
+                args["sender_realm"] = realm
+    return None
 
 
 def handle_advanced(arguments: dict) -> str:
@@ -308,26 +524,10 @@ def handle_advanced(arguments: dict) -> str:
             # Check if it's a valid daemon tool at all
             return f"Unknown tool: {tool}\nUse action='list' to see available hidden tools."
 
-        # Inject session_id for messaging tools if not already provided
-        if tool in MSG_TOOLS and not tool_args.get("session_id"):
-            sid = get_current_session_id(use_cache=False)
-            if not sid:
-                # Fail closed: never let this fall through to the daemon's own
-                # get_session_id() (reads chittad's env, not the caller's) — that
-                # silently stores/reads messages under session_id="".
-                return (
-                    "Error: could not determine this session's ID for messaging. "
-                    "Pass session_id explicitly, or call session_register first."
-                )
-            tool_args = dict(tool_args)
-            tool_args["session_id"] = sid
-            # msg_send uses sender_session_id instead of session_id
-            if tool == "msg_send" and not tool_args.get("sender_session_id"):
-                tool_args["sender_session_id"] = sid
-                if not tool_args.get("sender_realm"):
-                    realm = get_current_realm()
-                    if realm:
-                        tool_args["sender_realm"] = realm
+        tool_args = dict(tool_args)
+        error = inject_message_session(tool, tool_args)
+        if error:
+            return error
 
         # Call the hidden tool via daemon
         result = daemon_call(tool, tool_args)
@@ -354,7 +554,7 @@ def handle_advanced(arguments: dict) -> str:
 
         output += "Usage:\n"
         output += '  {"tool": "<name>", "arguments": {...}}\n'
-        output += '\nExample:\n'
+        output += "\nExample:\n"
         output += '  {"tool": "pin_memory", "arguments": {"id": 123, "reason": "hot context"}}\n'
         return output
 
@@ -400,7 +600,7 @@ def to_toon(obj: Any, indent: int = 0) -> str:
 
     if isinstance(obj, str):
         # Escape newlines and pipes for TOON rows
-        return obj.replace('\n', '\\n').replace('|', '\\|')
+        return obj.replace("\n", "\\n").replace("|", "\\|")
 
     if isinstance(obj, list):
         if not obj:
@@ -416,10 +616,10 @@ def to_toon(obj: Any, indent: int = 0) -> str:
                 for item in obj:
                     vals = []
                     for k in keys:
-                        v = item.get(k, '')
+                        v = item.get(k, "")
                         # Truncate long strings, escape newlines
-                        s = str(v) if v is not None else ''
-                        s = s.replace('\n', ' ').replace('|', '\\|')[:80]
+                        s = str(v) if v is not None else ""
+                        s = s.replace("\n", " ").replace("|", "\\|")[:80]
                         vals.append(s)
                     rows.append(" " + "|".join(vals))
                 return header + "\n" + "\n".join(rows)
@@ -483,7 +683,7 @@ class ChittaClient:
 
     def __init__(self, socket_path: str):
         self.socket_path = socket_path
-        self.sock: Optional[socket.socket] = None
+        self.sock: socket.socket | None = None
         # One socket shared by the 4-worker executor: the lock keeps two
         # threads from interleaving sendall/recv and reading each other's
         # responses; monotonic ids let us detect a desynced connection.
@@ -497,11 +697,15 @@ class ChittaClient:
             self.sock.connect(self.socket_path)
             self.sock.settimeout(30.0)
             return True
-        except Exception:
+        except OSError as exc:
+            # No daemon listening yet, stale socket file, or wrong permissions.
+            # ensure_daemon() treats False as "spawn or wait", so this is a
+            # normal startup state, not an error worth surfacing.
+            logger.debug("daemon socket connect failed (%s): %s", self.socket_path, exc)
             self.sock = None
             return False
 
-    def call(self, req: dict) -> Optional[str]:
+    def call(self, req: dict) -> str | None:
         """Send one JSON-RPC request and return the matching response line.
 
         Assigns a fresh monotonic id, serializes socket access, and verifies
@@ -535,14 +739,20 @@ class ChittaClient:
                 except (ValueError, AttributeError):
                     pass
                 return response
-            except Exception:
+            except (OSError, UnicodeDecodeError) as exc:
+                # Broken pipe, timeout, or an undecodable frame. Returning None
+                # is the caller's signal to drop the connection and retry once
+                # (see daemon_call), so do not raise through the lock.
+                logger.debug("daemon socket call failed: %s", exc)
                 return None
 
     def close(self):
         if self.sock:
             try:
                 self.sock.close()
-            except Exception:
+            except OSError:
+                # Already closed or reset by the daemon; the handle is being
+                # discarded either way.
                 pass
             self.sock = None
 
@@ -557,29 +767,43 @@ class ChittaHttpClient:
 
     def connect(self) -> bool:
         import urllib.request
+
         try:
             urllib.request.urlopen(
-                urllib.request.Request(self.base_url + "/",
+                urllib.request.Request(
+                    self.base_url + "/",
                     data=b'{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"health_check","arguments":{}}}',
-                    headers={"Content-Type": "application/json"}),
-                timeout=5)
+                    headers={"Content-Type": "application/json"},
+                ),
+                timeout=5,
+            )
             return True
-        except Exception:
+        except (OSError, HTTPException) as exc:
+            # Daemon not listening on the RPC port yet. ensure_daemon() falls
+            # through to its spawn-and-wait path on False.
+            logger.debug("daemon HTTP health probe failed (%s): %s", self.base_url, exc)
             return False
 
-    def call(self, req: dict) -> Optional[str]:
+    def call(self, req: dict) -> str | None:
         import urllib.request
+
         with self.lock:
             req_id = next(self._ids)
             req["id"] = req_id
             try:
                 r = urllib.request.urlopen(
-                    urllib.request.Request(self.base_url + "/",
+                    urllib.request.Request(
+                        self.base_url + "/",
                         data=json.dumps(req).encode(),
-                        headers={"Content-Type": "application/json"}),
-                    timeout=60)
+                        headers={"Content-Type": "application/json"},
+                    ),
+                    timeout=60,
+                )
                 return r.read().decode()
-            except Exception:
+            except (OSError, HTTPException, UnicodeDecodeError) as exc:
+                # Same contract as the Unix-socket client: None means "retry
+                # once with a fresh connection".
+                logger.debug("daemon HTTP call failed: %s", exc)
                 return None
 
     def close(self):
@@ -587,17 +811,21 @@ class ChittaHttpClient:
 
 
 # Global client and server
-client: Optional[ChittaClient] = None
+client: ChittaClient | None = None
 server = Server("chitta-mcp")
-current_session_id: Optional[str] = None  # Track current session for auto-defaults
-current_realm: Optional[str] = None  # Track current realm for auto-defaults
+current_session_id: str | None = None  # Track current session for auto-defaults
+current_realm: str | None = None  # Track current realm for auto-defaults
 
 # P0: Internal realm classification — prefixes that must land in soul:meta
 _INTERNAL_REALM_PREFIXES = (
-    "[thought]", "[impl]", "[thinking-block:", "[thinking.block:",
+    "[thought]",
+    "[impl]",
+    "[thinking-block:",
+    "[thinking.block:",
 )
 
-def _classify_internal_realm(content: str) -> Optional[str]:
+
+def _classify_internal_realm(content: str) -> str | None:
     """Return 'soul:meta' if content is an internal synthesis artifact, else None."""
     stripped = content.lstrip()
     for prefix in _INTERNAL_REALM_PREFIXES:
@@ -605,10 +833,9 @@ def _classify_internal_realm(content: str) -> Optional[str]:
             return "soul:meta"
     return None
 
+
 # P3: Hook idempotency dedup cache — (source_tool, content_hash) -> epoch_s
-import hashlib as _hashlib
-import time as _time
-_hook_dedup_cache: dict = {}
+_hook_dedup_cache: dict[tuple[str, str], float] = {}
 _HOOK_DEDUP_WINDOW_S = 60.0
 
 
@@ -620,8 +847,6 @@ def ensure_daemon() -> bool:
     Only ONE process should spawn the daemon - others wait.
     """
     global client
-    import time
-    import fcntl
 
     rpc_port = os.environ.get("CHITTA_RPC_PORT", "")
     if rpc_port:
@@ -660,14 +885,16 @@ def ensure_daemon() -> bool:
     lock_fd = None
     we_hold_lock = False
 
-    # Clean stale lock files (older than 60 seconds)
+    # Clean stale lock files (older than 60 seconds). Best-effort: a racing
+    # process may unlink the same path between the stat and the unlink, and an
+    # unwritable lock dir is not fatal — the O_EXCL create below decides.
     try:
         if os.path.exists(lock_path):
             lock_age = time.time() - os.path.getmtime(lock_path)
             if lock_age > 60:
                 os.unlink(lock_path)
-    except:
-        pass
+    except OSError as exc:
+        logger.debug("stale start-lock cleanup failed for %s: %s", lock_path, exc)
 
     try:
         # Try to create lock file atomically (O_EXCL fails if exists)
@@ -693,13 +920,13 @@ def ensure_daemon() -> bool:
             started = False
             unit = os.path.join(home, ".config", "systemd", "user", "chittad.service")
             if os.path.exists(unit):
-                started = (os.system("systemctl --user start chittad >/dev/null 2>&1") == 0)
+                started = os.system("systemctl --user start chittad >/dev/null 2>&1") == 0
             if not started:
                 chittad = os.path.join(home, ".claude", "bin", "chittad")
                 if os.path.exists(chittad):
                     # Fallback (no systemd unit): match the managed config; at minimum
                     # never enable hygiene/distill, and pin the store path + embedder.
-                    mind  = os.path.join(home, ".claude", "mind")
+                    mind = os.path.join(home, ".claude", "mind")
                     model = os.path.join(home, ".claude", "bin", "bge-large-en-v1.5.gguf")
                     flags = f"--path {mind} --no-autonomous --no-distill --no-hygiene --no-enrich"
                     if os.path.exists(model):
@@ -710,12 +937,13 @@ def ensure_daemon() -> bool:
                 if client.connect():
                     return True
         finally:
-            # Release lock
+            # Release lock. The unlink is best-effort: if it fails the file is
+            # left behind, and the stale-lock sweep above reclaims it after 60s.
             os.close(lock_fd)
             try:
                 os.unlink(lock_path)
-            except:
-                pass
+            except OSError as exc:
+                logger.debug("could not release start-lock %s: %s", lock_path, exc)
 
     return False
 
@@ -772,7 +1000,7 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
     req = {
         "jsonrpc": "2.0",
         "method": "tools/call",
-        "params": {"name": tool_name, "arguments": arguments}
+        "params": {"name": tool_name, "arguments": arguments},
     }
 
     response = client.call(req)
@@ -804,7 +1032,11 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
             )
 
         return ""
-    except Exception as e:
+    except (ValueError, AttributeError, TypeError) as e:
+        # Daemon sent something that is not the expected JSON-RPC envelope.
+        # Surfaced to the caller as text: every handler returns a string, and a
+        # malformed response is information the caller needs, not a crash.
+        logger.warning("unparseable daemon response for %s: %s", tool_name, e)
         return f"Error: {e}"
 
 
@@ -817,12 +1049,9 @@ async def list_tools():
     """
     composite_names = {t.name for t in COMPOSITE_TOOLS}
     # Filter out: composites (replaced by COMPOSITE_TOOLS), internal tools, advanced tools
-    filtered = [t for t in TOOLS
-                if t.name not in composite_names
-                and t.name not in HIDDEN_TOOLS]
+    filtered = [t for t in TOOLS if t.name not in composite_names and t.name not in HIDDEN_TOOLS]
     # Also filter composite tools if they're in HIDDEN_TOOLS
-    filtered_composites = [t for t in COMPOSITE_TOOLS
-                          if t.name not in HIDDEN_TOOLS]
+    filtered_composites = [t for t in COMPOSITE_TOOLS if t.name not in HIDDEN_TOOLS]
     # Strip null values from inputSchema (required: null breaks Zod validation)
     all_tools = filtered + filtered_composites
     return [clean_tool_schema(t) for t in all_tools]
@@ -832,15 +1061,18 @@ async def list_tools():
 def read_file_lines(file_path: str, start: int, end: int) -> str:
     """Read specific line range from a file."""
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         # Clamp to valid range
         start = max(1, start)
         end = min(len(lines), end)
 
-        return ''.join(lines[start-1:end])
-    except Exception as e:
+        return "".join(lines[start - 1 : end])
+    except OSError as e:
+        # Symbol index can outlive the file it points at (moved, deleted, or
+        # permissions changed). Report the path problem instead of failing the
+        # whole tool call.
         return f"Error reading file: {e}"
 
 
@@ -877,8 +1109,13 @@ def handle_read_symbol(arguments: dict) -> str:
         if not symbols:
             return f"No symbol found: {name}"
 
-        # Use first matching symbol
+        # The daemon's find_symbol has no project filter, so `project` — which
+        # both the read_symbol and read_function schemas advertise — is applied
+        # here as a preference over the returned candidates. Without it, or with
+        # no candidate under that path, this is the historical first-match pick.
         symbol = symbols[0]
+        if project:
+            symbol = next((s for s in symbols if project in s.get("file", "")), symbol)
         file_path = symbol.get("file", "")
         line_start = symbol.get("line_start", 1)
         line_end = symbol.get("line_end", line_start + 50)
@@ -900,7 +1137,9 @@ def handle_read_symbol(arguments: dict) -> str:
     # Calculate token estimate (rough: ~4 chars per token)
     tokens = len(code) // 4
 
-    header = f"[{symbol_kind} {symbol_name} @ {file_path}:{line_start}-{line_end}] (~{tokens} tokens)"
+    header = (
+        f"[{symbol_kind} {symbol_name} @ {file_path}:{line_start}-{line_end}] (~{tokens} tokens)"
+    )
     return f"{header}\n{code}"
 
 
@@ -956,12 +1195,15 @@ def handle_verify_correction(arguments: dict) -> str:
         return "Error: 'evidence_locus' parameter required"
 
     # Store verification record
-    verify_result = daemon_call("remember", {
-        "content": f"[correction:{mem_id}] verified_at:{evidence_locus} by:agent",
-        "tags": ["correction", "verified"],
-        "type": "correction",
-        "visibility": 2,
-    })
+    verify_result = daemon_call(
+        "remember",
+        {
+            "content": f"[correction:{mem_id}] verified_at:{evidence_locus} by:agent",
+            "tags": ["correction", "verified"],
+            "type": "correction",
+            "visibility": 2,
+        },
+    )
 
     # Update original memory tags to include 'verified'
     daemon_call("tag", {"id": int(mem_id) if mem_id.isdigit() else mem_id, "tags": ["verified"]})
@@ -1019,9 +1261,9 @@ def handle_memory_outcome(arguments: dict) -> str:
     return daemon_call("memory_outcome", params)
 
 
-_TYPED_NODE_TYPES = frozenset({
-    "digest-node", "symbol-summary", "decision", "open-question", "rollup", "working-brief"
-})
+_TYPED_NODE_TYPES = frozenset(
+    {"digest-node", "symbol-summary", "decision", "open-question", "rollup", "working-brief"}
+)
 _LINK_PREDICATES = frozenset({"supersedes", "invalidated-by", "anchors-to"})
 
 
@@ -1060,7 +1302,7 @@ def handle_remember_typed(arguments: dict) -> str:
 
     # Extract new ID from result (format varies; try to parse integer)
     new_id = None
-    id_match = re.search(r'\b(\d+)\b', remember_result)
+    id_match = re.search(r"\b(\d+)\b", remember_result)
     if id_match:
         new_id = id_match.group(1)
     if not new_id:
@@ -1076,13 +1318,16 @@ def handle_remember_typed(arguments: dict) -> str:
                 continue
             if predicate not in _LINK_PREDICATES:
                 continue
-            daemon_call("remember", {
-                "content": f"[link] {new_id} {predicate} {target_id}",
-                "tags": ["link", predicate],
-                "type": "episode",
-                "visibility": 2,
-                "realm": realm,
-            })
+            daemon_call(
+                "remember",
+                {
+                    "content": f"[link] {new_id} {predicate} {target_id}",
+                    "tags": ["link", predicate],
+                    "type": "episode",
+                    "visibility": 2,
+                    "realm": realm,
+                },
+            )
             links_written += 1
 
     return json.dumps({"id": new_id, "node_type": node_type, "links_written": links_written})
@@ -1123,7 +1368,7 @@ memories = soul.search("{query[:200]}", limit=10)
 results["memories"] = [(m.id, m.score, m.content[:150]) for m in memories if m.score > 0.3]
 
 # 2. Find related code symbols
-symbols = soul.symbols(pattern="{query.split()[0] if query else ''}", limit=5)
+symbols = soul.symbols(pattern="{query.split()[0] if query else ""}", limit=5)
 results["symbols"] = symbols[:5] if symbols else []
 
 # 3. Expand top memory for full context
@@ -1141,6 +1386,7 @@ results
 '''
         try:
             from soul_repl import execute_soul_code
+
             result, _ns = execute_soul_code(exploration_code)
 
             if result.error:
@@ -1171,7 +1417,11 @@ results
 
             return "\n".join(output)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
+            # execute_soul_code runs generated Python in a sandbox, so any
+            # exception type is reachable by construction. RLM is an optional
+            # accelerator; the daemon path below is the supported answer.
+            logger.info("RLM smart_context failed, using daemon path: %s", e)
             return f"RLM mode failed: {e}, falling back to daemon"
 
     # Default: delegate to C++ daemon (fast single-RPC)
@@ -1184,28 +1434,41 @@ results
 
     if task:
         # 1. Check for digest-node memories relevant to the task
-        digest_result = daemon_call("recall", {
-            "query": task,
-            "tag": "digest-node",
-            "limit": 3,
-        })
+        digest_result = daemon_call(
+            "recall",
+            {
+                "query": task,
+                "tag": "digest-node",
+                "limit": 3,
+            },
+        )
         if digest_result and "No memories" not in digest_result and "Error" not in digest_result:
             prefix_parts.append("[digest-nodes]\n" + digest_result)
 
         # 2. Check for decision memories relevant to the task
-        decision_result = daemon_call("recall", {
-            "query": task,
-            "tag": "decision",
-            "limit": 3,
-        })
-        if decision_result and "No memories" not in decision_result and "Error" not in decision_result:
+        decision_result = daemon_call(
+            "recall",
+            {
+                "query": task,
+                "tag": "decision",
+                "limit": 3,
+            },
+        )
+        if (
+            decision_result
+            and "No memories" not in decision_result
+            and "Error" not in decision_result
+        ):
             prefix_parts.append("[decisions]\n" + decision_result)
         else:
             # Also try text search for [dec] prefix
-            dec_result = daemon_call("recall", {
-                "query": f"[dec] {task}",
-                "limit": 2,
-            })
+            dec_result = daemon_call(
+                "recall",
+                {
+                    "query": f"[dec] {task}",
+                    "limit": 2,
+                },
+            )
             if dec_result and "No memories" not in dec_result and "Error" not in dec_result:
                 prefix_parts.append("[decisions]\n" + dec_result)
 
@@ -1221,12 +1484,42 @@ def handle_lookup(arguments: dict) -> str:
     return daemon_call("lookup", arguments)
 
 
+def _slug(text: str, width: int = 40) -> str:
+    """Triplet-node slug: lowercase, underscore-joined, width-capped."""
+    return text[:width].replace(" ", "_").lower()
+
+
+def _store_learning(
+    content: str,
+    tags: list[str],
+    mem_type: str,
+    visibility: int,
+    subject: str,
+    predicate: str,
+    obj: str,
+) -> str:
+    """Store one learning memory and link it into the triplet graph.
+
+    Every handle_learn_* variant differs only in how it renders `content` and
+    which triplet edge it draws; this is the write half they share. Returns the
+    daemon's remember() response so callers that surface it can, and the rest
+    can ignore it.
+    """
+    remembered = daemon_call(
+        "remember",
+        {
+            "content": content,
+            "tags": tags,
+            "type": mem_type,
+            "visibility": visibility,
+        },
+    )
+    daemon_call("connect", {"subject": subject, "predicate": predicate, "object": obj})
+    return remembered
+
+
 def handle_learn_correction(arguments: dict) -> str:
-    """
-    Store a correction when I was wrong.
-    Creates high-confidence counter-memory with 'corrects' triplet.
-    Detects repeat mistakes and flags them.
-    """
+    """Store a correction, flagging it when similar corrections already exist."""
     wrong = arguments.get("wrong", "")
     correct = arguments.get("correct", "")
     context = arguments.get("context", "")
@@ -1234,60 +1527,48 @@ def handle_learn_correction(arguments: dict) -> str:
     if not wrong or not correct:
         return "Error: both 'wrong' and 'correct' parameters required"
 
-    # Check for repeat mistake - search existing corrections for similar "wrong"
+    # Repeat-mistake check. Advisory only: daemon_call returns an error string
+    # rather than raising, so a failed recall simply yields no matches and no
+    # warning — it must never block the correction write.
+    existing = daemon_call("recall", {"query": wrong[:100], "tag": "correction", "limit": 3})
+    high_matches = [int(m) for m in re.findall(r"\[(\d+)%\]", str(existing)) if int(m) > 70]
     repeat_warning = ""
-    try:
-        existing = daemon_call("recall", {
-            "query": wrong[:100],
-            "tag": "correction",
-            "limit": 3
-        })
-        if existing and "results" in str(existing):
-            # Parse results to check similarity
-            import re
-            matches = re.findall(r'\[(\d+)%\]', str(existing))
-            high_matches = [int(m) for m in matches if int(m) > 70]
-            if high_matches:
-                repeat_warning = f"\n⚠️ REPEAT MISTAKE DETECTED ({len(high_matches)} similar corrections exist, highest {max(high_matches)}% match)"
-    except Exception:
-        pass  # Don't fail if repeat check fails
+    if high_matches:
+        repeat_warning = (
+            f"\n⚠️ REPEAT MISTAKE DETECTED ({len(high_matches)} similar corrections "
+            f"exist, highest {max(high_matches)}% match)"
+        )
 
-    # Format the correction as SSL - action first so truncation shows the solution
+    # SSL form — action first, so a truncated render still shows the solution.
     content = f"[correction] USE: {correct}\nNOT: {wrong}"
     if context:
         content += f"\n@{context.replace(' ', '-').lower()}"
 
-    # Add repeat flag to content if detected
     tags = ["correction", "high-priority"]
     if repeat_warning:
         content += "\n[REPEAT-MISTAKE]"
         tags.append("repeat-mistake")
 
-    remember_result = daemon_call("remember", {
-        "content": content,
-        "tags": tags,
-        "type": "correction",
-        "visibility": 2  # Global visibility - corrections apply everywhere
-    })
-
-    # Create triplet linking the correction
-    # Use short slugs for the triplet nodes
-    wrong_slug = wrong[:50].replace(" ", "_").lower()
-    correct_slug = correct[:50].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": correct_slug,
-        "predicate": "corrects",
-        "object": wrong_slug
-    })
-
-    return f"Correction stored:\n  USE: {correct}\n  NOT: {wrong}\n  Triplet: {correct_slug} → corrects → {wrong_slug}{repeat_warning}"
+    wrong_slug = _slug(wrong, 50)
+    correct_slug = _slug(correct, 50)
+    # visibility 2 (global): corrections apply everywhere, not just this realm.
+    _store_learning(
+        content,
+        tags,
+        "correction",
+        2,
+        subject=correct_slug,
+        predicate="corrects",
+        obj=wrong_slug,
+    )
+    return (
+        f"Correction stored:\n  USE: {correct}\n  NOT: {wrong}\n"
+        f"  Triplet: {correct_slug} → corrects → {wrong_slug}{repeat_warning}"
+    )
 
 
 def handle_learn_preference(arguments: dict) -> str:
-    """
-    Store a user preference for adapting communication/behavior.
-    Global visibility so it applies across all projects.
-    """
+    """Store a user preference. Global visibility — preferences apply everywhere."""
     category = arguments.get("category", "general")
     preference = arguments.get("preference", "")
     example = arguments.get("example", "")
@@ -1295,34 +1576,24 @@ def handle_learn_preference(arguments: dict) -> str:
     if not preference:
         return "Error: 'preference' parameter required"
 
-    # Format as preference memory
     content = f"[preference:{category}] {preference}"
     if example:
         content += f"\nExample: {example}"
 
-    # Store with global visibility and preference tag
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": ["preference", category],
-        "type": "preference",
-        "visibility": 2    # Global - applies everywhere
-    })
-
-    # Create triplet for relationship navigation
-    daemon_call("connect", {
-        "subject": "user",
-        "predicate": f"prefers_{category}",
-        "object": preference[:50].replace(" ", "_").lower()
-    })
-
+    _store_learning(
+        content,
+        ["preference", category],
+        "preference",
+        2,
+        subject="user",
+        predicate=f"prefers_{category}",
+        obj=_slug(preference, 50),
+    )
     return f"Preference stored:\n  Category: {category}\n  Preference: {preference}"
 
 
 def handle_learn_insight(arguments: dict) -> str:
-    """
-    Store a generalizable insight that applies across projects.
-    Always global visibility - these are cross-project learnings.
-    """
+    """Store a generalizable insight. Always global — these are cross-project."""
     domain = arguments.get("domain", "general")
     insight = arguments.get("insight", "")
     learned_from = arguments.get("learned_from", "")
@@ -1330,35 +1601,24 @@ def handle_learn_insight(arguments: dict) -> str:
     if not insight:
         return "Error: 'insight' parameter required"
 
-    # Format as insight memory
     content = f"[insight:{domain}] {insight}"
     if learned_from:
         content += f"\nLearned from: {learned_from}"
 
-    # Store with global visibility and insight tag
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": ["insight", domain, "cross-project"],
-        "type": "wisdom",
-        "visibility": 2  # Global - applies everywhere
-    })
-
-    # Create triplet for domain navigation
-    insight_slug = insight[:40].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": domain,
-        "predicate": "has_insight",
-        "object": insight_slug
-    })
-
+    _store_learning(
+        content,
+        ["insight", domain, "cross-project"],
+        "wisdom",
+        2,
+        subject=domain,
+        predicate="has_insight",
+        obj=_slug(insight),
+    )
     return f"Insight stored (global):\n  Domain: {domain}\n  Insight: {insight}"
 
 
 def handle_learn_approach(arguments: dict) -> str:
-    """
-    Store what approach worked in a particular state/mood.
-    Builds emotional memory for adapting to session dynamics.
-    """
+    """Store what approach worked in a given state, building emotional memory."""
     state = arguments.get("state", "general")
     approach = arguments.get("approach", "")
     outcome = arguments.get("outcome", "")
@@ -1366,35 +1626,24 @@ def handle_learn_approach(arguments: dict) -> str:
     if not approach:
         return "Error: 'approach' parameter required"
 
-    # Format as approach memory
     content = f"[approach:{state}] When {state}: {approach}"
     if outcome:
         content += f"\nOutcome: {outcome}"
 
-    # Store with global visibility (approaches work across projects)
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": ["approach", state, "emotional-memory"],
-        "type": "wisdom",
-        "visibility": 2  # Global
-    })
-
-    # Create triplet for state navigation
-    approach_slug = approach[:40].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": state,
-        "predicate": "helped_by",
-        "object": approach_slug
-    })
-
+    _store_learning(
+        content,
+        ["approach", state, "emotional-memory"],
+        "wisdom",
+        2,
+        subject=state,
+        predicate="helped_by",
+        obj=_slug(approach),
+    )
     return f"Approach stored:\n  State: {state}\n  Approach: {approach}"
 
 
 def handle_learn_outcome(arguments: dict) -> str:
-    """
-    Record whether a suggestion/approach actually helped.
-    Builds feedback loop for improving future suggestions.
-    """
+    """Record whether a suggestion actually helped, closing the feedback loop."""
     suggestion = arguments.get("suggestion", "")
     helped = arguments.get("helped", False)
     details = arguments.get("details", "")
@@ -1402,80 +1651,51 @@ def handle_learn_outcome(arguments: dict) -> str:
     if not suggestion:
         return "Error: 'suggestion' parameter required"
 
-    # Format as outcome memory
     outcome_type = "worked" if helped else "failed"
     content = f"[outcome:{outcome_type}] {suggestion}"
     if details:
         content += f"\nWhy: {details}"
 
-    # Store with appropriate tags
-    tags = ["outcome", outcome_type]
-    if helped:
-        tags.append("success")
-    else:
-        tags.append("failure")
-
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": tags,
-        "type": "episode",
-        "visibility": 2
-    })
-
-    # Create triplet for feedback tracking
-    suggestion_slug = suggestion[:40].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": suggestion_slug,
-        "predicate": "resulted_in",
-        "object": outcome_type
-    })
-
+    tags = ["outcome", outcome_type, "success" if helped else "failure"]
+    _store_learning(
+        content,
+        tags,
+        "episode",
+        2,
+        subject=_slug(suggestion),
+        predicate="resulted_in",
+        obj=outcome_type,
+    )
     return f"Outcome recorded:\n  Suggestion: {suggestion}\n  Helped: {helped}"
 
 
 def handle_learn_milestone(arguments: dict) -> str:
-    """
-    Record a relationship milestone - achievements and significant moments.
-    """
+    """Record a relationship milestone. Global — milestones matter everywhere."""
     milestone = arguments.get("milestone", "")
     significance = arguments.get("significance", "")
-    date = arguments.get("date", "")
+    date = arguments.get("date", "") or datetime.date.today().isoformat()
 
     if not milestone:
         return "Error: 'milestone' parameter required"
-
-    # Format as milestone memory
-    import datetime
-    if not date:
-        date = datetime.datetime.now().strftime("%Y-%m-%d")
 
     content = f"[milestone] {date}: {milestone}"
     if significance:
         content += f"\nSignificance: {significance}"
 
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": ["milestone", "relationship", "achievement"],
-        "type": "episode",
-        "visibility": 2  # Global - milestones matter everywhere
-    })
-
-    # Create triplet for timeline navigation
-    milestone_slug = milestone[:40].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": "partnership",
-        "predicate": "achieved",
-        "object": milestone_slug
-    })
-
+    _store_learning(
+        content,
+        ["milestone", "relationship", "achievement"],
+        "episode",
+        2,
+        subject="partnership",
+        predicate="achieved",
+        obj=_slug(milestone),
+    )
     return f"Milestone recorded:\n  Date: {date}\n  Milestone: {milestone}"
 
 
 def handle_learn_analysis(arguments: dict) -> str:
-    """
-    Record an analysis with its data and script locations.
-    Makes it easy to find and reproduce analyses later.
-    """
+    """Record an analysis with its data and script locations, so it can be rerun."""
     name = arguments.get("name", "")
     description = arguments.get("description", "")
     data_paths = arguments.get("data_paths", [])
@@ -1486,60 +1706,56 @@ def handle_learn_analysis(arguments: dict) -> str:
     if not name:
         return "Error: 'name' parameter required"
 
-    # Format as analysis memory
-    import datetime
-    date = datetime.datetime.now().strftime("%Y-%m-%d")
+    if not isinstance(data_paths, list):
+        data_paths = [data_paths]
+    if not isinstance(script_paths, list):
+        script_paths = [script_paths]
 
     content = f"[analysis:{project or 'general'}] {name}"
     if description:
         content += f"\nDescription: {description}"
-
     if data_paths:
-        if isinstance(data_paths, list):
-            content += f"\nData: {', '.join(data_paths)}"
-        else:
-            content += f"\nData: {data_paths}"
-
+        content += f"\nData: {', '.join(data_paths)}"
     if script_paths:
-        if isinstance(script_paths, list):
-            content += f"\nScripts: {', '.join(script_paths)}"
-        else:
-            content += f"\nScripts: {script_paths}"
-
+        content += f"\nScripts: {', '.join(script_paths)}"
     if findings:
         content += f"\nFindings: {findings}"
 
-    # Store with realm-specific visibility (analysis is project-bound)
-    result = daemon_call("remember", {
-        "content": content,
-        "tags": ["analysis", project or "general", "reproducibility"],
-        "type": "episode",
-        "visibility": 0  # Private to realm by default
-    })
-
-    # Create triplets for navigation
-    analysis_slug = name[:40].replace(" ", "_").lower()
-    daemon_call("connect", {
-        "subject": project or "general",
-        "predicate": "has_analysis",
-        "object": analysis_slug
-    })
-
-    # Link data paths
-    for path in (data_paths if isinstance(data_paths, list) else [data_paths]):
+    analysis_slug = _slug(name)
+    # visibility 0: an analysis is project-bound, so it stays private to its realm.
+    _store_learning(
+        content,
+        ["analysis", project or "general", "reproducibility"],
+        "episode",
+        0,
+        subject=project or "general",
+        predicate="has_analysis",
+        obj=analysis_slug,
+    )
+    for path in data_paths:
         if path:
-            daemon_call("connect", {
-                "subject": analysis_slug,
-                "predicate": "uses_data",
-                "object": path[:60]
-            })
+            daemon_call(
+                "connect",
+                {
+                    "subject": analysis_slug,
+                    "predicate": "uses_data",
+                    "object": path[:60],
+                },
+            )
 
-    return f"Analysis recorded:\n  Name: {name}\n  Data: {data_paths}\n  Scripts: {script_paths}"
+    # Render the joined form, not the list repr: a caller may pass either a
+    # list or a single comma-separated string, and the confirmation should look
+    # the same either way.
+    return (
+        f"Analysis recorded:\n  Name: {name}\n"
+        f"  Data: {', '.join(data_paths)}\n  Scripts: {', '.join(script_paths)}"
+    )
 
 
 # ============================================================================
 # Curiosity-driven research (background learning agent)
 # ============================================================================
+
 
 def handle_research_topics(arguments: dict) -> str:
     """Get topics that need research from various sources."""
@@ -1561,19 +1777,20 @@ def handle_research_topics(arguments: dict) -> str:
                     if len(parts) > 1:
                         gap_id = parts[0].split("#")[-1].strip()
                         content = parts[1].strip()
-                        topics.append({
-                            "type": "gap",
-                            "id": gap_id,
-                            "topic": content[:200],
-                            "source": "curiosity_gaps"
-                        })
+                        topics.append(
+                            {
+                                "type": "gap",
+                                "id": gap_id,
+                                "topic": content[:200],
+                                "source": "curiosity_gaps",
+                            }
+                        )
 
     if source == "weak" or source == "all":
         # Get low-confidence memories that might need verification
-        weak_result = daemon_call("recall", {
-            "query": "uncertain unclear unverified",
-            "limit": limit
-        })
+        weak_result = daemon_call(
+            "recall", {"query": "uncertain unclear unverified", "limit": limit}
+        )
         if weak_result and "No memories" not in weak_result:
             for line in weak_result.split("\n"):
                 if line.startswith("[") and "%" in line:
@@ -1581,12 +1798,14 @@ def handle_research_topics(arguments: dict) -> str:
                     conf_match = line.split("%")[0].strip("[")
                     if conf_match.isdigit() and int(conf_match) < 30:
                         content = line.split("]", 2)[-1].strip()
-                        topics.append({
-                            "type": "weak_memory",
-                            "confidence": int(conf_match),
-                            "topic": content[:200],
-                            "source": "low_confidence"
-                        })
+                        topics.append(
+                            {
+                                "type": "weak_memory",
+                                "confidence": int(conf_match),
+                                "topic": content[:200],
+                                "source": "low_confidence",
+                            }
+                        )
 
     if not topics:
         return "No research topics found. Consider:\n- Adding curiosity gaps with curiosity_note_gap\n- Or specify source='suggest' for AI-suggested topics"
@@ -1595,11 +1814,13 @@ def handle_research_topics(arguments: dict) -> str:
     output += "=" * 40 + "\n\n"
     for i, t in enumerate(topics[:limit], 1):
         output += f"{i}. [{t['type']}] {t['topic']}\n"
-        if t.get('id'):
+        if t.get("id"):
             output += f"   Gap ID: {t['id']} (use with research_store to resolve)\n"
         output += "\n"
 
-    output += "\nNext: Use WebSearch to research these topics, then call research_store with findings."
+    output += (
+        "\nNext: Use WebSearch to research these topics, then call research_store with findings."
+    )
     return output
 
 
@@ -1623,29 +1844,32 @@ def handle_research_store(arguments: dict) -> str:
     content = f"[research] {topic}\n{findings}{source_str}"
 
     # Store as wisdom with research tag
-    result = daemon_call("remember", {
-        "content": content,
-        "type": "wisdom",
-        "confidence": confidence,
-        "tags": ["research", "web-learned"]
-    })
+    daemon_call(
+        "remember",
+        {
+            "content": content,
+            "type": "wisdom",
+            "confidence": confidence,
+            "tags": ["research", "web-learned"],
+        },
+    )
 
     output = f"Research stored: {topic[:50]}...\n"
 
     # Resolve curiosity gap if provided
     if gap_id:
-        resolve_result = daemon_call("curiosity_resolve", {
-            "id": gap_id,
-            "learned": findings[:500]
-        })
+        daemon_call("curiosity_resolve", {"id": gap_id, "learned": findings[:500]})
         output += f"Resolved gap #{gap_id}\n"
 
     # Create triplet linking research to topic
-    daemon_call("connect", {
-        "subject": "research",
-        "predicate": "learned_about",
-        "object": topic.replace(" ", "_")[:50]
-    })
+    daemon_call(
+        "connect",
+        {
+            "subject": "research",
+            "predicate": "learned_about",
+            "object": topic.replace(" ", "_")[:50],
+        },
+    )
 
     return output + "Memory created with 'research' tag."
 
@@ -1665,10 +1889,7 @@ def handle_research_cycle(arguments: dict) -> str:
                     topic = parts[1].strip()
 
                     # Get context from related memories
-                    context_result = daemon_call("recall", {
-                        "query": topic[:100],
-                        "limit": 3
-                    })
+                    context_result = daemon_call("recall", {"query": topic[:100], "limit": 3})
 
                     output = "Research Cycle: Topic Found\n"
                     output += "=" * 40 + "\n\n"
@@ -1677,7 +1898,11 @@ def handle_research_cycle(arguments: dict) -> str:
 
                     output += "Related memories:\n"
                     if context_result and "No memories" not in context_result:
-                        ctx_lines = [l for l in context_result.split("\n") if l.strip() and "[gap]" not in l][:5]
+                        ctx_lines = [
+                            line
+                            for line in context_result.split("\n")
+                            if line.strip() and "[gap]" not in line
+                        ][:5]
                         output += "\n".join(ctx_lines) + "\n\n"
                     else:
                         output += "(none found)\n\n"
@@ -1689,10 +1914,13 @@ def handle_research_cycle(arguments: dict) -> str:
 
     # Fallback: search for gap content via recall
     # Try to find memories with "[gap]" in content
-    gaps_result = daemon_call("recall", {
-        "query": "How does DuckDB HNSW vector indexing",  # Use actual gap content
-        "limit": 10
-    })
+    gaps_result = daemon_call(
+        "recall",
+        {
+            "query": "How does DuckDB HNSW vector indexing",  # Use actual gap content
+            "limit": 10,
+        },
+    )
 
     if gaps_result and "No memories" not in gaps_result:
         for line in gaps_result.split("\n"):
@@ -1739,8 +1967,9 @@ def handle_transcript_search(arguments: dict) -> str:
             data = json.loads(result)
             if "transcript_path" in data:
                 transcript_paths.append((session_id, data["transcript_path"]))
-        except:
-            pass
+        except (json.JSONDecodeError, AttributeError, TypeError) as exc:
+            # Daemon returned an error string rather than structured JSON.
+            logger.debug("transcript_get gave no usable path for %s: %s", session_id, exc)
     else:
         # Get all pending transcripts
         result = daemon_call("transcript_list", {}, structured=True)
@@ -1748,8 +1977,8 @@ def handle_transcript_search(arguments: dict) -> str:
             data = json.loads(result)
             for t in data.get("transcripts", []):
                 transcript_paths.append((t.get("session_id", ""), t.get("transcript_path", "")))
-        except:
-            pass
+        except (json.JSONDecodeError, AttributeError, TypeError) as exc:
+            logger.debug("transcript_list gave no usable paths: %s", exc)
 
     if not transcript_paths:
         return "No transcripts found"
@@ -1761,7 +1990,7 @@ def handle_transcript_search(arguments: dict) -> str:
             continue
 
         try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 for line_num, line in enumerate(f, 1):
                     if not line.strip():
                         continue
@@ -1773,11 +2002,11 @@ def handle_transcript_search(arguments: dict) -> str:
 
                         content = ""
                         msg = entry.get("message", {})
-                        msg_content = msg.get("content", "")
-                        if isinstance(msg_content, str):
-                            content = msg_content
-                        elif isinstance(msg_content, list):
-                            for block in msg_content:
+                        msgcontent = msg.get("content", "")
+                        if isinstance(msgcontent, str):
+                            content = msgcontent
+                        elif isinstance(msgcontent, list):
+                            for block in msgcontent:
                                 if isinstance(block, dict) and "text" in block:
                                     content += block["text"] + "\n"
 
@@ -1792,17 +2021,26 @@ def handle_transcript_search(arguments: dict) -> str:
 
                         # Score by keyword density
                         score = match_count / len(keywords)
-                        results.append({
-                            "session_id": sid,
-                            "line": line_num,
-                            "role": msg_type,
-                            "content": content[:500] + ("..." if len(content) > 500 else ""),
-                            "score": score,
-                            "matches": match_count
-                        })
-                    except:
+                        results.append(
+                            {
+                                "session_id": sid,
+                                "line": line_num,
+                                "role": msg_type,
+                                "content": content[:500] + ("..." if len(content) > 500 else ""),
+                                "score": score,
+                                "matches": match_count,
+                            }
+                        )
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        # Transcripts are append-only JSONL written by a live
+                        # process: a torn final line, or an entry whose
+                        # "message" is not an object, is expected. Skip the
+                        # line, keep scanning the file.
                         continue
-        except:
+        except OSError as exc:
+            # Transcript deleted or permissions changed between the exists()
+            # check and the open. Skip this file, keep scanning the rest.
+            logger.debug("skipping unreadable transcript %s: %s", path, exc)
             continue
 
     # Sort by score descending
@@ -1820,6 +2058,8 @@ def handle_transcript_search(arguments: dict) -> str:
         output += f"   {r['content'][:200]}...\n\n"
 
     return output
+
+
 def handle_soul_repl(arguments: dict) -> str:
     """
     RLM-style REPL for programmatic soul exploration.
@@ -1856,15 +2096,17 @@ Persistent sessions (variables survive across calls):
 """
 
     try:
-        import json as _json
-        raw = daemon_call("repl_execute", {
-            "session_id": session_id or "default",
-            "code": code,
-            "reset": reset,
-            "max_output": 10000,
-        })
+        raw = daemon_call(
+            "repl_execute",
+            {
+                "session_id": session_id or "default",
+                "code": code,
+                "reset": reset,
+                "max_output": 10000,
+            },
+        )
         try:
-            result = _json.loads(raw)
+            result = json.loads(raw)
         except (ValueError, TypeError):
             return raw or "(no output)"
 
@@ -1877,34 +2119,24 @@ Persistent sessions (variables survive across calls):
         if traj:
             output.append(f"\n[Trajectory: {len(traj)} soul calls]")
             for t in traj[-5:]:
-                output.append(f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k, v in t['args'].items())})")
+                output.append(
+                    f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k, v in t['args'].items())})"
+                )
         if session_id:
             output.append(f"\n[Session: {session_id}]")
 
         return "\n".join(output) if output else "(no output)"
 
-    except Exception as e:
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        # The daemon reports REPL errors inside its own JSON payload; reaching
+        # here means the envelope itself was not the shape we expect.
+        logger.warning("malformed repl_execute response: %s", e)
         return f"REPL Error: {e}"
 
 
 # ============================================================================
 # Consolidated gateway handlers — reduce tool count for token efficiency
 # ============================================================================
-
-def _rrf_merge(lists: list, k: int = 60, limit: int = 10) -> list:
-    """Reciprocal Rank Fusion across multiple result lists."""
-    # Reciprocal-rank fusion: accumulate 1/(k+rank+1) per key across all lanes.
-    key_items: dict = {}
-    for lst in lists:
-        for rank, item in enumerate(lst):
-            key = item.get("memory_id") or item.get("text", "")[:80]
-            rrf = 1.0 / (k + rank + 1)
-            if key not in key_items:
-                key_items[key] = {"rrf": rrf, "item": item}
-            else:
-                key_items[key]["rrf"] += rrf
-    ranked = sorted(key_items.values(), key=lambda x: x["rrf"], reverse=True)
-    return [r["item"] for r in ranked[:limit]]
 
 
 def handle_recall_smart(arguments: dict) -> str:
@@ -1918,22 +2150,33 @@ def handle_recall_smart(arguments: dict) -> str:
 
     if not skip_llm:
         try:
-            import anthropic as _ant
-            client = _ant.Anthropic()
-            resp = client.messages.create(
+            import anthropic
+
+            anthropic_client = anthropic.Anthropic()
+            resp = anthropic_client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=200,
-                messages=[{"role": "user", "content": (
-                    f"Extract retrieval metadata from this query. Return JSON only, no prose.\n"
-                    f"Fields: entities (array of key noun phrases), speech_act "
-                    f"(one of: decision/correction/preference/task/result/failure/question/hypothesis/null), "
-                    f"answer_type (one of: fact/decision/preference/code/temporal).\n"
-                    f"Query: {query}"
-                )}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Extract retrieval metadata from this query. Return JSON only, no prose.\n"
+                            f"Fields: entities (array of key noun phrases), speech_act "
+                            f"(one of: decision/correction/preference/task/result/failure/question/hypothesis/null), "
+                            f"answer_type (one of: fact/decision/preference/code/temporal).\n"
+                            f"Query: {query}"
+                        ),
+                    }
+                ],
             )
             plan = json.loads(resp.content[0].text.strip())
-        except Exception:
-            pass  # fall through with empty plan
+        except Exception as exc:  # noqa: BLE001
+            # The planner is a best-effort accelerator over an optional
+            # dependency (`anthropic`), a network call, and unconstrained model
+            # output — missing package, auth failure, timeout, and non-JSON
+            # replies all mean the same thing here. Recall must still run, so
+            # fall through to the empty plan: lanes 2 and 3 simply stay off.
+            logger.info("recall_smart query planner unavailable: %s", exc)
 
     realm_arg = {"realm": realm} if realm else {}
 
@@ -1941,32 +2184,35 @@ def handle_recall_smart(arguments: dict) -> str:
     sem_raw = daemon_call("recall", {"query": query, "limit": limit * 2, **realm_arg})
     try:
         sem_hits = json.loads(sem_raw).get("results", [])
-    except Exception:
+    except (ValueError, AttributeError) as exc:
+        # daemon_call returns plain text on error rather than raising.
+        logger.warning("recall_smart semantic lane returned no JSON: %s", exc)
         sem_hits = []
 
     lanes = [sem_hits]
 
     # Lane 2: typed recall (if speech_act detected)
     if plan.get("speech_act"):
-        typed_raw = daemon_call("recall", {
-            "query": query, "tag": plan["speech_act"], "limit": limit, **realm_arg
-        })
+        typed_raw = daemon_call(
+            "recall", {"query": query, "tag": plan["speech_act"], "limit": limit, **realm_arg}
+        )
         try:
             lanes.append(json.loads(typed_raw).get("results", []))
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as exc:
+            # One dead lane must not sink the merge; RRF just fuses fewer lanes.
+            logger.debug("recall_smart typed lane returned no JSON: %s", exc)
 
     # Lane 3: spreading activation (if entities found)
     entities = plan.get("entities", [])
     if entities:
         seed_query = " ".join(entities[:5])
-        spread_raw = daemon_call("recall_spreading", {
-            "query": seed_query, "limit": limit, **realm_arg
-        })
+        spread_raw = daemon_call(
+            "recall_spreading", {"query": seed_query, "limit": limit, **realm_arg}
+        )
         try:
             lanes.append(json.loads(spread_raw).get("results", []))
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as exc:
+            logger.debug("recall_smart spreading lane returned no JSON: %s", exc)
 
     # Lane 4: session-level recall
     sess_raw = daemon_call("recall_session", {"query": query, "limit": limit, **realm_arg})
@@ -1977,18 +2223,19 @@ def handle_recall_smart(arguments: dict) -> str:
             s.setdefault("memory_id", s.get("session_id", ""))
             s.setdefault("text", s.get("best_evidence", ""))
         lanes.append(sess_data)
-    except Exception:
-        pass
+    except (ValueError, AttributeError, TypeError) as exc:
+        logger.debug("recall_smart session lane returned no JSON: %s", exc)
 
-    merged = _rrf_merge(lanes, k=60, limit=limit)
+    merged = rrf_merge(lanes, k=60, limit=limit)
     return json.dumps({"results": merged, "plan": plan})
 
 
 def handle_recall_gateway(arguments: dict) -> str:
     """Unified recall with strategy routing and optional cross-encoder reranking.
 
-    Strategies: hybrid (default), semantic, priority, temporal, smart, field
-    disable_hdc: if True, skip HDC lane in RRF (ablation/benchmarking)
+    Strategies: hybrid (default), semantic, priority, temporal, smart, keyword.
+    Every value maps to a tool the daemon actually serves; an unknown strategy
+    falls back to plain semantic recall.
 
     Default is hybrid: measured strict superset of pure-semantic on the golden
     set (nDCG@20 +0.08 active, +2 pass, 0 regressions) — hybrid's BM25 lane
@@ -1996,35 +2243,55 @@ def handle_recall_gateway(arguments: dict) -> str:
     low cosine similarity. Callers wanting the old behavior pass strategy="semantic".
     """
     strategy = arguments.pop("strategy", "hybrid")
+    # "field" used to map to a `recall_field` RPC the daemon does not implement.
+    # Unknown tool names come back as an empty content array, so that strategy
+    # silently returned no memories rather than erroring; dropped so it falls
+    # through to semantic recall like any other unrecognized strategy.
     tool_map = {
         "semantic": "recall",
         "priority": "recall_by_priority",
         "temporal": "recall_temporal",
         "hybrid": "hybrid_recall",
         "smart": "smart_recall",
-        "field": "recall_field",
         "keyword": "recall_keyword",
+        # daemon-native lane names: `recall` defaults to fused; make the
+        # published strategy values resolve explicitly instead of by fallthrough.
+        "fused": "recall",
     }
     tool = tool_map.get(strategy, "recall")
 
-    reranker = _get_reranker()
+    reranker = get_reranker()
     if not reranker:
         return daemon_call(tool, arguments)
 
     query = arguments.get("query", "")
     limit = int(arguments.get("limit", 10))
-    fetch_args = dict(arguments, limit=limit * _RERANK_FETCH_MUL)
+    fetch_args = dict(arguments, limit=limit * RERANK_FETCH_MUL)
     raw_str = daemon_call(tool, fetch_args, structured=True)
     try:
         raw = json.loads(raw_str)
         results = raw.get("results", [])
-    except Exception:
+    except (ValueError, AttributeError) as exc:
+        # No structured payload to rerank; the unreranked call below is the
+        # fallback, so this is a downgrade rather than a failure.
+        logger.debug("recall overfetch returned no JSON, skipping rerank: %s", exc)
         results = []
     if not results or len(results) <= limit:
         return daemon_call(tool, arguments)
 
     pairs = [(query, h.get("text", "")) for h in results]
     scores = reranker.predict(pairs)
+    if len(scores) != len(results):
+        # A backend returning a different number of scores than candidates is
+        # broken. zip would silently truncate and drop memories from recall, so
+        # fall back to the daemon's own ranking instead. Checked explicitly
+        # rather than with zip(strict=True), which is 3.10+.
+        logger.warning(
+            "reranker returned %d scores for %d candidates; skipping rerank",
+            len(scores),
+            len(results),
+        )
+        return daemon_call(tool, arguments)
     ranked = sorted(zip(scores, results), key=lambda x: -float(x[0]))
     reranked = [h for _, h in ranked[:limit]]
     return json.dumps({"results": reranked})
@@ -2126,25 +2393,29 @@ def handle_memory_edit_gateway(arguments: dict) -> str:
 
 # Map composite tool names to handlers
 def handle_run_hint_enricher(arguments: dict) -> str:
-    import subprocess as _sp
     script = os.path.join(os.path.dirname(__file__), "enrichers", "hint_enricher.py")
     mind = os.environ.get("MIND", os.path.expanduser("~/.claude/mind"))
     cmd = [
-        "python3", script,
-        "--mind", mind,
-        "--limit", str(arguments.get("limit", 100)),
-        "--model", str(arguments.get("model", "chitta-hint-tuned")),
+        "python3",
+        script,
+        "--mind",
+        mind,
+        "--limit",
+        str(arguments.get("limit", 100)),
+        "--model",
+        str(arguments.get("model", "chitta-hint-tuned")),
     ]
     if arguments.get("dry_run"):
         cmd.append("--dry-run")
     try:
-        result = _sp.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         out = result.stdout.strip()
         err = result.stderr.strip()
         if result.returncode != 0:
             return f"[hint_enricher] error (rc={result.returncode})\n{err}\n{out}"
         return out if out else (err if err else "[hint_enricher] done (no output)")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # Interpreter or script missing, or the 300s timeout elapsed.
         return f"[hint_enricher] failed: {e}"
 
 
@@ -2194,27 +2465,48 @@ MSG_TOOLS = {"msg_inbox", "msg_send", "msg_respond", "msg_ack", "msg_ack_all", "
 
 # Tools that need session_id injection
 SESSION_TOOLS = {
-    "ledger_save", "narrative_log", "narrative_history",
-    "anticipation_filter", "anticipation_gate_status",
-    "transcript_register", "transcript_get", "transcript_update",
-    "transcript_remove", "transcript_parse",
-    "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
-    "session_register", "session_heartbeat", "session_deregister",
+    "ledger_save",
+    "narrative_log",
+    "narrative_history",
+    "anticipation_filter",
+    "anticipation_gate_status",
+    "transcript_register",
+    "transcript_get",
+    "transcript_update",
+    "transcript_remove",
+    "transcript_parse",
+    "msg_inbox",
+    "msg_send",
+    "msg_ack",
+    "msg_ack_all",
+    "msg_history",
+    "session_register",
+    "session_heartbeat",
+    "session_deregister",
 }
 
 # Tools that store memories - need realm auto-injection
 REALM_STORE_TOOLS = {
-    "remember", "grow", "observe", "long_task_start", "checkpoint",
-    "goal_set", "habit_observe", "anticipation_observe",
-    "suggestion_track", "curiosity_note_gap", "background_schedule",
-    "narrative_log", "transcript_register",
+    "remember",
+    "grow",
+    "observe",
+    "long_task_start",
+    "checkpoint",
+    "goal_set",
+    "habit_observe",
+    "anticipation_observe",
+    "suggestion_track",
+    "curiosity_note_gap",
+    "background_schedule",
+    "narrative_log",
+    "transcript_register",
 }
 
 # Tools that filter/query by realm
 REALM_FILTER_TOOLS = {"long_task_active", "smart_context", "lookup"}
 
 
-def get_current_session_id(use_cache: bool = True) -> Optional[str]:
+def get_current_session_id(use_cache: bool = True) -> str | None:
     """
     Get current session ID using multiple detection strategies.
 
@@ -2286,7 +2578,7 @@ def get_current_session_id(use_cache: bool = True) -> Optional[str]:
     return None
 
 
-def get_current_realm() -> Optional[str]:
+def get_current_realm() -> str | None:
     """
     Get current realm using multiple detection strategies.
 
@@ -2317,26 +2609,31 @@ def get_current_realm() -> Optional[str]:
                 if realm:
                     current_realm = realm
                     return current_realm
-    except:
-        pass
+    except OSError as exc:
+        # Deleted cwd, unreadable file, or undecodable bytes: fall through to
+        # the git-repo strategy rather than failing realm detection outright.
+        logger.debug(".cc-soul-realm unreadable: %s", exc)
 
     # 4. Git repo name
     try:
-        import subprocess
-        result = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, timeout=2)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=2
+        )
         if result.returncode == 0 and result.stdout.strip():
             repo_name = os.path.basename(result.stdout.strip())
             current_realm = f"project:{repo_name}"
             return current_realm
-    except:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # git missing, not a repo, or slower than the 2s timeout. No realm is a
+        # valid answer — callers only inject a realm when one is detected.
+        logger.debug("git realm detection failed: %s", exc)
 
     return None
 
 
 _SQZ_BIN = os.path.expanduser("~/.claude/bin/sqz")
 _SQZ_THRESHOLD = 500
+
 
 def _sqz_compress(text: str, tool_name: str = "mcp") -> str:
     if len(text) < _SQZ_THRESHOLD:
@@ -2345,13 +2642,19 @@ def _sqz_compress(text: str, tool_name: str = "mcp") -> str:
     if not sqz:
         return text
     try:
-        import subprocess
         proc = subprocess.run(
             [sqz, "compress", "--cmd", tool_name],
-            input=text, capture_output=True, text=True, timeout=5
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return proc.stdout if proc.returncode == 0 and proc.stdout else text
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Compression is a token optimization, never a correctness requirement:
+        # if sqz is missing, unrunnable, or slower than its 5s timeout, the
+        # uncompressed text is still the right answer.
+        logger.debug("sqz compression skipped: %s", exc)
         return text
 
 
@@ -2363,7 +2666,7 @@ async def call_tool(name: str, arguments: dict):
     # Coerce string integers to int: LLMs sometimes generate "19" instead of 19,
     # which fails schema validation on strict integer params.
     for k, v in list(arguments.items()):
-        if isinstance(v, str) and v.lstrip('-').isdigit():
+        if isinstance(v, str) and v.lstrip("-").isdigit():
             arguments[k] = int(v)
 
     # Track session_id from session_register and transcript_register for auto-defaults
@@ -2372,26 +2675,9 @@ async def call_tool(name: str, arguments: dict):
     if name == "transcript_register" and "session_id" in arguments:
         current_session_id = arguments["session_id"]
 
-    # Auto-inject session_id for messaging tools if not provided
-    # Force fresh PPID lookup (use_cache=False) for messaging to handle session resume
-    if name in MSG_TOOLS and not arguments.get("session_id"):
-        sid = get_current_session_id(use_cache=False)
-        if not sid:
-            # Fail closed: never let this fall through to the daemon's own
-            # get_session_id() (reads chittad's env, not the caller's) — that
-            # silently stores/reads messages under session_id="".
-            return (
-                "Error: could not determine this session's ID for messaging. "
-                "Pass session_id explicitly, or call session_register first."
-            )
-        arguments["session_id"] = sid
-        # msg_send uses sender_session_id instead of session_id
-        if name == "msg_send" and not arguments.get("sender_session_id"):
-            arguments["sender_session_id"] = sid
-            if not arguments.get("sender_realm"):
-                realm = get_current_realm()
-                if realm:
-                    arguments["sender_realm"] = realm
+    messaging_error = inject_message_session(name, arguments)
+    if messaging_error:
+        return messaging_error
 
     # Auto-inject source_session for memory writes (substrate coverage lever:
     # feeds recall_session grouping + densify_backfill SameSession edges).
@@ -2435,13 +2721,13 @@ async def call_tool(name: str, arguments: dict):
     if name == "remember":
         source_tool = arguments.get("source_tool", "")
         if source_tool and "compliance" in source_tool:
-            _content_key = _hashlib.md5(
-                arguments.get("content", "")[:128].encode()
-            ).hexdigest()
-            _cache_key = (source_tool, _content_key)
-            _now = _time.time()
+            content_key = hashlib.md5(arguments.get("content", "")[:128].encode()).hexdigest()
+            _cache_key = (source_tool, content_key)
+            _now = time.time()
             if _now - _hook_dedup_cache.get(_cache_key, 0.0) < _HOOK_DEDUP_WINDOW_S:
-                return [TextContent(type="text", text="[dedup] skipped duplicate compliance memory")]
+                return [
+                    TextContent(type="text", text="[dedup] skipped duplicate compliance memory")
+                ]
             _hook_dedup_cache[_cache_key] = _now
             if len(_hook_dedup_cache) > 2000:
                 cutoff = _now - _HOOK_DEDUP_WINDOW_S
@@ -2464,31 +2750,55 @@ async def call_tool(name: str, arguments: dict):
     loop = asyncio.get_event_loop()
 
     # Merge-aware write policy (remember / grow only; never for hook-triggered observe)
-    _MERGE_WRITE_TOOLS = {"remember", "grow"}
-    _write_policy = arguments.pop("write_policy", None)
-    _merge_env = os.environ.get("CHITTA_MERGE_POLICY", "off")
-    if name in _MERGE_WRITE_TOOLS and (_write_policy == "merge_aware" or _merge_env == "merge_aware"):
-        _content = arguments.get("content", "")
-        _realm = arguments.get("realm", "")
+    MERGE_WRITE_TOOLS = {"remember", "grow"}
+    write_policy = arguments.pop("write_policy", None)
+    merge_env = os.environ.get("CHITTA_MERGE_POLICY", "off")
+    if name in MERGE_WRITE_TOOLS and (write_policy == "merge_aware" or merge_env == "merge_aware"):
+        content = arguments.get("content", "")
+        realm = arguments.get("realm", "")
         try:
-            import merge_judge as _mj
-            _recall_raw = await loop.run_in_executor(
-                _executor, daemon_call, "recall",
-                {"query": _content, "limit": 5, "strategy": "hybrid", **( {"realm": _realm} if _realm else {})}
+            import merge_judge
+
+            recall_raw = await loop.run_in_executor(
+                _executor,
+                daemon_call,
+                "recall",
+                {
+                    "query": content,
+                    "limit": 5,
+                    "strategy": "hybrid",
+                    **({"realm": realm} if realm else {}),
+                },
             )
-            _candidates = json.loads(_recall_raw).get("results", []) if _recall_raw else []
-            _decision = _mj.judge(_content, _candidates)
-            _action = _decision.get("action", "add")
-            if _action == "discard":
-                return [TextContent(type="text", text=f"[merge_aware] skipped: {_decision.get('reason', 'duplicate')}")]
-            if _action == "update":
-                _tid = _decision.get("target_id")
-                if _tid:
-                    await loop.run_in_executor(_executor, daemon_call, "update",
-                        {"id": str(_tid), "content": _content})
-                    return [TextContent(type="text", text=f"[merge_aware] updated #{_tid}: {_decision.get('reason', '')}")]
-        except Exception:
-            pass  # fall through to normal write on any judge failure
+            candidates = json.loads(recall_raw).get("results", []) if recall_raw else []
+            decision = merge_judge.judge(content, candidates)
+            action = decision.get("action", "add")
+            if action == "discard":
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"[merge_aware] skipped: {decision.get('reason', 'duplicate')}",
+                    )
+                ]
+            if action == "update":
+                target_id = decision.get("target_id")
+                if target_id:
+                    await loop.run_in_executor(
+                        _executor, daemon_call, "update", {"id": str(target_id), "content": content}
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"[merge_aware] updated #{target_id}: {decision.get('reason', '')}",
+                        )
+                    ]
+        except Exception as exc:  # noqa: BLE001
+            # The merge judge is an opt-in write filter spanning an optional
+            # import, a recall round-trip, and the judge's own heuristics. Its
+            # only job is to suppress a redundant write; if any part of it
+            # fails the correct outcome is the plain write below, never a lost
+            # memory. Deliberately catches everything.
+            logger.info("merge-aware judge failed, writing normally: %s", exc)
     if name in COMPOSITE_HANDLERS:
         result = await loop.run_in_executor(_executor, COMPOSITE_HANDLERS[name], arguments)
     else:
@@ -2523,7 +2833,7 @@ def _run_stdio():
         init_options = InitializationOptions(
             server_name="chitta-mcp",
             server_version="0.1.0",
-            capabilities=ServerCapabilities(tools=ToolsCapability())
+            capabilities=ServerCapabilities(tools=ToolsCapability()),
         )
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, init_options)
@@ -2541,10 +2851,10 @@ def _mcp_token() -> str:
 
 def _run_http(port: int):
     """Run as streamable HTTP MCP server for Codex, Cursor, Copilot CLI etc."""
-    from starlette.applications import Starlette
-    from starlette.routing import Mount
-    from starlette.responses import JSONResponse, PlainTextResponse
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse, PlainTextResponse
+    from starlette.routing import Mount
 
     token = _mcp_token()
 

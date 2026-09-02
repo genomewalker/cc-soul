@@ -13,7 +13,16 @@ Usage:
 
 Exit 0 if mean nDCG@limit >= --min, else 1.
 """
-import argparse, json, math, os, random, subprocess, sys
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import random
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -32,11 +41,15 @@ def _load_reranker():
         return _reranker
     try:
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from sentence_transformers import CrossEncoder
+
             _reranker = CrossEncoder(_RERANKER_MODEL)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        # Broad on purpose, but re-raised rather than swallowed: any load
+        # failure must reach the caller.
         # Silently returning False here made --reranker a no-op that still reported
         # "reranked" numbers. If the caller asked for a reranker, they must get one.
         raise RuntimeError(f"reranker requested but unavailable: {_RERANKER_MODEL}: {e}") from e
@@ -107,8 +120,9 @@ def bootstrap_ci(scores: list[float], n_boot: int = 1000, ci: float = 0.95) -> t
     return means[int(lo * n_boot)], means[int((1 - lo) * n_boot) - 1]
 
 
-def grade_strategy(queries: list[dict], strategy: str, limit: int,
-                   use_reranker: bool, quiet: bool) -> dict:
+def grade_strategy(
+    queries: list[dict], strategy: str, limit: int, use_reranker: bool, quiet: bool
+) -> dict:
     fetch_limit = limit * _RERANK_FETCH_MUL if use_reranker else limit
     scores_by_type: dict[str, list[float]] = {}
     per_query = []
@@ -164,12 +178,19 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
         if qtype != "abstention":
             hits_by_type.setdefault(qtype, []).append(hit)
             lenient_scores.append(ndcg(gold_lenient, results, limit))
-        per_query.append({
-            "query": q["query"], "type": qtype, "label": q.get("label", ""),
-            "ndcg": round(score, 3), "hit": hit, "gold_pos": gold_pos,
-            "abstained": abstained,
-            "n_gold": len(gold), "n_results": len(results),
-        })
+        per_query.append(
+            {
+                "query": q["query"],
+                "type": qtype,
+                "label": q.get("label", ""),
+                "ndcg": round(score, 3),
+                "hit": hit,
+                "gold_pos": gold_pos,
+                "abstained": abstained,
+                "n_gold": len(gold),
+                "n_results": len(results),
+            }
+        )
 
         if not quiet:
             sig_mark = " \033[2m[sig]\033[0m" if sig and not gold_pos else ""
@@ -177,8 +198,10 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
             tag = "PASS" if score >= 0.7 else "WARN" if score >= 0.4 else "FAIL"
             if qtype == "abstention":
                 tag, color = "ABS", "\033[36m"
-            print(f"{color}[{tag}]\033[0m {q['query'][:50]:<52} nDCG={score:.3f}  "
-                  f"pos={gold_pos}{sig_mark}")
+            print(
+                f"{color}[{tag}]\033[0m {q['query'][:50]:<52} nDCG={score:.3f}  "
+                f"pos={gold_pos}{sig_mark}"
+            )
 
     all_scores = [p["ndcg"] for p in per_query if p["type"] != "abstention"]
     mean = sum(all_scores) / len(all_scores) if all_scores else 0.0
@@ -190,8 +213,10 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
     abstain_scores = scores_by_type.get("abstention", [])
 
     if failed:
-        print(f"\033[33m[warn] {len(failed)} queries EXCLUDED (recall failed, not scored)\033[0m",
-              file=sys.stderr)
+        print(
+            f"\033[33m[warn] {len(failed)} queries EXCLUDED (recall failed, not scored)\033[0m",
+            file=sys.stderr,
+        )
 
     return {
         "strategy": strategy,
@@ -200,12 +225,14 @@ def grade_strategy(queries: list[dict], strategy: str, limit: int,
         "recall_at_k": round(recall_at_k, 3),
         "mean_ndcg": round(mean, 3),
         "mean_ndcg_lenient": round(lenient, 3),  # gold widened by signature match; diagnostic only
-        "abstention_acc": round(sum(abstain_scores) / len(abstain_scores), 3) if abstain_scores else None,
+        "abstention_acc": round(sum(abstain_scores) / len(abstain_scores), 3)
+        if abstain_scores
+        else None,
         "ci_95": [round(ci_lo, 3), round(ci_hi, 3)],
         "n_queries": len(all_scores),
         "n_failed_excluded": len(failed),
-        "by_type": {k: round(sum(v)/len(v), 3) for k, v in scores_by_type.items() if v},
-        "recall_by_type": {k: round(sum(v)/len(v), 3) for k, v in hits_by_type.items() if v},
+        "by_type": {k: round(sum(v) / len(v), 3) for k, v in scores_by_type.items() if v},
+        "recall_by_type": {k: round(sum(v) / len(v), 3) for k, v in hits_by_type.items() if v},
         "per_query": per_query,
     }
 
@@ -225,24 +252,28 @@ def load_queries(path: Path) -> list[dict]:
             orig = m.get("memory_id")
             if orig and str(orig) not in [str(g) for g in gold]:
                 gold = [str(orig)] + [str(g) for g in gold]
-            queries.append({
-                "query": m["query"],
-                "label": label,
-                "gold_ids": [str(g) for g in gold],
-                "gold_signature": "",
-                "type": m.get("type", "single_hop"),
-                "realm": m.get("realm"),
-            })
+            queries.append(
+                {
+                    "query": m["query"],
+                    "label": label,
+                    "gold_ids": [str(g) for g in gold],
+                    "gold_signature": "",
+                    "type": m.get("type", "single_hop"),
+                    "realm": m.get("realm"),
+                }
+            )
     else:
         # Fallback: use G0 format (version 3, plain dict of label→ids)
         for label, gold in ids.items():
-            queries.append({
-                "query": label.replace("_", " "),
-                "label": label,
-                "gold_ids": [str(g) for g in gold],
-                "gold_signature": "",
-                "type": "single_hop",
-            })
+            queries.append(
+                {
+                    "query": label.replace("_", " "),
+                    "label": label,
+                    "gold_ids": [str(g) for g in gold],
+                    "gold_signature": "",
+                    "type": "single_hop",
+                }
+            )
     return queries
 
 
@@ -252,25 +283,34 @@ def load_g0_queries(path: Path) -> list[dict]:
     sys.path.insert(0, str(path.parent))
     try:
         import importlib.util
-        spec = importlib.util.spec_from_file_location("grade_recall", path.parent / "grade-recall.py")
+
+        spec = importlib.util.spec_from_file_location(
+            "grade_recall", path.parent / "grade-recall.py"
+        )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         golden_set = mod.GOLDEN_SET
-        ids_data = json.loads((path.parent / "grade-recall-goldids.json").read_text()).get("ids", {})
+        ids_data = json.loads((path.parent / "grade-recall-goldids.json").read_text()).get(
+            "ids", {}
+        )
         queries = []
         for g in golden_set:
             label = g["desc"]
             gold = [str(x) for x in ids_data.get(label, [])]
-            queries.append({
-                "query": g["query"],
-                "label": label,
-                "gold_ids": gold,
-                "gold_signature": g.get("gold_signature", ""),
-                "type": "single_hop",
-                "realm": "project:cc-soul",
-            })
+            queries.append(
+                {
+                    "query": g["query"],
+                    "label": label,
+                    "gold_ids": gold,
+                    "gold_signature": g.get("gold_signature", ""),
+                    "type": "single_hop",
+                    "realm": "project:cc-soul",
+                }
+            )
         return queries
-    except Exception:
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+        # Golden-set file missing or malformed. An empty query list makes the
+        # eval report zero queries rather than crashing mid-run.
         return []
 
 
@@ -302,16 +342,24 @@ def bootstrap_goldids(queries: list[dict], limit: int, strategy: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--strategy", default="hybrid",
-                    help="Recall strategy: hybrid|semantic|field|smart (default: hybrid)")
-    ap.add_argument("--compare", nargs="+", metavar="STRATEGY",
-                    help="Compare multiple strategies side-by-side")
+    ap.add_argument(
+        "--strategy",
+        default="hybrid",
+        help="Recall strategy: hybrid|semantic|field|smart (default: hybrid)",
+    )
+    ap.add_argument(
+        "--compare", nargs="+", metavar="STRATEGY", help="Compare multiple strategies side-by-side"
+    )
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min", type=float, default=0.7)
-    ap.add_argument("--min-recall", type=float, default=None,
-                    help="Fail if recall@k falls below this. Unset until a true baseline exists — "
-                         "a threshold invented before the first honest measurement is just a "
-                         "number the harness was built to clear.")
+    ap.add_argument(
+        "--min-recall",
+        type=float,
+        default=None,
+        help="Fail if recall@k falls below this. Unset until a true baseline exists — "
+        "a threshold invented before the first honest measurement is just a "
+        "number the harness was built to clear.",
+    )
     ap.add_argument("--quiet", action="store_true")
     # The reranker used to be ON by default, which meant the harness never measured the
     # system. It fetches limit*_RERANK_FETCH_MUL, and lane_depth is a function of the
@@ -321,19 +369,28 @@ def main():
     # have. Two divergences from production, both invisible in the reported number, and
     # every tuning decision in this repo was made against them. Opt-in only now: default =
     # exactly what tool_recall serves.
-    ap.add_argument("--reranker", action="store_true",
-                    help="Fetch limit*4 and cross-encode down to limit. NOT the production "
-                         "path: it also widens lane_depth to 160. Use to measure the "
-                         "headroom a reranker would buy, never to report recall.")
-    ap.add_argument("--no-reranker", action="store_true",
-                    help="Deprecated no-op — this is the default now.")
-    ap.add_argument("--bootstrap", action="store_true",
-                    help="Re-verify gold IDs against live daemon")
-    ap.add_argument("--include-g0", action="store_true",
-                    help="Include G0 (grade-recall.py) queries in eval")
+    ap.add_argument(
+        "--reranker",
+        action="store_true",
+        help="Fetch limit*4 and cross-encode down to limit. NOT the production "
+        "path: it also widens lane_depth to 160. Use to measure the "
+        "headroom a reranker would buy, never to report recall.",
+    )
+    ap.add_argument(
+        "--no-reranker", action="store_true", help="Deprecated no-op — this is the default now."
+    )
+    ap.add_argument(
+        "--bootstrap", action="store_true", help="Re-verify gold IDs against live daemon"
+    )
+    ap.add_argument(
+        "--include-g0", action="store_true", help="Include G0 (grade-recall.py) queries in eval"
+    )
     ap.add_argument("--out", default=str(RESULTS_PATH))
-    ap.add_argument("--goldids", default=str(GOLDIDS_PATH),
-                    help="Gold IDs file (default: hooks/chitta-eval-goldids.json)")
+    ap.add_argument(
+        "--goldids",
+        default=str(GOLDIDS_PATH),
+        help="Gold IDs file (default: hooks/chitta-eval-goldids.json)",
+    )
     args = ap.parse_args()
 
     goldids_path = Path(args.goldids)
@@ -364,20 +421,28 @@ def main():
 
     for strat in strategies:
         if not args.quiet:
-            print(f"\n\033[1mStrategy: {strat}\033[0m  (limit={args.limit}, reranker={use_reranker})")
+            print(
+                f"\n\033[1mStrategy: {strat}\033[0m  (limit={args.limit}, reranker={use_reranker})"
+            )
             print("─" * 72)
         results[strat] = grade_strategy(queries, strat, args.limit, use_reranker, args.quiet)
         r = results[strat]
         # recall@k leads. nDCG is a ranking-quality number and it only has meaning for the
         # queries whose gold was found at all; if recall@k is low, a high nDCG just says
         # "the few it found, it ranked well" — which is how the old harness looked healthy.
-        print(f"\n\033[1mrecall@{args.limit} = {r['recall_at_k']:.3f}\033[0m"
-              f"   (gold memory retrieved at all)")
-        print(f"\033[1m{'mean nDCG@' + str(args.limit)} = {r['mean_ndcg']:.3f}\033[0m"
-              f"  95% CI [{r['ci_95'][0]:.3f}, {r['ci_95'][1]:.3f}]"
-              f"  n={r['n_queries']}")
+        print(
+            f"\n\033[1mrecall@{args.limit} = {r['recall_at_k']:.3f}\033[0m"
+            f"   (gold memory retrieved at all)"
+        )
+        print(
+            f"\033[1m{'mean nDCG@' + str(args.limit)} = {r['mean_ndcg']:.3f}\033[0m"
+            f"  95% CI [{r['ci_95'][0]:.3f}, {r['ci_95'][1]:.3f}]"
+            f"  n={r['n_queries']}"
+        )
         if r.get("abstention_acc") is not None:
-            print(f"abstention   = {r['abstention_acc']:.3f}   (declines when the store cannot answer)")
+            print(
+                f"abstention   = {r['abstention_acc']:.3f}   (declines when the store cannot answer)"
+            )
         for qtype, score in r.get("by_type", {}).items():
             print(f"  nDCG {qtype}: {score:.3f}")
         for qtype, score in r.get("recall_by_type", {}).items():
@@ -389,12 +454,15 @@ def main():
         print("─" * 50)
         for s, r in results.items():
             ci = r["ci_95"]
-            print(f"{s:<12} {r['mean_ndcg']:<12.3f} [{ci[0]:.3f}, {ci[1]:.3f}]      {r['n_queries']}")
+            print(
+                f"{s:<12} {r['mean_ndcg']:<12.3f} [{ci[0]:.3f}, {ci[1]:.3f}]      {r['n_queries']}"
+            )
 
     # Save results
     out_path = Path(args.out)
-    out_path.write_text(json.dumps(results if len(strategies) > 1 else results[strategies[0]],
-                                    indent=2))
+    out_path.write_text(
+        json.dumps(results if len(strategies) > 1 else results[strategies[0]], indent=2)
+    )
     print(f"\nresult: {out_path}")
 
     r0 = results[strategies[0]]
@@ -402,8 +470,10 @@ def main():
     # nDCG alone cannot fail this gate on a recall collapse — it is only computed over the
     # queries whose gold was retrieved. Gate on recall too, or the collapse exits 0.
     if args.min_recall is not None and r0["recall_at_k"] < args.min_recall:
-        print(f"\033[31mrecall@{args.limit}={r0['recall_at_k']:.3f} < --min-recall {args.min_recall}\033[0m",
-              file=sys.stderr)
+        print(
+            f"\033[31mrecall@{args.limit}={r0['recall_at_k']:.3f} < --min-recall {args.min_recall}\033[0m",
+            file=sys.stderr,
+        )
         ok = False
     sys.exit(0 if ok else 1)
 

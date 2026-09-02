@@ -3,6 +3,85 @@
 All notable changes to chitta (formerly cc-soul; renamed 2026-09-02, see
 [docs/RENAME.md](docs/RENAME.md)) are documented here.
 
+> **Gap notice, 2026-09-02.** Entries below jump from 5.71.0 to 5.41.3.
+> Versions 5.42.0 through 5.70.x were released without changelog entries;
+> roughly 419 commits landed in that window. The git history and the GitHub
+> release notes are the record for that period. This is a documentation gap,
+> not a period of inactivity.
+
+## [5.71.0] - 2026-09-02
+
+### Changed — project renamed `cc-soul` → `chitta`
+
+- Plugin identity is now `chitta`, marketplace `genomewalker-chitta`, repository
+  `github.com/genomewalker/chitta`. Skills are namespaced by plugin name, so
+  `/cc-soul:recap` becomes `/chitta:recap`.
+- Every `CC_SOUL_*` environment variable keeps working through an alias shim in
+  `hooks/lib.sh` plus inline fallbacks at pre-source read sites. If both names
+  are set, `CHITTA_*` wins.
+- Unchanged on purpose: file and directory names, the `chitta-field` submodule,
+  binaries, systemd unit names, the `.cc-soul-realm` dotfile, stored realm names
+  (`project:cc-soul` is still a valid realm), `docs/CNAME`, and historical
+  changelog entries. Full migration steps and the alias table:
+  [docs/RENAME.md](docs/RENAME.md).
+
+### Added — recall-biased pre-filter
+
+- `recall` now fetches a wide candidate pool (`CHITTA_RECALL_POOL`, default 60,
+  capped at 160) and over-selects it down to a rerank budget with scalar-only
+  keep rules. A candidate survives if it is already inside `limit`, contains a
+  literal query token, shares realm and kind with a top-5 hit at half the maximum
+  score, or is a one-hop association neighbour of the head.
+- A/B on the 30-query golden set, mean nDCG@20 with the reranker on: **0.435**
+  pre-filter off, **0.487** on. On by default; `prefilter: false` or
+  `CHITTA_RECALL_PREFILTER=0` restores the previous narrow-pool path exactly.
+
+### Added — analogy lane, keyword realm scoping, lane ablation
+
+- `recall_analogy`: proportional (`a:b::c:?`) and structural relation-shape
+  retrieval over the triplet lane using vector-symbolic binding. No model call.
+- `smart_recall`'s keyword legs are now realm-scoped, closing a cross-realm bleed.
+- `CHITTA_ABLATE_LANES` disables named hook recall lanes (`sem`, `ctx`, `hyb`,
+  `kw`, `corr`, `xr`) for one agent process. Consumed by `hooks/prompt-core.sh`;
+  there is no daemon-side ablation flag.
+
+### Added — SMRITI-Bench
+
+- `benchmarks/smriti/`: an outcome-grounded memory benchmark for coding agents.
+  A task passes an objective check command or it does not; no model judge, no
+  reference-answer overlap score. First full matrix (9 tasks, off/on, 3 trials,
+  n=27 per condition): success 23/27 off versus 27/27 on, paired token ratio
+  median 0.52. MUI v2 rescore on the same data: 0.630.
+- Not yet run: a live matrix over the six newer tasks or any ablation condition.
+
+### Added — outcome ledger, MDL consolidation gate
+
+- `chitta-mcp/outcome_ledger.py` and `hooks/outcome-ledger.sh`: fail-open JSONL
+  append of `injected`, `bash_outcome` and `session_end` events, with an offline
+  joiner computing Wilson-lower-bound credit per memory.
+- `chitta-mcp/mdl_gate.py` runs in **shadow mode only**. It writes to
+  `mdl_gate_shadow.jsonl` and does not block distillation.
+
+### Added — session registry, thread inference, resume selector
+
+- `chitta-mcp/session_registry.py`, `thread_inference.py`, `resume_selector.py`,
+  with tests under `chitta-mcp/tests/`.
+
+### Fixed
+
+- Removed `eval` and Python source interpolation from hooks.
+- `.claude-plugin/plugin.json` declared `chitta-field >= 5.0.0`; the submodule
+  version is 2.7.12. Corrected to `>= 2.1.0`, the documented snapshot-format
+  rollback floor.
+
+### Documentation
+
+- `docs/tools.html` and `docs/API.md` are now generated from a live daemon by
+  `scripts/gen-tools-docs.py` instead of hand-maintained. The hand-written page
+  claimed "150+ tools" and listed 241; the real surface is 343.
+- New pages: `docs/recall.html` (the retrieval pipeline) and
+  `docs/benchmarks.html` (SMRITI-Bench, LongMemEval, LoCoMo).
+
 ## [5.41.3] - 2026-05-21
 
 ### Added — LongMemEval benchmark pipeline (78% on longmemeval_s)

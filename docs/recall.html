@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recall Pipeline — chitta</title>
+<meta name="description" content="How chitta retrieves memory: a wide candidate pool, a recall-biased pre-filter, reciprocal-rank fusion across lanes, an optional cross-encoder rerank, and a hook-side admission filter with a calibrated confidence band.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Recall Pipeline — chitta">
+<meta property="og:description" content="Pool, pre-filter, fusion, rerank, admission. Every stage of chitta's retrieval path, with the knobs and the measured numbers.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Recall Pipeline — chitta">
+<meta name="twitter:description" content="Pool, pre-filter, fusion, rerank, admission — chitta's retrieval path end to end.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+.submenu-toc { position: sticky; top: 60px; z-index: 90;
+  background: linear-gradient(180deg, rgba(11,11,16,0.98) 0%, rgba(11,11,16,0.95) 100%);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(122,162,247,0.1); margin-top: -1px; }
+.submenu-toc-inner { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-5);
+  display: flex; align-items: center; gap: 4px; overflow-x: auto;
+  scrollbar-width: none; -ms-overflow-style: none; }
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link { display: flex; align-items: center; gap: 8px; padding: 14px 16px;
+  color: #565f89; font-family: var(--font-mono); font-size: 0.75rem;
+  text-decoration: none; white-space: nowrap; transition: all 0.2s ease; position: relative; }
+.submenu-toc-link::before { content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; opacity: 0.4; transition: all 0.2s ease; }
+.submenu-toc-link:hover, .submenu-toc-link.active { color: var(--sandal-300); }
+.submenu-toc-link.active::before { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.stage-list { counter-reset: stage; margin: var(--space-5) 0; }
+.stage { display: grid; grid-template-columns: 44px 1fr; gap: var(--space-4);
+  padding: var(--space-4) 0; border-top: 1px solid rgba(157,178,217,0.08); }
+.stage-num { font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--sandal-300); opacity: 0.7; }
+.stage-title { font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--aura-300); margin-bottom: var(--space-2); }
+.stage-body { color: var(--ash-300); line-height: 1.8; font-size: var(--text-sm); }
+.status-line { font-family: var(--font-mono); font-size: var(--text-xs);
+  color: #565f89; margin-top: var(--space-3); }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">chitta</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html" class="active">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
+      <li><a href="sadhana.html">Sadhana</a></li>
+      <li><a href="context.html">Context</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
+      <li><a href="constellation.html">Constellation</a></li>
+      <li><a href="dreams/index.html">Dreams</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Retrieval</div>
+    <h1 class="reveal reveal-delay-1">How recall works.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Retrieval runs in two places. The daemon answers a <code style="color: var(--aura-300);">recall</code> call by widening a candidate pool, over-selecting it with cheap scalar rules, and optionally reranking. The hook that runs on every prompt fans out across several lanes, fuses them, and then decides what is actually allowed into the context window.</p>
+    <p class="status-line">Status as of 2026-09-02.</p>
+  </div>
+</header>
+
+<!-- TOC -->
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#sec-daemon" class="submenu-toc-link" data-section="sec-daemon">Daemon path</a>
+    <a href="#sec-strategies" class="submenu-toc-link" data-section="sec-strategies">Strategies</a>
+    <a href="#sec-lanes" class="submenu-toc-link" data-section="sec-lanes">Hook lanes</a>
+    <a href="#sec-admission" class="submenu-toc-link" data-section="sec-admission">Admission</a>
+    <a href="#sec-c2" class="submenu-toc-link" data-section="sec-c2">Confidence band</a>
+    <a href="#sec-rerank" class="submenu-toc-link" data-section="sec-rerank">Rerank</a>
+    <a href="#sec-knobs" class="submenu-toc-link" data-section="sec-knobs">Knobs</a>
+    <a href="#sec-results" class="submenu-toc-link" data-section="sec-results">Measured</a>
+  </div>
+</nav>
+
+<section class="tools-section">
+  <div class="container">
+
+    <!-- DAEMON PATH -->
+    <div class="tools-category" id="sec-daemon">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="1" opacity="0.4"/><circle cx="10" cy="10" r="3" stroke="#CBAF86" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Daemon path</span>
+        <span class="tools-category-count">5 stages</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">One <code>recall</code> call inside <code>chittad</code>, from query to returned hits. The design premise, measured on the golden set, is that the top-20 cut &mdash; not ranking precision &mdash; was losing gold memories the retriever had already found. So the pool gets wider and the filter that narrows it is deliberately generous.</p>
+        <div class="stage-list">
+
+          <div class="stage reveal">
+            <div class="stage-num">01</div>
+            <div>
+              <div class="stage-title">Wide pool</div>
+              <div class="stage-body">Each lane fetches a pool far deeper than the caller&rsquo;s <code>limit</code>: <code>CHITTA_RECALL_POOL</code> results, 60 by default, hard-capped at 160 to bound HNSW and BM25 cost. A caller can override per call with the <code>pool</code> argument.</div>
+            </div>
+          </div>
+
+          <div class="stage reveal">
+            <div class="stage-num">02</div>
+            <div>
+              <div class="stage-title">Fusion and term-overlap rescore</div>
+              <div class="stage-body">Lane results are fused, then rescored with a term-overlap component so literal query tokens &mdash; filenames, identifiers, paths &mdash; count for something a pure embedding cosine would miss.</div>
+            </div>
+          </div>
+
+          <div class="stage reveal">
+            <div class="stage-num">03</div>
+            <div>
+              <div class="stage-title">Recall-biased pre-filter</div>
+              <div class="stage-body">The pool is over-selected down to a rerank budget (<code>CHITTA_RERANK_BUDGET</code>, 24 by default) using scalar-only rules &mdash; no embeddings, no per-candidate store round-trips, linear in pool size. A candidate survives if <em>any</em> rule fires, and that asymmetry is the point:
+                <ul style="margin-top: var(--space-2); line-height: 1.8;">
+                  <li>its rank is already inside <code>limit</code>, so nothing that would have been returned is ever dropped;</li>
+                  <li>it literally contains a distinctive query token;</li>
+                  <li>it shares realm and kind with a top-5 hit and scores at least half the maximum;</li>
+                  <li>it is a one-hop association neighbour of the head of the ranking.</li>
+                </ul>
+                On by default. Pass <code>prefilter: false</code>, or set <code>CHITTA_RECALL_PREFILTER=0</code>, to restore the previous narrow-pool path exactly.</div>
+            </div>
+          </div>
+
+          <div class="stage reveal">
+            <div class="stage-num">04</div>
+            <div>
+              <div class="stage-title">Rerank</div>
+              <div class="stage-body">Survivors go to the cross-encoder stage when it is available, described under <a href="#sec-rerank">Rerank</a> below. Without it the fused order stands.</div>
+            </div>
+          </div>
+
+          <div class="stage reveal">
+            <div class="stage-num">05</div>
+            <div>
+              <div class="stage-title">Truncate to limit</div>
+              <div class="stage-body">Only here does the result set narrow to what the caller asked for. Each hit is emitted as <code>#&lt;id&gt; [pct%] [type] text</code>; <code>explain: true</code> adds a per-hit score decomposition.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- STRATEGIES -->
+    <div class="tools-category" id="sec-strategies">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 6 H16 M4 10 H16 M4 14 H11" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Strategies</span>
+        <span class="tools-category-count">7 strategies</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Over MCP, <code>recall</code> is a gateway: the <code>strategy</code> argument picks which daemon retrieval tool actually runs, and the gateway applies the rerank stage around it. The default is <code>hybrid</code>, not pure semantic.</p>
+        <table class="comp-table">
+          <thead><tr><th>strategy</th><th>Runs</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td><code>hybrid</code> <em>(default)</em></td><td><code>hybrid_recall</code></td><td>General queries. Measured a strict superset of pure semantic on the golden set: nDCG@20 +0.08 on active queries, +2 passes, no regressions. Its BM25 lane catches literal tokens that a low cosine similarity buries.</td></tr>
+            <tr><td><code>semantic</code></td><td><code>recall</code></td><td>The pre-gateway behaviour, for callers that want embedding similarity alone.</td></tr>
+            <tr><td><code>keyword</code></td><td><code>recall_keyword</code></td><td>BM25 only, realm-scoped. Exact filenames, identifiers, error strings.</td></tr>
+            <tr><td><code>smart</code></td><td><code>smart_recall</code></td><td>Multi-lane reciprocal-rank fusion across semantic, typed, spreading-activation and session lanes.</td></tr>
+            <tr><td><code>priority</code></td><td><code>recall_by_priority</code></td><td>Priority-tier ordering rather than similarity ordering.</td></tr>
+            <tr><td><code>temporal</code></td><td><code>recall_temporal</code></td><td>Time-scoped questions.</td></tr>
+            <tr><td><code>field</code></td><td><code>recall_field</code></td><td>The Hopfield/DAM associative path.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">Multi-lane fusion uses reciprocal-rank fusion with <em>k</em> = 60. Passing <code>disable_hdc: true</code> skips the hyperdimensional-computing lane; it exists for ablation and benchmarking, not for normal use.</p>
+        <p class="section-intro">Separately, <code>recall_analogy</code> answers structural queries rather than similarity queries &mdash; proportional (<code>a:b::c:?</code>) and relation-shape matching over the triplet lane, using vector-symbolic binding. No model call, no GPU.</p>
+      </div>
+    </div>
+
+    <!-- HOOK LANES -->
+    <div class="tools-category" id="sec-lanes">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 5 H17 M3 10 H17 M3 15 H17" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Hook lanes</span>
+        <span class="tools-category-count">6 lanes</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">On every prompt, <code>hooks/prompt-core.sh</code> runs several recall calls in parallel &mdash; each in a backgrounded subshell writing to its own file &mdash; then merges them with a lane marker per line. The whole hook works to a wall-clock budget (<code>CHITTA_HOOK_BUDGET_MS</code>, 6000 ms by default) because the harness gives <code>UserPromptSubmit</code> far less time than the individual timeouts sum to.</p>
+        <table class="comp-table">
+          <thead><tr><th>Lane</th><th>What it asks for</th><th>Why it exists</th></tr></thead>
+          <tbody>
+            <tr><td><code>sem</code></td><td>Structured or smart recall on the literal turn</td><td>Fuzzy semantic match on what was just said.</td></tr>
+            <tr><td><code>ctx</code></td><td>Semantic recall against a recency-weighted thread query</td><td>Conversational continuity across turns, not just this one.</td></tr>
+            <tr><td><code>hyb</code></td><td><code>recall --strategy hybrid --limit 5</code></td><td>Fused hits, and the header that carries the calibrated confidence scalar.</td></tr>
+            <tr><td><code>kw</code></td><td>BM25 only, filtered to knowledge types</td><td>Exact tokens. Unfiltered it scored 0.345 useful on 29 replayed prompts; restricting to wisdom, insight, research, data, milestone and convergence types lifted that to 0.818.</td></tr>
+            <tr><td><code>corr</code></td><td>Correction-tagged recall</td><td>Past corrections that should not be repeated.</td></tr>
+            <tr><td><code>xr</code></td><td>Unscoped hybrid retry</td><td>Cross-realm fallback, fired only when the realm-scoped merge came back empty.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">A deterministic correction lookup runs alongside these and is not one of the fuzzy lanes: it is a keyed check, not a ranked search, and it survives the silencing rules below.</p>
+        <p class="section-intro">Any lane can be turned off for a single agent process with <code>CHITTA_ABLATE_LANES</code>, a comma list of the short names above. That is the mechanism the benchmark&rsquo;s ablation matrix drives; see <a href="benchmarks.html">Benchmarks</a>.</p>
+      </div>
+    </div>
+
+    <!-- ADMISSION -->
+    <div class="tools-category" id="sec-admission">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="4" width="12" height="12" rx="2" stroke="#CBAF86" stroke-width="1.2" fill="none"/></svg>
+        </div>
+        <span class="tools-category-name">Admission</span>
+        <span class="tools-category-count">5 drop causes</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Retrieving a memory is not the same as showing it to the model. Every merged candidate carries an admission reason &mdash; the lane it came from &mdash; and every rejection is counted by cause. The hook renders that as per-item lane tags plus one summary line, so the policy that decides what enters the context window is inspectable rather than implicit.</p>
+        <div class="code-block"><span class="comment"># the summary line the hook emits</span>
+[admit] C2:KNOWN(53%) sem:2 hyb:1 kw:1 | drop conf:4 unk:6 dup:2 | relevant memory present &mdash; verify before fully trusting</div>
+        <table class="comp-table">
+          <thead><tr><th>Drop cause</th><th>Rule</th></tr></thead>
+          <tbody>
+            <tr><td><code>conf</code></td><td>Below the confidence floor. 30% for the ranked lanes; the BM25 lane is scored on its own much lower scale and gets a floor of 1 instead.</td></tr>
+            <tr><td><code>unk</code></td><td>Silenced by the UNKNOWN rule described in the next section.</td></tr>
+            <tr><td><code>dup</code></td><td>Already injected earlier in this session, tracked by content hash.</td></tr>
+            <tr><td><code>meta</code></td><td>Process artifacts: thinking-block episodes and synthesis memories, which are the system talking about itself.</td></tr>
+            <tr><td><code>cap</code></td><td>Over the per-turn budget. The summary line and the confidence tag are reserved space before memories are appended.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">Two more rules shape what is even considered. A terse negation &mdash; eight words or fewer containing &ldquo;is not&rdquo;, &ldquo;no&rdquo; and similar &mdash; silences every fuzzy lane, because such a turn is almost always correcting the previous turn rather than asking for a topic search, and broad recall there reinforces the negated noun. And a shadow-mode entity check logs, without yet enforcing, whether each semantic candidate shares a distinctive token with the turn.</p>
+      </div>
+    </div>
+
+    <!-- C2 -->
+    <div class="tools-category" id="sec-c2">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/><path d="M10 6 V10 L13 12" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Confidence band</span>
+        <span class="tools-category-count">2 bands</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">The hybrid lane&rsquo;s response header carries the daemon&rsquo;s Platt-calibrated maximum relevance, a single scalar standing in for &ldquo;does this store know anything about this question&rdquo;. The hook bins it into two bands and states the answer to the model in words. This is hook-side admission logic, not a daemon mechanism &mdash; there is no confidence-band parameter inside <code>chittad</code>.</p>
+        <table class="comp-table">
+          <thead><tr><th>Band</th><th>Raw maxrel</th><th>What the model is told</th></tr></thead>
+          <tbody>
+            <tr><td><code>KNOWN</code></td><td>&ge; 81</td><td>Relevant memory is present; verify before fully trusting it, and recall explicitly if it matters.</td></tr>
+            <tr><td><code>UNKNOWN</code></td><td>&lt; 81</td><td>This is the boundary of what is known; do not lean on it, ask or recall explicitly.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">Two bands, not three, on purpose. Version 5.70.0 shipped a three-band tag; store drift then inverted the boundary between the top two bands, with the supposedly stronger band scoring gold-hit@3 0.62 against the weaker band&rsquo;s 0.64, and no threshold restored a monotonic separation. A confident-sounding tag that can be wrong at rank one is worse than a coarser honest one, so the two top bands were merged into a single confident-but-verify band. The KNOWN-versus-UNKNOWN split is monotonic.</p>
+        <p class="section-intro">The <em>displayed</em> percentage is recalibrated separately. Raw Platt maxrel read a mean of 0.844 on a frozen golden snapshot where the true hit@3 was 0.533, an expected calibration error of 0.31. A logistic refit over the logit of maxrel cuts leave-one-out calibration error to 0.159 and removes the over-confidence. Only the number shown is recalibrated; the band itself stays on raw maxrel, so behaviour is unchanged and the figure the model reads stops lying.</p>
+        <p class="section-intro"><strong>UNKNOWN silence.</strong> The per-item percentage from multi-lane fusion is max-normalized, so rank one always reads 100% for any query at all, off-topic included &mdash; which defeats a per-item floor. When the absolute signal says UNKNOWN, the semantic, context and fuzzy-correction lanes are treated as noise and dropped. Keyword, hybrid and cross-realm hits survive only if they share a distinctive token with the current turn, which preserves the exact-lookup case without letting stop-word matches leak arbitrary memories. Set <code>CHITTA_UNKNOWN_SILENCE=0</code> to disable.</p>
+        <p class="section-intro"><strong>Small-realm relaxation.</strong> A cross-project calibration under-scores a genuinely small realm: a handful of on-topic memories can pin the band below the threshold even when the top hit is strong. When the hybrid header shows a short result page in a non-default realm with a confident top hit, the token-share rule is extended to the semantic and context lanes instead of dropping them outright. The fuzzy correction lane stays silenced regardless, because a wrong correction costs more than a missed one.</p>
+      </div>
+    </div>
+
+    <!-- RERANK -->
+    <div class="tools-category" id="sec-rerank">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M6 14 V6 M10 14 V9 M14 14 V4" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Rerank</span>
+        <span class="tools-category-count">optional</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">When a cross-encoder is available, the recall gateway fetches four times the requested limit, scores every query-document pair with <code>cross-encoder/ms-marco-MiniLM-L-6-v2</code>, and returns the top <code>limit</code> by that score. It only engages when the retriever returned more candidates than the caller asked for; otherwise there is nothing to reorder and the call passes straight through.</p>
+        <p class="section-intro">An ONNX int8 export is preferred when <code>CHITTA_RERANK_ONNX_DIR</code> points at one. Thread count and maximum sequence length are set by <code>CHITTA_RERANK_THREADS</code> (8) and <code>CHITTA_RERANK_MAX_LEN</code> (128). If no reranker can be loaded the pipeline runs without it &mdash; the stage is an improvement, not a dependency.</p>
+      </div>
+    </div>
+
+    <!-- KNOBS -->
+    <div class="tools-category" id="sec-knobs">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="7" r="2.5" stroke="#9DB2D9" stroke-width="1"/><circle cx="13" cy="13" r="2.5" stroke="#CBAF86" stroke-width="1"/><path d="M7 9.5 V16 M13 10.5 V4" stroke="#9DB2D9" stroke-width="0.8" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Knobs</span>
+        <span class="tools-category-count">10 variables</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Every variable below also answers to its historical <code>CC_SOUL_*</code> name; see <a href="https://github.com/genomewalker/chitta/blob/main/docs/RENAME.md" target="_blank" rel="noopener">the rename note</a> for the full alias table.</p>
+        <table class="comp-table">
+          <thead><tr><th>Variable</th><th>Default</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td><code>CHITTA_RECALL_POOL</code></td><td>60</td><td>Candidate pool depth before the pre-filter, capped at 160.</td></tr>
+            <tr><td><code>CHITTA_RECALL_PREFILTER</code></td><td>1</td><td>Set to 0 to restore the narrow-pool path.</td></tr>
+            <tr><td><code>CHITTA_RERANK_BUDGET</code></td><td>24</td><td>Survivor cap the pre-filter over-selects down to.</td></tr>
+            <tr><td><code>CHITTA_RERANK_ONNX_DIR</code></td><td>unset</td><td>Directory holding the int8 ONNX reranker export.</td></tr>
+            <tr><td><code>CHITTA_RERANK_THREADS</code></td><td>8</td><td>ONNX intra-op thread count.</td></tr>
+            <tr><td><code>CHITTA_RERANK_MAX_LEN</code></td><td>128</td><td>Maximum reranker sequence length.</td></tr>
+            <tr><td><code>CHITTA_ABLATE_LANES</code></td><td>unset</td><td>Comma list of hook lanes to skip: <code>sem</code>, <code>ctx</code>, <code>hyb</code>, <code>kw</code>, <code>corr</code>, <code>xr</code>.</td></tr>
+            <tr><td><code>CHITTA_UNKNOWN_SILENCE</code></td><td>1</td><td>Set to 0 to keep low-confidence lanes instead of silencing them.</td></tr>
+            <tr><td><code>CHITTA_C2_SMALL_REALM</code></td><td>1</td><td>Small-realm relaxation, with <code>_MAXN</code> (3) and <code>_MINPCT</code> (50) thresholds.</td></tr>
+            <tr><td><code>CHITTA_HOOK_BUDGET_MS</code></td><td>6000</td><td>Wall-clock budget for the whole prompt hook.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">Set <code>CHITTA_ADMIT_DEBUG=1</code> to get one line on stderr per candidate, showing its lane, confidence, the confidence band, and whether the small-realm relaxation applied.</p>
+      </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div class="tools-category" id="sec-results">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 16 L8 10 L12 12 L16 5" stroke="#CBAF86" stroke-width="1.2" fill="none"/></svg>
+        </div>
+        <span class="tools-category-name">Measured</span>
+        <span class="tools-category-count">golden set</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Retrieval changes are graded on a fixed golden set of 30 queries with hand-labelled gold memory ids, scored as mean nDCG at a limit of 20 with the reranker on. The set is small and drawn from one store, so it is directional evidence, not a general claim.</p>
+        <table class="comp-table">
+          <thead><tr><th>Run</th><th>mean nDCG@20</th></tr></thead>
+          <tbody>
+            <tr><td>Pre-filter off</td><td>0.435</td></tr>
+            <tr><td>Pre-filter on <em>(current default)</em></td><td>0.487</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">The immediately preceding baseline on the same set read 0.442. Separately, making <code>hybrid</code> the default strategy measured as a strict superset of pure semantic: nDCG@20 up 0.08 on active queries, two more passing queries, and no regressions.</p>
+        <p class="section-intro">The end-to-end question &mdash; does any of this make an agent finish a real task more often or more cheaply &mdash; is a different measurement, and it lives on the <a href="benchmarks.html">Benchmarks</a> page.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) { entry.target.classList.add('visible'); observer.unobserve(entry.target); }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    var t = document.querySelector(this.getAttribute('href'));
+    if (!t) return;
+    e.preventDefault();
+    window.scrollTo({ top: t.getBoundingClientRect().top + window.pageYOffset - 140, behavior: 'smooth' });
+    t.classList.remove('collapsed');
+  });
+});
+(function() {
+  var links = document.querySelectorAll('.submenu-toc-link');
+  var secs = [];
+  links.forEach(function(l) {
+    var s = document.getElementById(l.getAttribute('data-section'));
+    if (s) secs.push({ el: s, link: l });
+  });
+  if (!secs.length) return;
+  function update() {
+    var pos = window.scrollY + 180, active = secs[0];
+    secs.forEach(function(s) { if (s.el.offsetTop <= pos) active = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    active.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

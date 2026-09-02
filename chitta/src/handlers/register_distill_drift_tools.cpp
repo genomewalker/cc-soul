@@ -173,6 +173,10 @@ void FieldRpcHandler::register_distill_drift_tools() {
                 {"budget_tokens", {{"type", "integer"}, {"description", "Target token budget (default 4000)"}}},
                 {"mad_k", {{"type", "number"}, {"description", "MAD threshold multiplier (default 1.5, lower=more turns)"}}},
                 {"role_filter", {{"type", "string"}, {"description", "Filter by role: user, assistant, or empty for all"}}},
+                // ceiling: advertised but inert — tool_trajectory_compact reads
+                // no such flag, so system turns are always excluded and a caller
+                // passing true is silently ignored; upgrade: thread it into the
+                // role filter there, or drop it from this schema. (2026-09-02)
                 {"include_system", {{"type", "boolean"}, {"description", "Include system turns (default false)"}}}
             }}, {"required", {"task"}}
         }}

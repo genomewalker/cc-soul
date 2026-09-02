@@ -100,6 +100,7 @@ def _read_stack_state() -> dict:
 
 def _write_stack_state(patch: dict) -> None:
     from datetime import datetime, timezone
+
     path = _stack_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     data = _read_stack_state()
@@ -235,7 +236,9 @@ def heal_stack(*, check_only: bool = False) -> int:
         _write_stack_state({"backend": backend_actual})
 
     claude_settings = _json_file(_claude_home() / "settings.json")
-    claude_configured = bool(((claude_settings.get("mcpServers") or {}).get("chitta") or {}).get("command"))
+    claude_configured = bool(
+        ((claude_settings.get("mcpServers") or {}).get("chitta") or {}).get("command")
+    )
     claude_adapter = state.get("claude_adapter", "")
     mcp_version = _distribution_version("chitta-mcp")
 
@@ -257,7 +260,9 @@ def heal_stack(*, check_only: bool = False) -> int:
     if codex_present:
         codex_adapter = state.get("codex_adapter", "")
         if not codex_adapter or codex_adapter != backend_actual:
-            print(f"  Codex adapter drift: manifest {codex_adapter or 'missing'}, backend {backend_actual}")
+            print(
+                f"  Codex adapter drift: manifest {codex_adapter or 'missing'}, backend {backend_actual}"
+            )
             drift_count += 1
             if not check_only:
                 mcp_install._install_codex()
@@ -268,7 +273,9 @@ def heal_stack(*, check_only: bool = False) -> int:
         bridge_installed = _distribution_version("chitta-bridge")
         bridge_recorded = state.get("bridge", "")
         if bridge_installed and bridge_installed != bridge_recorded:
-            print(f"  Bridge manifest out of date: installed {bridge_installed}, manifest {bridge_recorded or 'missing'}")
+            print(
+                f"  Bridge manifest out of date: installed {bridge_installed}, manifest {bridge_recorded or 'missing'}"
+            )
             drift_count += 1
             if not check_only:
                 _write_stack_state({"bridge": bridge_installed})
@@ -308,8 +315,12 @@ def print_status() -> int:
     claude_home = _claude_home()
     codex_home = _codex_home()
     claude_settings = _json_file(claude_home / "settings.json")
-    codex_config = (codex_home / "config.toml").read_text() if (codex_home / "config.toml").is_file() else ""
-    chitta_entry = (((claude_settings.get("mcpServers") or {}).get("chitta")) or {}).get("command", "")
+    codex_config = (
+        (codex_home / "config.toml").read_text() if (codex_home / "config.toml").is_file() else ""
+    )
+    chitta_entry = (((claude_settings.get("mcpServers") or {}).get("chitta")) or {}).get(
+        "command", ""
+    )
     chitta_mcp_cmd = _resolve_command(
         "chitta-mcp",
         str(Path.home() / ".local" / "bin" / "chitta-mcp"),
@@ -318,22 +329,32 @@ def print_status() -> int:
     chitta_mcp_version = _distribution_version("chitta-mcp") or _command_version(chitta_mcp_cmd)
 
     print("Shared backend")
-    print(_status_line("chitta", _command_version(str(claude_home / "bin" / "chitta")) or "missing"))
-    print(_status_line("chittad", _command_version(str(claude_home / "bin" / "chittad")) or "missing"))
+    print(
+        _status_line("chitta", _command_version(str(claude_home / "bin" / "chitta")) or "missing")
+    )
+    print(
+        _status_line("chittad", _command_version(str(claude_home / "bin" / "chittad")) or "missing")
+    )
     print(_status_line("daemon", _systemd_daemon_state()))
     print(_status_line("mind path", str(claude_home / "mind")))
     print(_status_line("socket", get_socket_path()))
     print(_status_line("chitta-mcp", chitta_mcp_version or "missing"))
 
     print("\nClaude Code adapter")
-    print(_status_line("settings.json", "present" if (claude_home / "settings.json").is_file() else "missing"))
+    print(
+        _status_line(
+            "settings.json", "present" if (claude_home / "settings.json").is_file() else "missing"
+        )
+    )
     print(_status_line("MCP server", chitta_entry or "not configured"))
 
     print("\nCodex adapter")
     print(
         _status_line(
             "cc-soul plugin",
-            "installed" if (codex_home / "plugins" / "cache" / "local" / "cc-soul" / "local").is_dir() else "missing",
+            "installed"
+            if (codex_home / "plugins" / "cache" / "local" / "cc-soul" / "local").is_dir()
+            else "missing",
         )
     )
     print(
@@ -353,7 +374,7 @@ def print_status() -> int:
     print(
         _status_line(
             "bridge config",
-            "present" if '[mcp_servers.chitta-bridge]' in codex_config else "not configured",
+            "present" if "[mcp_servers.chitta-bridge]" in codex_config else "not configured",
         )
     )
     print(_status_line("chitta-bridge", _distribution_version("chitta-bridge") or "missing"))
@@ -381,14 +402,20 @@ def doctor_stack(*, fix: bool) -> int:
 
         issues += len(duplicates)
         print(f"  {name}: keeping {kept['version']} @ {kept['path']}")
-        for duplicate in sorted(duplicates, key=lambda record: _version_key(str(record["version"]))):
+        for duplicate in sorted(
+            duplicates, key=lambda record: _version_key(str(record["version"]))
+        ):
             print(f"    stale {duplicate['version']} @ {duplicate['path']}")
             if fix:
                 shutil.rmtree(Path(duplicate["path"]))
                 changes += 1
 
     if fix:
-        print(f"\nremoved {changes} stale dist-info directories." if changes else "\nno cleanup needed.")
+        print(
+            f"\nremoved {changes} stale dist-info directories."
+            if changes
+            else "\nno cleanup needed."
+        )
     elif issues:
         print("\nrerun with: chitta-stack doctor --fix")
     else:
@@ -404,7 +431,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    install_p = sub.add_parser("install", help="Install the shared backend and/or frontend adapters")
+    install_p = sub.add_parser(
+        "install", help="Install the shared backend and/or frontend adapters"
+    )
     install_p.add_argument(
         "target",
         nargs="?",
@@ -418,7 +447,9 @@ def _parser() -> argparse.ArgumentParser:
         help="Skip the Codex chitta-bridge adapter when installing Codex",
     )
 
-    uninstall_p = sub.add_parser("uninstall", help="Remove frontend adapters without touching the shared backend")
+    uninstall_p = sub.add_parser(
+        "uninstall", help="Remove frontend adapters without touching the shared backend"
+    )
     uninstall_p.add_argument(
         "target",
         nargs="?",
@@ -433,13 +464,17 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("status", help="Show shared-backend and frontend-adapter status")
-    doctor_p = sub.add_parser("doctor", help="Inspect or clean stale Python package metadata for the shared stack")
+    doctor_p = sub.add_parser(
+        "doctor", help="Inspect or clean stale Python package metadata for the shared stack"
+    )
     doctor_p.add_argument(
         "--fix",
         action="store_true",
         help="Remove stale dist-info directories for chitta-mcp and chitta-bridge",
     )
-    heal_p = sub.add_parser("heal", help="Reinstall any stack component that drifted from the manifest")
+    heal_p = sub.add_parser(
+        "heal", help="Reinstall any stack component that drifted from the manifest"
+    )
     heal_p.add_argument(
         "--check",
         action="store_true",

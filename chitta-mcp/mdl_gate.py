@@ -91,7 +91,9 @@ def judge(wisdom: str, evidence: str, margin: int = DEFAULT_MARGIN) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_judge = sub.add_parser("judge", help="Judge whether wisdom compresses its evidence")
@@ -103,9 +105,9 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.cmd == "judge":
-        with open(args.wisdom_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(args.wisdom_file, encoding="utf-8", errors="replace") as f:
             wisdom = f.read()
-        with open(args.evidence_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(args.evidence_file, encoding="utf-8", errors="replace") as f:
             evidence = f.read()
         result = judge(wisdom, evidence, args.margin)
         print(json.dumps(result))

@@ -1,14 +1,30 @@
 # chitta
 
+Status as of 2026-09-02.
+
 ## Build & deploy
 ```bash
 cd chitta && cmake --build build --parallel
 install -m 0755 ../bin/chittad ~/.claude/bin/chittad
 install -m 0755 ../bin/chitta  ~/.claude/bin/chitta
+# chitta_hintd exists only when built with CHITTA_WITH_LLAMA_CPP=ON
+[ -f ../bin/chitta_hintd ] && install -m 0755 ../bin/chitta_hintd ~/.claude/bin/chitta_hintd
 systemctl --user restart chittad
-pkill -f "chitta mcp" 2>/dev/null; sleep 1
+systemctl --user try-restart chitta-hintd 2>/dev/null || true
+pkill -f "chitta-m[c]p" 2>/dev/null; sleep 1   # process is `chitta-mcp` (hyphen); [c] so pkill -f can't match its own shell
 ```
 `install` = atomic rename. Never `cp` over running binary → ETXTBSY.
+
+The process is `chitta-mcp` with a hyphen. An earlier version of this file said
+`pkill -f "chitta mcp"` with a space, which silently matched nothing and left a
+stale MCP server running against new binaries.
+
+## Dev install (editable)
+Hooks and MCP Python run from `~/.claude/hooks/*` and the plugin cache, not from
+a checkout. `bash scripts/dev-install.sh` symlinks both back at this repo, so an
+edit is live on the next hook invocation; it restarts the MCP server for you.
+Re-run it after any plugin update, which can replace the symlinks with a fresh
+clone. Binaries stay on the build-and-install flow above.
 
 ## Release
 `./scripts/release.sh patch|minor|major -y`
@@ -29,6 +45,9 @@ pkill -f "chitta mcp" 2>/dev/null; sleep 1
 
 Enforce mode auto-activates once shadow log has ≥100 entries AND is
 ≥3 days old — no manual env flip needed.
+
+Every `CC_SOUL_*` variable below also answers to a `CHITTA_*` twin; if both are
+set, `CHITTA_*` wins. See `docs/RENAME.md` for the full alias table.
 
 | Env | Effect |
 |---|---|

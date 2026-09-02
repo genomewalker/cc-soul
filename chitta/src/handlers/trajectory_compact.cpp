@@ -14,7 +14,6 @@ ToolResult FieldRpcHandler::tool_trajectory_compact(const json& params) {
     std::string session_id = params.value("session_id", "");
     size_t budget_tokens   = static_cast<size_t>(params.value("budget_tokens", 4000));
     float mad_k            = params.value("mad_k", 1.5f);
-    bool include_system    = params.value("include_system", false);
     std::string role_filter = params.value("role_filter", "");
 
     // ── Resolve transcript path ──────────────────────────────────────────

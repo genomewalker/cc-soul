@@ -17,9 +17,9 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
 import urllib.error
-
+import urllib.request
+from http.client import HTTPException
 
 VALID_KINDS = {"lesson", "gotcha", "decision", "preference", "correction", "pattern"}
 VALID_SCOPES = {"project", "global", "partnership"}
@@ -58,13 +58,15 @@ def discover_endpoint():
             with urllib.request.urlopen(req, timeout=3) as r:
                 if b"data" in r.read():
                     return url
-        except Exception:
+        except (OSError, HTTPException):
+            # Candidate endpoint is unreachable or slow; try the next one.
             continue
     try:
         with urllib.request.urlopen("http://localhost:11434/v1/models", timeout=3) as r:
             if b"data" in r.read():
                 return "http://localhost:11434"
-    except Exception:
+    except (OSError, HTTPException):
+        # No local Ollama; "" disables LLM extraction for this run.
         pass
     return ""
 
@@ -82,24 +84,36 @@ def read_last_assistant_turn(transcript_path):
     try:
         with open(transcript_path) as f:
             lines = f.readlines()
-    except Exception:
+    except OSError:
+        # Transcript rotated away or unreadable between the hook firing and
+        # this read. Empty strings tell the caller there is nothing to extract.
         return "", ""
     last_asst_idx = None
     for i in range(len(lines) - 1, -1, -1):
         try:
             rec = json.loads(lines[i])
-        except Exception:
+        except json.JSONDecodeError:
+            # Transcripts are appended to by a live process, so the final line
+            # is routinely half-written. Skip it and keep scanning backwards.
             continue
         role = rec.get("role") or rec.get("message", {}).get("role")
         if role == "assistant" and last_asst_idx is None:
             content = rec.get("message", {}).get("content", [])
-            parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+            parts = [
+                c.get("text", "")
+                for c in content
+                if isinstance(c, dict) and c.get("type") == "text"
+            ]
             assistant_response = "\n".join(parts)
             last_asst_idx = i
         elif role == "user" and last_asst_idx is not None:
             content = rec.get("message", {}).get("content", [])
             if isinstance(content, list):
-                parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+                parts = [
+                    c.get("text", "")
+                    for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ]
                 user_prompt = "\n".join(parts)
             elif isinstance(content, str):
                 user_prompt = content
@@ -118,15 +132,17 @@ def build_user_prompt(session_id, realm, turn_index, user_prompt, assistant_resp
 
 
 def call_llm(endpoint, model, user_msg):
-    req_body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        "temperature": 0.2,
-        "max_tokens": 2048,
-    }).encode()
+    req_body = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 2048,
+        }
+    ).encode()
     req = urllib.request.Request(
         f"{endpoint}/v1/chat/completions",
         data=req_body,
@@ -136,7 +152,9 @@ def call_llm(endpoint, model, user_msg):
         with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as r:
             payload = json.loads(r.read())
         return payload["choices"][0]["message"]["content"]
-    except Exception as e:
+    except (OSError, HTTPException, ValueError, KeyError, IndexError) as e:
+        # Network failure, or a body that is not the chat-completions shape.
+        # Extraction is best-effort enrichment, never required for the hook.
         sys.stderr.write(f"[stop_extractor] LLM call failed: {e}\n")
         return ""
 
@@ -164,7 +182,8 @@ def parse_jsonl(raw, error_log_path):
             continue
         try:
             obj = json.loads(s)
-        except Exception as e:
+        except json.JSONDecodeError as e:
+            # Model emitted a non-JSON line. Logged, then skipped.
             _log_error(error_log_path, s, f"json: {e}")
             continue
         if not validate(obj):
@@ -180,8 +199,13 @@ def _log_error(path, line, reason):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a") as f:
-            f.write(json.dumps({"ts": int(time.time()), "reason": reason, "line": line[:500]}) + "\n")
-    except Exception:
+            f.write(
+                json.dumps({"ts": int(time.time()), "reason": reason, "line": line[:500]}) + "\n"
+            )
+    except OSError:
+        # This is the error logger itself. If it cannot write, there is nowhere
+        # left to report that; swallowing keeps a disk problem from turning a
+        # logged parse failure into a hook crash.
         pass
 
 
@@ -200,18 +224,28 @@ def emit(obj, realm_default):
     chitta_bin = os.environ.get("CHITTA_BIN", os.path.expanduser("~/.claude/bin/chitta"))
     category = kind_to_category(obj["kind"])
     realm = obj.get("realm") or realm_default or "brahman"
-    tags = f"source=distillation,kind={obj['kind']},scope={obj.get('scope','project')},realm={realm}"
+    tags = (
+        f"source=distillation,kind={obj['kind']},scope={obj.get('scope', 'project')},realm={realm}"
+    )
     args = [
-        chitta_bin, "observe",
-        "--category", category,
-        "--title", obj["title"][:80],
-        "--content", obj["content"],
-        "--confidence", str(obj.get("confidence", 0.85)),
-        "--tags", tags,
+        chitta_bin,
+        "observe",
+        "--category",
+        category,
+        "--title",
+        obj["title"][:80],
+        "--content",
+        obj["content"],
+        "--confidence",
+        str(obj.get("confidence", 0.85)),
+        "--tags",
+        tags,
     ]
     try:
         subprocess.run(args, timeout=10, check=False, capture_output=True)
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # chitta binary missing or over its timeout. Reported, not fatal: the
+        # Stop hook must exit cleanly whatever the daemon is doing.
         sys.stderr.write(f"[stop_extractor] observe failed: {e}\n")
 
 
@@ -246,7 +280,9 @@ def run(session_id, turn_index, transcript_path, realm):
 
 def main():
     if len(sys.argv) < 5:
-        sys.stderr.write("usage: stop_extractor.py <session_id> <turn_index> <transcript_path> <realm>\n")
+        sys.stderr.write(
+            "usage: stop_extractor.py <session_id> <turn_index> <transcript_path> <realm>\n"
+        )
         sys.exit(2)
     session_id = sys.argv[1]
     try:

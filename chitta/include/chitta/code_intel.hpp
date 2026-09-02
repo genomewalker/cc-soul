@@ -609,11 +609,16 @@ private:
     // C/C++ Full Extraction (Symbols + Callsites)
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Generate symbol ID for a function/method
+    // Generate symbol ID for a function/method. `path` is accepted but
+    // deliberately not part of the id, so the id stays stable when a symbol
+    // moves between files.
+    // ceiling: two same-named statics (or same-signature overloads) in
+    // different files share one id and collide in the symbol table;
+    // upgrade: fold the signature into the id, and `path` for internal-linkage
+    // symbols only, so cross-file moves still preserve identity. (2026-09-02)
     std::string make_symbol_id(const std::string& kind, const std::string& name,
-                               const std::string& parent, const std::string& path) {
+                               const std::string& parent, const std::string& /*path*/) {
         std::string fqn = parent.empty() ? name : (parent + "::" + name);
-        // Simple hash for now - could be improved with signature info
         return "cpp:" + kind + ":" + fqn;
     }
 

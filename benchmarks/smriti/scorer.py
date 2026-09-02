@@ -103,7 +103,9 @@ def score(records):
             "mean_tokens": sum(tokens) / n if n else 0.0,
             "mean_input_tokens": sum(r.get("input_tokens", 0) for r in rs) / n if n else 0.0,
             "mean_output_tokens": sum(r.get("output_tokens", 0) for r in rs) / n if n else 0.0,
-            "mean_cache_read_tokens": sum(r.get("cache_read_tokens", 0) for r in rs) / n if n else 0.0,
+            "mean_cache_read_tokens": sum(r.get("cache_read_tokens", 0) for r in rs) / n
+            if n
+            else 0.0,
             # Fraction of this condition's records where an outcome-ledger
             # 'injected' event during the agent's call actually named one of
             # the planted ids (runner.read_injected_ids_in_window). None when
@@ -116,8 +118,12 @@ def score(records):
 
     headline = {}
     if "off" in per_condition and "on" in per_condition:
-        headline["delta_sr"] = per_condition["on"]["success_rate"] - per_condition["off"]["success_rate"]
-        headline["delta_tokens"] = per_condition["on"]["mean_tokens"] - per_condition["off"]["mean_tokens"]
+        headline["delta_sr"] = (
+            per_condition["on"]["success_rate"] - per_condition["off"]["success_rate"]
+        )
+        headline["delta_tokens"] = (
+            per_condition["on"]["mean_tokens"] - per_condition["off"]["mean_tokens"]
+        )
 
         # MUI v2 (ledger-grounded, replaces the echo proxy as the headline
         # number — see mui_credit). Pair each on-run with the off-run(s)
@@ -136,8 +142,9 @@ def score(records):
         sr_lift_n = 0
         cost_n = 0
         for r in on_records:
-            paired = (off_by_task_trial.get((r["task_id"], r["trial"]))
-                      or off_by_task.get(r["task_id"], []))
+            paired = off_by_task_trial.get((r["task_id"], r["trial"])) or off_by_task.get(
+                r["task_id"], []
+            )
             sr_lift, cost = mui_credit(r, paired)
             sr_lift_n += sr_lift
             cost_n += cost
@@ -155,7 +162,9 @@ def score(records):
 
         # Surface this at headline level too: a low rate here calls delta_sr
         # itself into question, not just the per-condition detail.
-        headline["on_injection_confirmation_rate"] = per_condition["on"]["injection_confirmation_rate"]
+        headline["on_injection_confirmation_rate"] = per_condition["on"][
+            "injection_confirmation_rate"
+        ]
 
     for label in by_condition:
         if label.startswith("ablate:") and "on" in per_condition:

@@ -154,7 +154,7 @@ ToolResult FieldRpcHandler::tool_probe_calibrate(const json& params) {
     return result;
 }
 
-ToolResult FieldRpcHandler::tool_probe_status(const json& params) {
+ToolResult FieldRpcHandler::tool_probe_status(const json&) {
     auto hits = field_store_->recall(
         embed_query("probe centroid behavioral class"), 100, "behavior");
 

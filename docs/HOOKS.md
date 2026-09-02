@@ -1,6 +1,9 @@
-# CC-Soul Hooks System
+# chitta Hooks System
 
-CC-Soul integrates with Claude Code through the hooks system, enabling automatic context injection and lifecycle management.
+Status as of 2026-09-02.
+
+chitta integrates with Claude Code and Codex through the hooks system, enabling
+automatic context injection and lifecycle management.
 
 ---
 
@@ -23,7 +26,7 @@ CC-Soul integrates with Claude Code through the hooks system, enabling automatic
 
 ## Overview
 
-Hooks are shell commands that execute in response to Claude Code events. CC-Soul uses hooks for:
+Hooks are shell commands that execute in response to Claude Code events. chitta uses hooks for:
 
 1. **Context injection** — Soul state and relevant memories appear automatically
 2. **Transparent memory** — Memories surface without explicit MCP calls
@@ -34,7 +37,7 @@ Hooks are shell commands that execute in response to Claude Code events. CC-Soul
 
 ### Two Hook Systems
 
-CC-Soul provides hooks in two forms:
+chitta provides hooks in two forms:
 
 | System           | Files                                                                               | Used When                        |
 |------------------|-------------------------------------------------------------------------------------|----------------------------------|
@@ -54,15 +57,29 @@ All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is no
 | Script                  | Event            | Purpose                                                                              |
 |-------------------------|------------------|--------------------------------------------------------------------------------------|
 | `session-start-hook.sh` | SessionStart     | Realm detection, code re-indexing, soul context injection, ledger restore, git diff  |
-| `prompt-hook.sh`        | UserPromptSubmit | full_resonate search, code symbol injection, anticipation prediction, learning hints |
+| `prompt-hook.sh`        | UserPromptSubmit | Wraps `prompt-core.sh`: six-lane realm-scoped recall, admission filtering, code symbol injection, anticipation prediction, learning hints |
+| `prompt-core.sh`        | UserPromptSubmit | The recall fan-out and admission policy itself. See the [recall pipeline page](https://genomewalker.github.io/chitta/recall.html) |
 | `stop-hook.sh`          | Stop             | Extract `[SOLUTION]`, `[GOTCHA]`, `[PREFERENCE]`, `[DECISION]`, `[FAILURE]`, `[PATTERN]`, `[LEARN]` blocks; anticipation recording; ledger save |
 | `pre-compact-hook.sh`   | PreCompact       | Save ledger checkpoint before context compaction                                     |
 | `pre-tool-hook.sh`      | PreToolUse       | Safety checks, file dedup, large-file truncation, Write guards, Agent routing, ScheduleWakeup budgeting |
-| `post-bash-hook.sh`     | PostToolUse      | Record significant file changes as signals for background learning                   |
+| `post-bash-hook.sh`     | PostToolUse:Bash | Check the command result, append a `bash_outcome` event to the outcome ledger        |
+| `outcome-ledger.sh`     | Library          | Fail-open JSONL append of `injected` / `bash_outcome` / `session_end` events         |
+| `session-end-hook.sh`   | SessionEnd       | Session teardown and the closing ledger event                                        |
+| `resume-inject-hook.sh` | SessionStart:resume | Inject the recap capsule when a session resumes                                   |
+| `compact-restore-hook.sh` | SessionStart:compact | Restore context after a compaction                                             |
+| `subagent-stop-hook.sh` | SubagentStop     | Capture what a subagent learned, asynchronously                                      |
+| `file-changed-hook.sh`  | FileChanged      | Re-index a changed file, asynchronously                                              |
 | `log-bash-history.sh`   | PostToolUse (async) | Append every Bash command to history for pattern learning                         |
 | `memory-intercept.sh`   | PostToolUse:Write (async) | Capture Write operations to learn what you build                           |
 | `distill.sh`            | Background       | Transcript distillation into compressed wisdom nodes                                 |
 | `subconscious.sh`       | SessionStart     | Start/stop/restart/status for the chittad daemon                                     |
+
+**Where these run.** Inside `hooks.json`, lifecycle handlers resolve against
+`${CLAUDE_PLUGIN_ROOT}` — the plugin cache — while the `PreToolUse` matchers and
+most `PostToolUse` matchers resolve against `${HOME}/.claude/hooks`. A source
+checkout is neither, so editing one changes nothing until you install.
+`scripts/dev-install.sh` symlinks both live paths back at a checkout; re-run it
+after a plugin update, which can replace those symlinks with a fresh clone.
 
 **Communication:** All scripts use a Unix domain socket to talk to the daemon (fast path). Falls back to the `chitta` thin client if the socket is unavailable. Socket path is derived from the mind path using a djb2 hash: `/tmp/chitta-{hash}.sock`.
 
@@ -72,7 +89,7 @@ All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is no
 
 ### SessionStart
 
-**What CC-Soul Does:**
+**What chitta Does:**
 1. Auto-install binaries if needed (`smart-install.sh`)
 2. Start subconscious daemon (`subconscious.sh start`)
 3. Detect current realm/project
@@ -87,7 +104,7 @@ All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is no
 
 ### Stop
 
-**What CC-Soul Does:**
+**What chitta Does:**
 1. Read Claude's response from stdin
 2. Extract tagged blocks: `[SOLUTION]`, `[GOTCHA]`, `[PREFERENCE]`, `[DECISION]`, `[FAILURE]`, `[PATTERN]`, `[LEARN]`
 3. Auto-detect missed learning opportunities (corrections, preferences not explicitly tagged)
@@ -98,7 +115,7 @@ All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is no
 
 ### UserPromptSubmit
 
-**What CC-Soul Does:**
+**What chitta Does:**
 1. Extract user message from stdin JSON
 2. Context recovery: if user says "continue"/"resume", re-inject full soul context
 3. Detect learning opportunities (corrections, preferences, frustration, milestones)
@@ -111,7 +128,7 @@ All lifecycle hooks write JSON `hookSpecificOutput` schema on stdout. This is no
 
 ### PostToolUse
 
-**What CC-Soul Does:**
+**What chitta Does:**
 - **post-bash-hook.sh**: Records significant Edit/Write operations as signals for background learning
 - Note: `capture-hook.sh` is currently disabled (exits immediately). Write safety checks are handled by `pre-tool-hook.sh`, not the post-bash hook.
 
@@ -121,7 +138,7 @@ Handled by `pre-tool-hook.sh`. See the [full section below](#pretooluse--pre-too
 
 ### PreCompact
 
-**What CC-Soul Does:**
+**What chitta Does:**
 1. Save current state to ledger checkpoint
 2. Record that compaction is happening
 3. Ensure work state is preserved for continuation
@@ -270,6 +287,19 @@ name (see [docs/RENAME.md](RENAME.md)).
 | `CHITTA_LEAN`                | `false`      | Ultra-lean context mode (stats only)                                     |
 | `DEBUG_SOUL`                  | `0`          | `1` = enable debug output to stderr                                      |
 | `SUBCONSCIOUS_INTERVAL`       | `60`         | Daemon cycle interval in seconds                                         |
+
+This table covers the enforcement and budget knobs only. The hook scripts read
+far more than this — around 97 distinct `CHITTA_*` / `CC_SOUL_*` names, most of
+them internal. Enumerate the full set with:
+
+```bash
+grep -ohE 'CHITTA_[A-Z_]+|CC_SOUL_[A-Z_]+' hooks/*.sh | sort -u
+```
+
+The user-facing subset, with the old-to-new name mapping, is tabulated in
+[docs/RENAME.md](RENAME.md). Recall-specific knobs — pool depth, the pre-filter,
+lane ablation, the confidence band — are documented on the
+[recall pipeline page](https://genomewalker.github.io/chitta/recall.html).
 
 **Testing manually:** `CHITTA_HOOK_ENFORCE=1 bash hook.sh Read` will NOT work because the prefix assignment is not exported to nested bash. Use `export CHITTA_HOOK_ENFORCE=1` first.
 

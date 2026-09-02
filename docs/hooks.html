@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hook System — cc-soul</title>
-<meta name="description" content="Lifecycle-aware memory hooks for cc-soul. Plugin hooks and settings hooks connect Claude Code events to the soul — session start, prompts, responses, tool use, and compaction.">
+<title>Hook System — chitta</title>
+<meta name="description" content="Lifecycle-aware memory hooks for chitta. Plugin hooks and settings hooks connect Claude Code events to the soul — session start, prompts, responses, tool use, and compaction.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Hook System — cc-soul">
-<meta property="og:description" content="Lifecycle-aware memory hooks for cc-soul. Plugin hooks and settings hooks connect Claude Code events to the soul.">
+<meta property="og:title" content="Hook System — chitta">
+<meta property="og:description" content="Lifecycle-aware memory hooks for chitta. Plugin hooks and settings hooks connect Claude Code events to the soul.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Hook System — cc-soul">
-<meta name="twitter:description" content="Lifecycle-aware memory hooks for cc-soul connecting Claude Code events to the soul.">
+<meta name="twitter:title" content="Hook System — chitta">
+<meta name="twitter:description" content="Lifecycle-aware memory hooks for chitta connecting Claude Code events to the soul.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -87,15 +87,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -103,9 +104,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html" class="active">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -116,6 +118,7 @@
     <div class="page-header-badge reveal">Hook System</div>
     <h1 class="reveal reveal-delay-1">Lifecycle-aware memory.</h1>
     <p class="page-header-sub reveal reveal-delay-2">Hooks inject memories at the right moment. Individual scripts in <code style="color: var(--aura-300);">hooks/</code> handle each lifecycle event, configured via <code style="color: var(--aura-300);">hooks.json</code> (plugin) or <code style="color: var(--aura-300);">~/.claude/settings.json</code> (standalone).</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -143,7 +146,7 @@
           <svg viewBox="0 0 20 20" fill="none"><path d="M3 10 L8 5 L8 8 L17 8 L17 12 L8 12 L8 15 Z" stroke="#CBAF86" stroke-width="1.2" fill="none"/></svg>
         </div>
         <span class="tools-category-name">Event Types</span>
-        <span class="tools-category-count">6 events</span>
+        <span class="tools-category-count">9 events</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-content">
@@ -175,11 +178,12 @@
             </div>
             <div class="mapping-actions">
               <ul>
-                <li>Context recovery on &ldquo;continue&rdquo; / &ldquo;resume&rdquo; keywords</li>
+                <li>Realm-scoped recall across six parallel lanes &mdash; semantic, thread context, hybrid, keyword, corrections, and a cross-realm fallback</li>
+                <li>Admission filter: confidence floors, deduplication against what this session already saw, and a calibrated confidence band that silences low-signal lanes. See <a href="recall.html">Recall</a></li>
                 <li>Learning opportunity detection (corrections, preferences, frustration, milestones)</li>
-                <li><code>full_resonate</code> search &mdash; semantic recall with realm filtering</li>
                 <li>Code symbol injection for files referenced in the prompt</li>
                 <li><code>anticipation_predict</code> &mdash; predict likely actions from context patterns</li>
+                <li>Runs to a wall-clock budget (<code>CHITTA_HOOK_BUDGET_MS</code>, 6000 ms). Optional enrichment is skipped once it is spent; memory injection and the correction lanes never are</li>
               </ul>
             </div>
           </div>
@@ -230,11 +234,48 @@
           <div class="mapping-row reveal">
             <div class="mapping-event">
               <span class="mapping-event-name">PostToolUse</span>
-              <span class="mapping-event-when">After Edit / Write</span>
+              <span class="mapping-event-when">After Bash / Write</span>
             </div>
             <div class="mapping-actions">
               <ul>
-                <li>Record significant file changes as signals in memory</li>
+                <li>Log the command that ran, and append its outcome to the outcome ledger</li>
+                <li>Record memory-shaped written content as signals in memory</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">SessionEnd</span>
+              <span class="mapping-event-when">When the session closes</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Session teardown, final ledger write, and a <code>session_end</code> outcome-ledger event</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">SubagentStop</span>
+              <span class="mapping-event-when">When a subagent finishes</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Capture what the subagent learned, asynchronously</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">FileChanged</span>
+              <span class="mapping-event-when">When a watched file changes</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Re-index the changed file, asynchronously</li>
               </ul>
             </div>
           </div>
@@ -270,10 +311,11 @@
               Uses <code>~/.claude/settings.json</code> to wire lifecycle events to the same individual scripts in <code>hooks/</code>. Installed by <code>smart-install.sh</code>.
             </div>
             <div class="mode-detail">
-              Handles all 6 event types with dedicated scripts: <code>session-start-hook.sh</code>, <code>prompt-hook.sh</code>, <code>stop-hook.sh</code>, <code>pre-compact-hook.sh</code>, <code>pre-tool-hook.sh</code>, <code>post-bash-hook.sh</code>.
+              Handles the same event set with dedicated scripts: <code>session-start-hook.sh</code>, <code>prompt-hook.sh</code>, <code>stop-hook.sh</code>, <code>pre-compact-hook.sh</code>, <code>pre-tool-hook.sh</code>, <code>post-bash-hook.sh</code>.
             </div>
           </div>
         </div>
+        <p class="content-text" style="margin-top: var(--space-5);"><strong>Two roots, on purpose.</strong> Inside <code>hooks.json</code>, lifecycle handlers resolve against <code>${CLAUDE_PLUGIN_ROOT}</code> &mdash; the plugin cache &mdash; while the <code>PreToolUse</code> matchers and most <code>PostToolUse</code> matchers resolve against <code>${HOME}/.claude/hooks</code>. A source checkout is neither. That is why editing a checkout changes nothing until you install, and why <code>scripts/dev-install.sh</code> symlinks both live paths back at your checkout. A plugin update can replace those symlinks with a fresh clone, so re-run it afterwards.</p>
       </div>
     </div>
 
@@ -466,7 +508,7 @@
 <!-- BACK -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
   </div>
 </section>
 
@@ -476,7 +518,7 @@
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

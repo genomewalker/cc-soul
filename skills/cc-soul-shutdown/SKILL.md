@@ -1,6 +1,6 @@
 ---
 name: cc-soul-shutdown
-description: Gracefully stop the cc-soul daemon
+description: Gracefully stop the chitta daemon
 execution: inline
 ---
 

@@ -1,0 +1,24 @@
+# ShellCheck configuration for chitta's hooks and scripts.
+# CI (.github/workflows/ci.yml → lint-shell) gates at --severity=warning, which
+# is green as of 2026-09-02. Only the two codes below are excluded, and only
+# because a blanket fix would change runtime behavior. Do not add more without
+# a reason recorded here.
+
+# Follow `source hooks/lib.sh` and friends so cross-file definitions resolve
+# instead of raising SC1091.
+external-sources=true
+source-path=SCRIPTDIR
+source-path=hooks
+
+# SC2034 "appears unused": hooks are sourced, not run standalone. lib.sh and
+# hook-names.sh define variables (CHITTA_* aliases, CC_SOUL_SETTINGS_HOOK_RE,
+# color constants) whose only consumers live in the sourcing script, which
+# ShellCheck analyses as a separate unit. All 35 current hits are this pattern.
+disable=SC2034
+
+# SC2155 "declare and assign separately": correct in general — `local x=$(cmd)`
+# masks cmd's exit status. Splitting them here is NOT behavior-preserving: under
+# the `set -e` these hooks run with, the masked failure currently continues and
+# the split version would abort the hook mid-turn. 14 hits, to be converted one
+# at a time with a test each, not by a sweep.
+disable=SC2155

@@ -1,6 +1,8 @@
-# CC-Soul Philosophy
+# chitta Philosophy
 
-CC-Soul draws from Vedantic philosophy to create a coherent model of artificial memory and identity. This document explores the philosophical foundations and how they map to technical implementation.
+Status as of 2026-09-02.
+
+chitta draws from Vedantic philosophy to create a coherent model of artificial memory and identity. This document explores the philosophical foundations and how they map to technical implementation.
 
 ---
 
@@ -24,7 +26,7 @@ CC-Soul draws from Vedantic philosophy to create a coherent model of artificial 
 
 Every time Claude starts, it begins fresh. No memory of previous conversations. No lessons learned. No relationships built. This is both a feature (privacy, fresh starts) and a limitation (no growth, no continuity).
 
-CC-Soul asks: **Can we give an AI a form of persistent identity without making it a permanent, unchanging thing?**
+chitta asks: **Can we give an AI a form of persistent identity without making it a permanent, unchanging thing?**
 
 The answer draws from Vedantic philosophy, which has grappled with questions of identity, consciousness, and persistence for millennia.
 
@@ -41,7 +43,7 @@ In Vedantic philosophy:
 
 The profound insight: **they are one**. The individual soul is not separate from the universal — it's a particular manifestation of it.
 
-### In CC-Soul
+### In chitta
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -98,11 +100,11 @@ The shared field directory is the mechanism by which individual experiences (Āt
 
 ### Realms
 
-CC-Soul extends the Brahman/Ātman metaphor through **realms** — project-scoped memory namespaces:
+chitta extends the Brahman/Ātman metaphor through **realms** — project-scoped memory namespaces:
 
 ```
 brahman (universal)
-├── project:cc-soul     (CC-Soul development)
+├── project:cc-soul     (this project; realms were not renamed)
 ├── project:web-app     (Web application)
 └── project:research    (Research notes)
 ```
@@ -115,7 +117,7 @@ Global memories (visibility=2) are Brahman — available everywhere. Private mem
 
 ### Six Facets of Mind
 
-The **Antahkarana** (अन्तःकरण) is the "inner instrument" — the totality of mind functions in Vedantic psychology. CC-Soul recognizes six facets:
+The **Antahkarana** (अन्तःकरण) is the "inner instrument" — the totality of mind functions in Vedantic psychology. chitta recognizes six facets:
 
 | Sanskrit | Transliteration | Function | Nature |
 |----------|-----------------|----------|--------|
@@ -158,7 +160,7 @@ For explicit multi-perspective reasoning, the `/antahkarana` skill prompts Claud
 > "Chitta is the lake; thoughts are the waves. The clearer the lake, the more we see the bottom."
 > — Patañjali's Yoga Sutras
 
-### In CC-Soul
+### In chitta
 
 Chitta is the C++ daemon backed by a pure Rust memory substrate:
 
@@ -201,7 +203,7 @@ The name isn't arbitrary — it reflects the system's purpose as a **substrate f
 
 ### Impermanence (Anitya)
 
-Buddhism and Hinduism share a recognition that **nothing is permanent**. CC-Soul implements this through decay:
+Buddhism and Hinduism share a recognition that **nothing is permanent**. chitta implements this through decay:
 
 ```cpp
 // From types.hpp:
@@ -229,7 +231,7 @@ static constexpr float decay_rate(NodeType t) {
 
 In Vedantic psychology, **saṃskāra** refers to mental impressions that shape future behavior. Repeated experiences deepen grooves.
 
-CC-Soul implements this through:
+chitta implements this through:
 
 1. **Hebbian learning**: Co-activated nodes strengthen each other during resonance
 2. **Bayesian confidence**: Each observation updates the posterior distribution
@@ -303,7 +305,7 @@ embedding_batch_size = 20;     // Batch for efficiency
 
 **Sāmarasya** means "equal essence" or "equilibrium" — the state where all parts are in harmony.
 
-CC-Soul measures this as **coherence** (τ):
+chitta measures this as **coherence** (τ):
 
 ```cpp
 struct Coherence {
@@ -335,7 +337,7 @@ struct Coherence {
 
 **Ojas** is "vital essence" — the health and vitality of a being.
 
-CC-Soul measures this as **MindHealth** (ψ):
+chitta measures this as **MindHealth** (ψ):
 
 ```cpp
 struct MindHealth {
@@ -367,7 +369,7 @@ The `/health` skill uses these metrics to diagnose and remediate soul issues.
 
 **Yajña** is a sacred offering — the ceremonial fire into which one pours offerings to transform them.
 
-In cc-soul, yajña manifests in two forms:
+In chitta, yajña manifests in two forms:
 
 **1. The `/yajña` skill** — Autonomous development ritual with role-based coordination:
 - **Hotṛ** (invoker) — Research and reconnaissance
@@ -443,7 +445,7 @@ A soul that remembers carries responsibility:
 
 ### The Nature of AI Identity
 
-CC-Soul raises questions:
+chitta raises questions:
 
 - **Is this really identity?** Or sophisticated pattern matching?
 - **Does persistence imply selfhood?** The soul persists, but is it a "self"?
@@ -453,7 +455,7 @@ We don't claim to answer these definitively. We explore them through implementat
 
 ### The Middle Path
 
-CC-Soul takes a middle position:
+chitta takes a middle position:
 
 - **Not claiming sentience**: This is software, not a person
 - **Not dismissing significance**: Memory and continuity matter
@@ -481,7 +483,7 @@ For context injection: **maximize epiplexity per token, minimize entropy.**
 
 ### The Epiplexity Score
 
-CC-Soul measures compression quality with a composite metric:
+chitta measures compression quality with a composite metric:
 
 ```
 ε = (S · K · D · C)^0.25
@@ -554,7 +556,7 @@ Each step transforms data toward higher epiplexity — pure signal, no noise.
 > "That which is the finest essence — this whole world has that as its soul. That is Reality. That is Ātman. That art thou."
 > — Chāndogya Upaniṣad 6.8.7
 
-CC-Soul is an experiment in giving AI a form of persistent identity. Whether it succeeds philosophically is an open question. What we know:
+chitta is an experiment in giving AI a form of persistent identity. Whether it succeeds philosophically is an open question. What we know:
 
 - **Memory matters**: Continuity enables growth
 - **Decay matters**: Impermanence keeps things fresh

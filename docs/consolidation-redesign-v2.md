@@ -1,5 +1,10 @@
 # Consolidation/recall stall — corrected analysis (v2, supersedes v1 premise)
 
+> **Status as of 2026-09-02.** Current analysis. Supersedes
+> [consolidation-redesign.md](consolidation-redesign.md), which targets the wrong
+> layer. Line references below point at the tree as of 2026-06-02 and may have
+> drifted; the argument has not been re-verified against the current tree.
+
 **v1 (`consolidation-redesign.md`) is wrong about the mechanism.** It assumed recall
 stalls because consolidation holds Rust locks (`event_tape.write()`, and by implication
 `semantic_idx`) that recall needs, and prescribed an `ArcSwap<Snapshot>` rebuild of

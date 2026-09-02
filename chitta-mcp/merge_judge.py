@@ -14,6 +14,7 @@ import anthropic as _ant
 
 _client: _ant.Anthropic | None = None
 
+
 def _get_client() -> _ant.Anthropic:
     global _client
     if _client is None:
@@ -79,7 +80,11 @@ def judge(content: str, candidates: list[dict[str, Any]]) -> dict:
         result = json.loads(resp.content[0].text.strip())
         if "action" not in result:
             raise ValueError("missing action")
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Spans an optional `anthropic` import, a network call, and
+        # unconstrained model output. Every failure mode has the same safe
+        # answer: fall back to a plain add, because dropping the caller's
+        # memory is the one outcome this judge must never cause.
         result = {"action": "add", "target_id": None, "reason": "judge error — defaulting to add"}
 
     _cache[key] = (now, result)

@@ -4,6 +4,7 @@ Thread inference: decide whether current session extends/creates/pivots/seals a 
 Reads transcript JSONL, computes TF-IDF fingerprint, compares to existing threads.
 Pure stdlib — no numpy/sklearn.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,26 +28,106 @@ from task_ledger import (
 )
 
 _STOPWORDS = {
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "can", "this", "that", "these", "those",
-    "it", "its", "we", "i", "you", "they", "he", "she", "what", "how",
-    "when", "where", "which", "who", "not", "no", "yes", "if", "then",
-    "so", "just", "use", "run", "add", "get", "set", "let", "put", "make",
-    "also", "now", "need", "want", "like", "as", "up", "out", "into",
-    "please", "thanks", "ok", "okay", "sure", "yes", "good", "great",
-    "can", "let", "please", "going", "here", "there", "then", "them",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "from",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "can",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "its",
+    "we",
+    "i",
+    "you",
+    "they",
+    "he",
+    "she",
+    "what",
+    "how",
+    "when",
+    "where",
+    "which",
+    "who",
+    "not",
+    "no",
+    "yes",
+    "if",
+    "then",
+    "so",
+    "just",
+    "use",
+    "run",
+    "add",
+    "get",
+    "set",
+    "let",
+    "put",
+    "make",
+    "also",
+    "now",
+    "need",
+    "want",
+    "like",
+    "as",
+    "up",
+    "out",
+    "into",
+    "please",
+    "thanks",
+    "ok",
+    "okay",
+    "sure",
+    "good",
+    "great",
+    "going",
+    "here",
+    "there",
+    "them",
 }
 
 
 def _clean_user_text(text: str) -> str:
     for tag in (
-        "environment_context", "recommended_plugins", "system-reminder",
-        "task-notification", "local-command-stdout", "local-command-stderr",
+        "environment_context",
+        "recommended_plugins",
+        "system-reminder",
+        "task-notification",
+        "local-command-stdout",
+        "local-command-stderr",
     ):
-        text = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", " ", text,
-                      flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -79,15 +160,22 @@ def extract_user_turns(transcript_path: str, limit: int = 15) -> list[str]:
                         if payload.get("type") == "message" and payload.get("role") == "user":
                             for block in payload.get("content", []):
                                 if isinstance(block, dict) and block.get("type") in (
-                                    "text", "input_text", "output_text"
+                                    "text",
+                                    "input_text",
+                                    "output_text",
                                 ):
                                     extracted.append(block.get("text", ""))
                     text = _clean_user_text("\n".join(extracted))
                     if text and text not in texts:
                         texts.append(text)
-                except Exception:
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    # Transcripts are JSONL written by a live process: a torn
+                    # last line or an unexpected message shape is normal. Skip
+                    # the line and keep reading.
                     pass
-    except Exception:
+    except OSError:
+        # Transcript missing or unreadable; callers treat an empty list as
+        # "no recent user text to infer a thread from".
         pass
     return texts[-limit:]
 
@@ -159,9 +247,14 @@ def _title_from_fingerprint(fp: dict) -> str:
     return " ".join(w for w, _ in top) or "session"
 
 
-def _bind_and_claim(result: dict, session_id: str, thread_id: str,
-                    client: str, project_dir: str,
-                    transcript_path: str) -> dict:
+def _bind_and_claim(
+    result: dict,
+    session_id: str,
+    thread_id: str,
+    client: str,
+    project_dir: str,
+    transcript_path: str,
+) -> dict:
     if not session_id:
         return result
     session_bind(session_id, thread_id, client, project_dir, transcript_path)
@@ -171,10 +264,20 @@ def _bind_and_claim(result: dict, session_id: str, thread_id: str,
     return result
 
 
-def infer(transcript_path: str, realm: str, min_turns: int = 3,
-          session_id: str = "", client: str = "", project_dir: str = "",
-          user_turns: list[str] | None = None) -> dict:
-    texts = user_turns[-15:] if user_turns is not None else extract_user_turns(transcript_path, limit=15)
+def infer(
+    transcript_path: str,
+    realm: str,
+    min_turns: int = 3,
+    session_id: str = "",
+    client: str = "",
+    project_dir: str = "",
+    user_turns: list[str] | None = None,
+) -> dict:
+    texts = (
+        user_turns[-15:]
+        if user_turns is not None
+        else extract_user_turns(transcript_path, limit=15)
+    )
     if len(texts) < min_turns:
         return {"action": "skip", "reason": f"too few turns ({len(texts)}<{min_turns})"}
 
@@ -198,15 +301,16 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
             "title": title,
             "top_terms": list(fp)[:8],
         }
-        return _bind_and_claim(result, session_id, tid, client, project_dir,
-                               transcript_path)
+        return _bind_and_claim(result, session_id, tid, client, project_dir, transcript_path)
 
     best_score = 0.0
     best_thread: dict | None = None
     for t in active_threads:
         try:
             stored_fp = json.loads(t.get("topic_fingerprint") or "{}")
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
+            # Thread stored before fingerprints existed, or with a corrupt one.
+            # An empty fingerprint scores 0 and simply never wins.
             stored_fp = {}
         score = cosine(fp, stored_fp)
         if score > best_score:
@@ -225,8 +329,7 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
                 "score": round(best_score, 3),
                 "owner_session_id": owner,
             }
-            return _bind_and_claim(result, session_id, tid, client, project_dir,
-                                   transcript_path)
+            return _bind_and_claim(result, session_id, tid, client, project_dir, transcript_path)
         thread_update(best_thread["thread_id"], last_active_at=now, topic_fingerprint=fp_json)
         result = {
             "action": "extend",
@@ -234,8 +337,9 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
             "title": best_thread["title"],
             "score": round(best_score, 3),
         }
-        return _bind_and_claim(result, session_id, best_thread["thread_id"],
-                               client, project_dir, transcript_path)
+        return _bind_and_claim(
+            result, session_id, best_thread["thread_id"], client, project_dir, transcript_path
+        )
 
     if best_score >= 0.30:
         owner = str(live_leases.get(best_thread["thread_id"], {}).get("session_id") or "")
@@ -252,11 +356,11 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
                 "title": title,
                 "score": round(best_score, 3),
             }
-            return _bind_and_claim(result, session_id, tid, client, project_dir,
-                                   transcript_path)
+            return _bind_and_claim(result, session_id, tid, client, project_dir, transcript_path)
         thread_seal(best_thread["thread_id"], reason=f"topic_pivot score={best_score:.2f}")
-        tid = thread_create(title=title, realm=realm, fingerprint=fp_json,
-                            parent=best_thread["thread_id"])
+        tid = thread_create(
+            title=title, realm=realm, fingerprint=fp_json, parent=best_thread["thread_id"]
+        )
         result = {
             "action": "pivot",
             "thread_id": tid,
@@ -264,8 +368,7 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
             "title": title,
             "score": round(best_score, 3),
         }
-        return _bind_and_claim(result, session_id, tid, client, project_dir,
-                               transcript_path)
+        return _bind_and_claim(result, session_id, tid, client, project_dir, transcript_path)
 
     tid = thread_create(title=title, realm=realm, fingerprint=fp_json)
     result = {
@@ -274,8 +377,7 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3,
         "title": title,
         "score": round(best_score, 3),
     }
-    return _bind_and_claim(result, session_id, tid, client, project_dir,
-                           transcript_path)
+    return _bind_and_claim(result, session_id, tid, client, project_dir, transcript_path)
 
 
 def _cli() -> None:
@@ -289,8 +391,15 @@ def _cli() -> None:
     p.add_argument("--snapshot", default="")
     args = p.parse_args()
     user_turns = snapshot_user_turns(args.snapshot) if args.snapshot else None
-    result = infer(args.transcript, args.realm, args.min_turns,
-                   args.session_id, args.client, args.project_dir, user_turns)
+    result = infer(
+        args.transcript,
+        args.realm,
+        args.min_turns,
+        args.session_id,
+        args.client,
+        args.project_dir,
+        user_turns,
+    )
     print(json.dumps(result, default=str))
 
 

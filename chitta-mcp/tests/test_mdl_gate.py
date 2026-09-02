@@ -25,8 +25,11 @@ def _make_evidence(wisdom: str, n_chunks: int, lines_per_chunk: int = 400) -> st
     once per chunk amid unrelated filler, so it spans >32KB (multiple chunks)."""
     rng = random.Random(11)
     chunks = []
-    for c in range(n_chunks):
-        lines = [f"{rng.choice(_FILLER)} turn={i} id={rng.randint(1000, 9999)}" for i in range(lines_per_chunk)]
+    for _ in range(n_chunks):
+        lines = [
+            f"{rng.choice(_FILLER)} turn={i} id={rng.randint(1000, 9999)}"
+            for i in range(lines_per_chunk)
+        ]
         lines.insert(len(lines) // 2, wisdom)
         chunks.append("\n".join(lines))
     return "\n".join(chunks)

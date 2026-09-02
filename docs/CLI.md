@@ -1,4 +1,4 @@
-# CC-Soul CLI Reference
+# chitta CLI Reference
 
 `chittad` is the daemon binary (memory server, background processing, Unix socket listener).
 The `chitta` client binary is a separate tool not covered by `simple_cli.cpp`; this document covers `chittad` commands only.

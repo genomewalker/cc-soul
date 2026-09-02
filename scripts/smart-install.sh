@@ -11,6 +11,11 @@ trap '' USR1 USR2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
+# Legacy settings-hook name list. `set -e` aborts if it is missing: an empty
+# CC_SOUL_SETTINGS_HOOK_RE would make jq's test() match every hook command and
+# strip the user's unrelated entries from settings.json.
+# shellcheck source=../hooks/hook-names.sh
+source "$PLUGIN_DIR/hooks/hook-names.sh"
 CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
 BIN_DIR="${HOME}/.claude/bin"
@@ -689,9 +694,9 @@ configure_hooks() {
     # additions; otherwise Claude executes both copies with different timeouts.
     if jq -e '(if (.enabledPlugins // {} | has("chitta@genomewalker-chitta")) then .enabledPlugins["chitta@genomewalker-chitta"] else .enabledPlugins["cc-soul@genomewalker-cc-soul"] end) == true' "$settings_file" &>/dev/null; then
         local cleanup_stage="${settings_file}.cc-soul-cleanup"
-        jq '
+        jq --arg re "$CC_SOUL_SETTINGS_HOOK_RE" '
           def is_cc_soul_hook:
-            ((.command? // "") | test("(subconscious|session-start-hook|compact-restore-hook|resume-inject-hook|prompt-hook|stop-hook|session-end-hook|pre-compact-hook|subagent-stop-hook|file-changed-hook|pre-tool-hook|post-bash-hook|log-bash-history|memory-intercept)\\.sh"));
+            ((.command? // "") | test($re));
           def strip_cc_soul:
             map(.hooks = ((.hooks // []) | map(select((is_cc_soul_hook | not)))))
             | map(select((.hooks | length) > 0));

@@ -10,7 +10,7 @@
 
 📖 **[Documentation & Architecture →](https://genomewalker.github.io/chitta/)**
 
-Persistent memory for Claude Code, Codex, and OpenCode. Learns from every session, surfaces what matters, forgets what doesn't.
+Persistent memory for Claude Code and Codex. Learns from every session, surfaces what matters, forgets what doesn't.
 
 ## Before & After
 
@@ -56,8 +56,15 @@ chitta-stack install all          # both adapters
 chitta-stack install shared       # backend only
 chitta-stack install claude-code  # Claude adapter only
 chitta-stack install codex        # Codex adapter + bridge
+chitta-stack uninstall codex      # remove one adapter, leave the backend alone
 chitta-stack status
+chitta-stack doctor               # inspect or clean stale Python package metadata
+chitta-stack heal                 # reinstall any component that drifted from the manifest
 ```
+
+OpenCode is not a frontend adapter. It appears only as an optional review
+backend reached through `chitta-bridge`; there is no OpenCode hook wiring in
+this repository.
 
 ## How It Works
 
@@ -164,7 +171,7 @@ sadhana-tui                                         # real-time TUI
 
 ## Philosophy
 
-CC-soul's architecture draws from Vedantic philosophy:
+chitta's architecture draws from Vedantic philosophy:
 
 - **Impermanence** — Memories decay without use (Anitya)
 - **Impressions** — Repetition strengthens patterns (Saṃskāra)
@@ -181,30 +188,44 @@ The soul is not a database. It is who Claude becomes through working with you.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture |
 | [SADHANA.md](docs/SADHANA.md) | Autonomous agents guide |
 | [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Vedantic concepts explained |
-| [API.md](docs/API.md) | Complete MCP tools reference (100+) |
+| [API.md](docs/API.md) | Complete MCP tool reference — generated from a live daemon by `scripts/gen-tools-docs.py` |
 | [CLI.md](docs/CLI.md) | Command-line interface |
 | [HOOKS.md](docs/HOOKS.md) | Hook system configuration |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude |
+| [RENAME.md](docs/RENAME.md) | Migrating from `cc-soul`, and the `CC_SOUL_*` alias table |
 
 **[Full Documentation Site](https://genomewalker.github.io/chitta/)**
 
 ## Models
 
-CC-soul ships fine-tuned models for two jobs. All run in-process via llama.cpp — no Ollama server required.
+Everything runs in-process via llama.cpp. No Ollama server is required.
 
-| Model | File | Size | Role |
-|-------|------|------|------|
-| **jina-embeddings-v2-ft** | `~/.claude/models/jina-v2-ft.gguf` | — | Embeddings — domain fine-tuned Jina v2, 768-dim (active; nDCG@20=0.851) |
-| nomic-embed-text-v1.5 | `~/.claude/models/nomic-embed-text-v1.5.gguf` | 140 MB | Embeddings — fallback, 768-dim |
-| **chitta-hint-qwen v5-model-b** | `~/.claude/models/chitta-hint-qwen-q4_k_m.gguf` (symlink) | 851 MB | Hint extraction — active (88% overall, +20pp over prior) |
-| chitta-hint-qwen v4 q4_k_m | `~/.claude/models/chitta-hint-qwen-q4_k_m.gguf.old` | 379 MB | Hint extraction — prior generation (68% overall) |
+A public install embeds with **bge-large-en-v1.5** at 1024 dimensions. That is
+what `scripts/smart-install.sh` downloads, and the filename the daemon looks for
+is derived from the *compiled* embedding identity, so a binary can never load a
+model from a different vector space than the store was built with.
 
-Override the embedding model: `--embed-model PATH` or `CHITTA_EMBED_MODEL=PATH`.
-Override the hint model: `CHITTA_HINT_MODEL=PATH`.
+| Job | Public default | Where it is looked for |
+|-----|----------------|------------------------|
+| Embeddings | `bge-large-en-v1.5.gguf`, 1024-dim | `--embed-model` / `$CHITTA_EMBED_MODEL`, then `~/.claude/models/`, `~/.claude/bin/`, `<mind>/../../models/` |
+| Hint extraction | `chitta-hint-qwen-q4_k_m.gguf` (optional) | `$CHITTA_HINT_MODEL`, then `~/.claude/models/` |
+
+The embedding dimension is a compile-time constant (`-DCHITTA_EMBED_DIM`, or
+`$CHITTA_EMBED_DIM` at configure time). Changing it needs a fresh build
+directory and a re-embed of the store; `smart-install.sh` detects an existing
+`nomic-embed-text` install and preserves that identity rather than switching.
+
+Personal builds pin different models — a fine-tuned embedder, a distiller, a
+newer hint model — through the same `cf_embed_model_id()` mechanism. Any
+accuracy figure for those is specific to that build and that store; it does not
+describe a public install.
+
+Hint extraction is optional. `chitta_hintd` is built only when the build enables
+llama.cpp, and everything works without it running.
 
 ## chitta-field: The Memory Substrate
 
-CC-soul's memory lives in [chitta-field](https://github.com/genomewalker/chitta-field) — a pure Rust cognitive substrate designed to behave like memory, not a database.
+chitta's memory lives in [chitta-field](https://github.com/genomewalker/chitta-field) — a pure Rust cognitive substrate designed to behave like memory, not a database.
 
 - **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions; recall driven by pattern overlap
 - **Self-orthogonalizing encoder** — FEP-derived learning rule; representations decorrelate naturally, resisting catastrophic forgetting
@@ -225,7 +246,7 @@ Deep multi-session research that accumulates structured knowledge over time. 7 s
 
 ## Building from Source
 
-Requirements: CMake 3.14+, C++17 compiler, Rust 1.92+
+Requirements: CMake 3.14+, a C++20 compiler, Rust 1.92+
 
 ```bash
 git clone --recurse-submodules https://github.com/genomewalker/chitta.git
@@ -239,6 +260,29 @@ cd chitta-field && ./build.sh build --release && cd ..
 cd chitta && cmake -B build -DCMAKE_BUILD_TYPE=Release -DCHITTA_WITH_LLAMA_CPP=ON
 cmake --build build --parallel
 ```
+
+## Measurement
+
+Two different questions, measured two different ways.
+
+**Does retrieval find the right memory?** A fixed golden set of 30 queries with
+hand-labelled gold ids, scored as mean nDCG@20 with the reranker on. The
+recall-biased pre-filter took that from 0.435 to 0.487.
+
+**Does the memory make the agent better?** [SMRITI-Bench](benchmarks/smriti/README.md)
+runs a coding agent on a task with memory off and on, and asks whether an
+objective check command passes and at what token cost. No model judge, no
+reference-answer overlap score. First full matrix, 9 tasks and 3 trials per
+condition: 23/27 passed cold, 27/27 with memory, at a paired median token ratio
+of 0.52. The corpus has since grown to 15 tasks and lane ablation is wired, but
+no live matrix has been run over the newer tasks yet.
+
+LongMemEval and LoCoMo harnesses also live under `benchmarks/`. The recorded
+LongMemEval result is 0.780 on `longmemeval_s` over 50 single-session-user
+questions, from 2026-05-21. No LoCoMo result is recorded in this repository.
+
+Details: [recall pipeline](https://genomewalker.github.io/chitta/recall.html) ·
+[benchmarks](https://genomewalker.github.io/chitta/benchmarks.html).
 
 ## References
 

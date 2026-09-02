@@ -2,6 +2,7 @@
 """
 Resume capsule builder: ~800-token context packet for /resume <thread>.
 """
+
 import argparse
 import json
 import os
@@ -10,19 +11,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from task_ledger import thread_get, artifact_list, inbox_list
+from task_ledger import artifact_list, inbox_list, thread_get
 
 CHITTA_BIN = os.environ.get("CHITTA_BIN", str(Path.home() / ".claude/bin/chitta"))
 
 
 def _chitta(args: list[str]) -> object:
     try:
-        r = subprocess.run(
-            [CHITTA_BIN, *args], capture_output=True, text=True, timeout=10
-        )
+        r = subprocess.run([CHITTA_BIN, *args], capture_output=True, text=True, timeout=10)
         if r.returncode == 0 and r.stdout.strip():
             return json.loads(r.stdout)
-    except Exception:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        # Daemon down or non-JSON reply. None is the documented "no data".
         pass
     return None
 
@@ -30,33 +30,35 @@ def _chitta(args: list[str]) -> object:
 def _tasks_for_thread(thread_id: str) -> list[dict]:
     raw = _chitta(["query_tasks", "--json"])
     tasks: list[dict] = (
-        raw.get("tasks", []) if isinstance(raw, dict)
-        else raw if isinstance(raw, list)
-        else []
+        raw.get("tasks", []) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
     )
     result = []
     for t in tasks:
         try:
             payload = json.loads(t.get("payload", "{}") or "{}")
             if payload.get("thread_id") == thread_id:
-                result.append({
-                    "task_id":          t.get("id") or t.get("task_id", ""),
-                    "goal":             payload.get("goal", ""),
-                    "status":           t.get("status", ""),
-                    "cmd":              payload.get("cmd", ""),
-                    "cwd":              payload.get("cwd", ""),
-                    "git_branch":       payload.get("git_branch", ""),
-                    "conda_env":        payload.get("conda_env", ""),
-                    "blockers":         payload.get("blockers", []),
-                    "work_items":       payload.get("work_items", []),
-                    "completion_digest": payload.get("completion_digest", ""),
-                    "job_id":           payload.get("job_id", ""),
-                    "iterations":       payload.get("iterations", 0),
-                    "params":           payload.get("params", {}),
-                    "inputs":           payload.get("inputs", []),
-                    "outputs":          payload.get("outputs", []),
-                })
-        except Exception:
+                result.append(
+                    {
+                        "task_id": t.get("id") or t.get("task_id", ""),
+                        "goal": payload.get("goal", ""),
+                        "status": t.get("status", ""),
+                        "cmd": payload.get("cmd", ""),
+                        "cwd": payload.get("cwd", ""),
+                        "git_branch": payload.get("git_branch", ""),
+                        "conda_env": payload.get("conda_env", ""),
+                        "blockers": payload.get("blockers", []),
+                        "work_items": payload.get("work_items", []),
+                        "completion_digest": payload.get("completion_digest", ""),
+                        "job_id": payload.get("job_id", ""),
+                        "iterations": payload.get("iterations", 0),
+                        "params": payload.get("params", {}),
+                        "inputs": payload.get("inputs", []),
+                        "outputs": payload.get("outputs", []),
+                    }
+                )
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            # Task row with a malformed payload: omit it from the capsule
+            # rather than failing the whole resume.
             pass
     return result
 
@@ -67,35 +69,37 @@ def build(thread_id: str) -> dict:
         return {"error": f"thread not found: {thread_id}"}
 
     all_tasks = _tasks_for_thread(thread_id)
-    active    = [t for t in all_tasks if t["status"] in ("active", "running", "blocked")]
+    active = [t for t in all_tasks if t["status"] in ("active", "running", "blocked")]
     completed = [t for t in all_tasks if t["status"] == "completed"][-3:]
-    failed    = [t for t in all_tasks if t["status"] == "failed"]
+    failed = [t for t in all_tasks if t["status"] == "failed"]
 
-    artifacts   = artifact_list(thread_id=thread_id)[-10:]
+    artifacts = artifact_list(thread_id=thread_id)[-10:]
     inbox_items = [
-        i for i in inbox_list(target_realm=thread.get("realm", ""), state="pending")
+        i
+        for i in inbox_list(target_realm=thread.get("realm", ""), state="pending")
         if i.get("thread_id") == thread_id
     ]
 
     return {
-        "thread_id":    thread_id,
-        "title":        thread.get("title", ""),
-        "realm":        thread.get("realm", ""),
-        "status":       thread.get("status", ""),
-        "last_active":  thread.get("last_active_at"),
+        "thread_id": thread_id,
+        "title": thread.get("title", ""),
+        "realm": thread.get("realm", ""),
+        "status": thread.get("status", ""),
+        "last_active": thread.get("last_active_at"),
         "active_tasks": active,
-        "completed":    completed,
-        "failed":       failed,
-        "artifacts":    [{"path": a["path"], "kind": a["kind"], "size": a.get("size")}
-                         for a in artifacts],
-        "inbox":        [{"event_type": i["event_type"], "digest": i["digest"]}
-                         for i in inbox_items],
-        "summary":      _render(thread, active, completed, failed, artifacts, inbox_items),
+        "completed": completed,
+        "failed": failed,
+        "artifacts": [
+            {"path": a["path"], "kind": a["kind"], "size": a.get("size")} for a in artifacts
+        ],
+        "inbox": [{"event_type": i["event_type"], "digest": i["digest"]} for i in inbox_items],
+        "summary": _render(thread, active, completed, failed, artifacts, inbox_items),
     }
 
 
-def _render(thread: dict, active: list, completed: list, failed: list,
-            artifacts: list, inbox: list) -> str:
+def _render(
+    thread: dict, active: list, completed: list, failed: list, artifacts: list, inbox: list
+) -> str:
     lines: list[str] = []
     lines.append(f"Thread: {thread.get('title', thread.get('thread_id', ''))}")
     lines.append(f"Realm:  {thread.get('realm', '')}")

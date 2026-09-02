@@ -31,7 +31,7 @@ CUTOFF=$(($(date +%s) - SINCE_HOURS * 3600))
 
 # Collect all spans from recent files
 ALL_SPANS=$(mktemp)
-trap "rm -f $ALL_SPANS" EXIT
+trap 'rm -f "$ALL_SPANS"' EXIT
 
 for f in "$SPANS_DIR"/*.jsonl; do
     [[ ! -f "$f" ]] && continue

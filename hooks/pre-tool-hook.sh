@@ -468,7 +468,7 @@ case "$MATCHER" in
             _is_temp=0
             case "$_wp_path" in
                 /tmp/*|*/scratch/*|*/tmp/*) _is_temp=1 ;;
-                *patch*|*fix_*|*edit_*|*_patch.*|*_fix.*|*_edit.*) _is_temp=1 ;;
+                *patch*|*fix_*|*edit_*|*_fix.*|*_edit.*) _is_temp=1 ;;
             esac
             if [[ "$_is_temp" == "1" ]]; then
                 _wp_content=$(echo "$STDIN_DATA" | jq -r '.tool_input.content // empty' 2>/dev/null)

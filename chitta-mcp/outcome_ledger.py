@@ -9,6 +9,7 @@ CLI:
   python3 outcome_ledger.py report [--ledger PATH] [--window-s 600]
   python3 outcome_ledger.py credit [--ledger PATH] [--window-s 600] [--apply]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,7 +20,10 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-DEFAULT_LEDGER = Path(os.environ.get("CHITTA_DB_PATH", str(Path.home() / ".claude" / "mind"))) / "outcome_ledger.jsonl"
+DEFAULT_LEDGER = (
+    Path(os.environ.get("CHITTA_DB_PATH", str(Path.home() / ".claude" / "mind")))
+    / "outcome_ledger.jsonl"
+)
 CHITTA_BIN = os.environ.get("CHITTA_BIN", str(Path.home() / ".claude" / "bin" / "chitta"))
 
 
@@ -85,15 +89,25 @@ def report(ledger_path: Path, window_s: int) -> str:
     rows = []
     for mid, s in stats.items():
         n = s["successes"] + s["failures"]
-        rows.append((mid, s["injections"], s["successes"], s["failures"], wilson_lower_bound(s["successes"], n)))
+        rows.append(
+            (
+                mid,
+                s["injections"],
+                s["successes"],
+                s["failures"],
+                wilson_lower_bound(s["successes"], n),
+            )
+        )
     rows.sort(key=lambda r: r[1], reverse=True)
 
     lines = [f"{'id':<24}{'injections':>12}{'successes':>12}{'failures':>12}{'wilson_lb':>12}"]
     for mid, inj, suc, fail, wlb in rows:
         lines.append(f"{mid:<24}{inj:>12}{suc:>12}{fail:>12}{wlb:>12.3f}")
     lines.append("")
-    lines.append(f"totals: memories={len(rows)} injections={sum(r[1] for r in rows)} "
-                  f"successes={sum(r[2] for r in rows)} failures={sum(r[3] for r in rows)}")
+    lines.append(
+        f"totals: memories={len(rows)} injections={sum(r[1] for r in rows)} "
+        f"successes={sum(r[2] for r in rows)} failures={sum(r[3] for r in rows)}"
+    )
     return "\n".join(lines)
 
 
@@ -103,10 +117,18 @@ def call_ack_nack(tool: str, mid: str) -> tuple:
     nack_memory are daemon tools not listed in the client's TOOL_SPECS, so the
     CLI rejects them as an unknown option (verified). `chitta mcp` forwards a
     tools/call request to the daemon and returns the real result synchronously."""
-    req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": tool, "arguments": {"id": mid}}})
+    req = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": {"id": mid}},
+        }
+    )
     try:
-        proc = subprocess.run([CHITTA_BIN, "mcp"], input=req, capture_output=True, text=True, timeout=5)
+        proc = subprocess.run(
+            [CHITTA_BIN, "mcp"], input=req, capture_output=True, text=True, timeout=5
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, str(exc)
     if proc.returncode != 0:
@@ -127,8 +149,14 @@ def call_ack_nack(tool: str, mid: str) -> tuple:
     return True, ""
 
 
-def credit(ledger_path: Path, window_s: int, apply: bool,
-           min_observations: int = 3, ack_threshold: float = 0.6, nack_threshold: float = 0.3) -> str:
+def credit(
+    ledger_path: Path,
+    window_s: int,
+    apply: bool,
+    min_observations: int = 3,
+    ack_threshold: float = 0.6,
+    nack_threshold: float = 0.3,
+) -> str:
     stats = compute_credit(load_events(ledger_path), window_s)
     lines = []
     for mid, s in sorted(stats.items(), key=lambda kv: -kv[1]["injections"]):
@@ -149,12 +177,16 @@ def credit(ledger_path: Path, window_s: int, apply: bool,
         else:
             lines.append(f"[dry-run] {action} --id {mid}  (n={n} wlb={wlb:.3f})")
     if not lines:
-        lines.append(f"no memories crossed the credit threshold (min_observations={min_observations})")
+        lines.append(
+            f"no memories crossed the credit threshold (min_observations={min_observations})"
+        )
     return "\n".join(lines)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_report = sub.add_parser("report", help="print per-memory injection/outcome table")
@@ -164,8 +196,11 @@ def main() -> int:
     p_credit = sub.add_parser("credit", help="ack/nack memories crossing the credit threshold")
     p_credit.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     p_credit.add_argument("--window-s", type=int, default=600)
-    p_credit.add_argument("--apply", action="store_true",
-                           help="actually call ack_memory/nack_memory (default: dry-run, prints intended calls)")
+    p_credit.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually call ack_memory/nack_memory (default: dry-run, prints intended calls)",
+    )
 
     args = parser.parse_args()
 

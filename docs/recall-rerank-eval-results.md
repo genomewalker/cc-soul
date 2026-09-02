@@ -1,5 +1,10 @@
 # Recall rerank eval — Step 1 gate result (geometric damping: NO-GO)
 
+> **Historical result. Status as of 2026-09-02.** This records one pre-registered
+> gate decision and its verdict. It is not a description of the shipping recall
+> path; for that see the
+> [recall pipeline page](https://genomewalker.github.io/chitta/recall.html).
+
 `scripts/recall_rerank_eval.py` — the pre-registered gate the room agreed must
 precede any rerank change (consolidation-redesign Step 2). Verdict: **NO-GO.
 Do not ship the geometric damping `s_c − β·r_d` as a reranker on this corpus.**

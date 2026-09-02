@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>chitta-field — Organic Memory Substrate — cc-soul</title>
-<meta name="description" content="chitta-field: a pure Rust organic memory substrate for cc-soul. Sparse associative codes, write-ahead log, multi-writer design, and sub-millisecond recall via cortical posting index.">
+<title>chitta-field — Organic Memory Substrate</title>
+<meta name="description" content="chitta-field: a pure Rust organic memory substrate for chitta. Sparse associative codes, write-ahead log, multi-writer design, and sub-millisecond recall via cortical posting index.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="chitta-field — Organic Memory Substrate — cc-soul">
+<meta property="og:title" content="chitta-field — Organic Memory Substrate">
 <meta property="og:description" content="A pure Rust organic memory substrate. Sparse associative codes, WAL, multi-writer, sub-millisecond recall.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
@@ -344,15 +344,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html" class="active">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -360,9 +361,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -373,6 +375,7 @@
     <div class="page-header-badge reveal">Memory Substrate</div>
     <h1 class="reveal reveal-delay-1"><span style="font-style:italic">chitta-field</span></h1>
     <p class="page-header-sub reveal reveal-delay-2">A pure Rust organic memory substrate&thinsp;&mdash;&thinsp;sparse associative codes, write-ahead log, multi-writer, sub-millisecond recall. No external database. No NFS locks.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -399,7 +402,7 @@
 <section class="cf-page-section" id="overview">
   <div class="container">
     <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">What it is</h2></div>
-    <p class="section-intro reveal reveal-delay-1">chitta-field is the sole storage substrate for cc-soul. It was designed to eliminate NFS file handle issues and D-state hangs on shared filesystems. It is a pure Rust library compiled to <code>libchitta_field.a</code>, statically linked into the C++ daemon. Zero external processes. Zero network sockets. Zero OS file handles on startup beyond the WAL segments.</p>
+    <p class="section-intro reveal reveal-delay-1">chitta-field is the sole storage substrate for chitta. It was designed to eliminate NFS file handle issues and D-state hangs on shared filesystems. It is a pure Rust library compiled to <code>libchitta_field.a</code>, statically linked into the C++ daemon. Zero external processes. Zero network sockets. Zero OS file handles on startup beyond the WAL segments.</p>
 
     <!-- Canvas animation -->
     <div class="cf-canvas-hero reveal reveal-delay-2">
@@ -770,7 +773,7 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
       </div>
       <div class="cf-card">
         <h4 class="cf-card-title">Flat files still matter</h4>
-        <p class="cf-card-desc">cc-soul syncs bidirectionally with Claude Code&rsquo;s built-in <code>MEMORY.md</code>. What the user writes there is absorbed into chitta; what chitta knows is injected back. Flat files are a fine human-readable interface and import surface. They are not a viable primary substrate at scale.</p>
+        <p class="cf-card-desc">chitta syncs bidirectionally with Claude Code&rsquo;s built-in <code>MEMORY.md</code>. What the user writes there is absorbed into chitta; what chitta knows is injected back. Flat files are a fine human-readable interface and import surface. They are not a viable primary substrate at scale.</p>
       </div>
     </div>
   </div>
@@ -972,7 +975,7 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
 <!-- ═══ INTEGRATION ═══ -->
 <section class="cf-page-section alt-bg" id="integration">
   <div class="container">
-    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Integration with cc-soul</h2></div>
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Integration with chitta</h2></div>
     <p class="section-intro reveal reveal-delay-1">chitta-field is a separate Rust repository included as a git submodule. The C++ daemon calls into it exclusively via a C FFI layer (<code>chitta_field.h</code>), keeping the Rust and C++ build systems fully independent.</p>
 
     <div class="cf-cards reveal reveal-delay-2">
@@ -985,14 +988,14 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
         <p class="cf-card-desc">All calls go through <code>cf_*</code> C functions defined in <code>chitta_field.h</code>. The C++ side calls <code>cf_open()</code>, gets back an opaque <code>FieldHandle*</code>, and uses it for all subsequent ops. No C++ knows about Rust internals.</p>
       </div>
       <div class="cf-card">
-        <h4 class="cf-card-title">ChittaFieldHandler</h4>
-        <p class="cf-card-desc">The RPC handler that registers all 100+ tools wraps <code>FieldStore</code> via the FFI. <code>ChittaFieldHandler</code> in <code>rpc/chitta_field_handler.hpp</code> is the sole RPC handler for all memory operations.</p>
+        <h4 class="cf-card-title">FieldRpcHandler</h4>
+        <p class="cf-card-desc">The RPC handler that registers all 319 daemon tools wraps <code>FieldStore</code> via the FFI. <code>FieldRpcHandler</code> in <code>rpc/field_handler.hpp</code> is the sole RPC handler for all memory operations.</p>
       </div>
     </div>
 
     <div class="cf-code reveal reveal-delay-3" style="margin-top:var(--space-6)">
 <span class="cm">// Build from source (git clone with submodule)</span>
-git clone --recurse-submodules https://github.com/genomewalker/cc-soul.git
+git clone --recurse-submodules https://github.com/genomewalker/chitta.git
 <span class="cm">// Build chitta-field (Rust, requires 1.92+)</span>
 cd chitta-field &amp;&amp; ./build.sh build --release &amp;&amp; cd ..
 <span class="cm">// Build the daemon (C++17 + ONNX Runtime)</span>
@@ -1043,7 +1046,7 @@ make -j$(nproc)
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

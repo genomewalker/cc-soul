@@ -419,7 +419,15 @@ void Subconscious::store_correction(const std::string& context, const std::strin
                            content.str(), embedding, confidence, 0.005f); }
 }
 
-void Subconscious::store_preference(const std::string& preference, const std::string& realm) {
+// Preferences are stored GLOBALLY (brahman) on purpose — a stated preference is
+// about how the user wants to be worked with, not about one project, so it must
+// survive a realm switch. This is why `realm` is accepted and deliberately
+// dropped, unlike store_correction/store_frustration beside it, which scope to
+// the realm they were observed in.
+// ceiling: a genuinely project-local preference ("in THIS repo, prefer X") is
+// promoted to global and will surface everywhere; upgrade: let the caller mark
+// scope and honour `realm` when it does. (2026-09-02)
+void Subconscious::store_preference(const std::string& preference, const std::string& /*realm*/) {
     std::ostringstream content;
     content << "[preference] " << preference;
 
@@ -537,25 +545,19 @@ void Subconscious::observe_pattern(const std::string& context, const std::string
                            text.str(), embedding, 0.5f, 0.03f); }
 }
 
-void Subconscious::verify_prediction(const std::string& actual_action, const std::string& realm) {
+// Clears the outstanding prediction. There is no anticipation success tracking
+// behind this: a word-overlap score used to be computed here and then dropped
+// on the floor unread, so it has been removed rather than left to look load-
+// bearing. Both parameters are kept for the two call sites and for the scoring
+// this will do again.
+// ceiling: prediction accuracy is never measured, so the anticipation lane
+// cannot be tuned or falsified; upgrade: score the overlap against
+// actual_action and persist it per realm, then feed that back into the
+// predictor. (2026-09-02)
+void Subconscious::verify_prediction(const std::string& /*actual_action*/,
+                                     const std::string& /*realm*/) {
     std::lock_guard<std::mutex> lock(anticipation_mutex_);
     if (last_predicted_action_.empty()) return;
-
-    // Simple word-overlap heuristic
-    std::istringstream iss(last_predicted_action_);
-    std::string word;
-    int matches = 0;
-    int total = 0;
-    while (iss >> word) {
-        if (word.length() >= 4) {
-            total++;
-            if (actual_action.find(word) != std::string::npos) {
-                matches++;
-            }
-        }
-    }
-
-    // No DB-backed anticipation success tracking; just clear the prediction
     last_predicted_action_.clear();
 }
 
@@ -689,9 +691,15 @@ void Subconscious::run_sleep_consolidation() {
         bool full_snapped = field_store_->save_full_snapshot();
         if (full_snapped && time_for_wal_compact()) {
             try {
-                size_t deleted = field_store_->compact_wal();
+                // compact_wal() returns -1 on failure, not a count. Assigning it
+                // to size_t turned that into 18446744073709551615 and printed it
+                // as a success line, so a failing compaction read as a huge win.
+                int64_t deleted = field_store_->compact_wal();
                 stats_.last_compact_wal_at = now_ms();
-                std::cerr << "[subconscious] WAL compact: deleted " << deleted << " segments\n";
+                if (deleted < 0)
+                    std::cerr << "[subconscious] WAL compact failed (store reported an error)\n";
+                else
+                    std::cerr << "[subconscious] WAL compact: deleted " << deleted << " segments\n";
             } catch (const std::exception& e) {
                 std::cerr << "[subconscious] WAL compact failed: " << e.what() << "\n";
             }

@@ -1,5 +1,13 @@
 # Consolidation Redesign — stall-free memory consolidation
 
+> **Superseded. Status as of 2026-09-02.** The premise of this document is wrong.
+> It assumed recall stalls because consolidation holds Rust locks that recall
+> needs. Reading the actual code disproved that; the contention is at the C++ RPC
+> layer, not in the Rust store. Read
+> [consolidation-redesign-v2.md](consolidation-redesign-v2.md) instead, and do
+> not build steps 4–7 of this document as written. Kept for the record of how
+> the analysis went wrong.
+
 Design from a multi-model room (`gpt-5.5:xhigh` + `opus-4.8:xhigh`, room `room-f3f2e863`).
 
 ## Problem

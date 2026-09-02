@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Constellation — cc-soul</title>
+<title>Constellation — chitta</title>
 <meta name="description" content="Live semantic constellation: 512 cross-model directions distilled from open-weight LLMs, forming the prior knowledge geometry of the blank mind.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -171,7 +171,7 @@
 
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
@@ -179,6 +179,8 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -186,9 +188,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
-      <li><a href="constellation.html" style="color:var(--aura-300)">Constellation</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
+      <li><a href="constellation.html" class="active">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -198,6 +201,7 @@
     <div class="page-header-badge reveal">Semantic Geometry</div>
     <h1 class="reveal reveal-delay-1">The Constellation.</h1>
     <p class="page-header-sub reveal reveal-delay-2">512 semantic directions distilled from open-weight LLMs&thinsp;&mdash;&thinsp;the prior knowledge structure seeded into every blank mind before the first memory.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -254,6 +258,14 @@
   </div>
 
   <div class="legend reveal" id="legend"></div>
+  <p class="reveal" style="max-width:660px;margin:var(--space-5) 0 0;padding-left:var(--space-4);border-left:2px solid rgba(203,175,134,0.35);font-size:13px;line-height:1.8;color:var(--ash-300)">
+    <strong style="color:var(--sandal-300)">Archive.</strong> This is a static snapshot, not a live view.
+    <code>constellation-data.json</code> was last generated on 2026-05-20 by
+    <code>scripts/build_constellation.py</code> and <code>scripts/export_constellation_web.py</code>.
+    Those generators still work and are wired into the harvest script, but they are run occasionally
+    rather than on a schedule, so what you see here reflects the store as it was on that date.
+  </p>
+
 
   <div style="margin-top:var(--space-8)" class="reveal">
     <h2 class="heading-section" style="margin-bottom:var(--space-5)">Three ways to explore</h2>
@@ -285,8 +297,8 @@
 
 <footer style="border-top:1px solid rgba(157,178,217,0.06);padding:var(--space-7) 0;margin-top:var(--space-8)">
   <div class="container" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-4);font-family:var(--font-mono);font-size:12px;color:var(--ash-300);opacity:0.5">
-    <span>cc-soul — constellation data updated on each harvest run</span>
-    <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" style="opacity:0.7">GitHub</a>
+    <span>chitta — snapshot, last generated 2026-05-20</span>
+    <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener" style="opacity:0.7">GitHub</a>
   </div>
 </footer>
 

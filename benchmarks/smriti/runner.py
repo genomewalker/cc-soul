@@ -66,6 +66,8 @@ corrections) to chitta's short hook-lane names (sem, kw, hyb, ctx, corr)
 -- see parse_condition().
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -78,7 +80,6 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 SCRATCH_ROOT = os.environ.get("SMRITI_SCRATCH", "/projects/caeg/scratch/kbd606/tmp")
 
@@ -101,6 +102,7 @@ ABLATE_SHORT_LANES = set(ABLATE_ALL_LANES.split(","))
 
 
 # ---- task loading + minimal schema validation (stdlib only) ----
+
 
 def load_task(task_dir: Path) -> dict:
     task = json.loads((task_dir / "task.json").read_text())
@@ -126,6 +128,7 @@ def validate_task(task: dict) -> None:
 
 
 # ---- memory adapters ----
+
 
 class MemoryAdapter:
     """Interface between the runner and a memory system under test."""
@@ -183,7 +186,7 @@ class ChittaAdapter(MemoryAdapter):
 
     CHITTA_BIN = os.path.expanduser("~/.claude/bin/chitta")
 
-    def __init__(self, ablate_lane: Optional[str] = None, dry_run: bool = False):
+    def __init__(self, ablate_lane: str | None = None, dry_run: bool = False):
         self.ablate_lane = ablate_lane
         self.dry_run = dry_run
 
@@ -200,18 +203,29 @@ class ChittaAdapter(MemoryAdapter):
             data = json.loads(result.stdout)
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError:
-            print(f"[ChittaAdapter] non-JSON response from '{cmd[1]}': "
-                  f"stdout={result.stdout!r} stderr={result.stderr!r}", file=sys.stderr)
+            print(
+                f"[ChittaAdapter] non-JSON response from '{cmd[1]}': "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}",
+                file=sys.stderr,
+            )
             return {}
 
     def plant(self, memories, realm_prefix):
         ids = []
         for m in memories:
-            cmd = [self.CHITTA_BIN, "remember", "--json",
-                   "--content", m["content"],
-                   "--type", m["type"],
-                   "--realm", realm_prefix,
-                   "--tags", "smriti-bench"]
+            cmd = [
+                self.CHITTA_BIN,
+                "remember",
+                "--json",
+                "--content",
+                m["content"],
+                "--type",
+                m["type"],
+                "--realm",
+                realm_prefix,
+                "--tags",
+                "smriti-bench",
+            ]
             data = self._run_cli(cmd)
             if "id" in data:
                 ids.append(data["id"])
@@ -238,6 +252,7 @@ class ChittaAdapter(MemoryAdapter):
 
 # ---- agent adapters ----
 
+
 @dataclass
 class AgentResult:
     transcript: str
@@ -248,8 +263,9 @@ class AgentResult:
 
 
 class AgentAdapter:
-    def run(self, prompt: str, memory_context: str, workdir: Path,
-            env: Optional[dict] = None) -> AgentResult:
+    def run(
+        self, prompt: str, memory_context: str, workdir: Path, env: dict | None = None
+    ) -> AgentResult:
         raise NotImplementedError
 
 
@@ -294,23 +310,33 @@ class ClaudeCodeAdapter(AgentAdapter):
     def run(self, prompt, memory_context, workdir, env=None):
         cmd = self.build_cmd(prompt)
         if self.dry_run:
-            print(f"[dry-run] would run in {workdir} (env additions: {env or {}}): "
-                  f"{cmd[0]} -p <prompt: {len(prompt)} chars> --output-format json "
-                  f"(timeout {self.timeout_s}s)")
+            print(
+                f"[dry-run] would run in {workdir} (env additions: {env or {}}): "
+                f"{cmd[0]} -p <prompt: {len(prompt)} chars> --output-format json "
+                f"(timeout {self.timeout_s}s)"
+            )
             return AgentResult(transcript="[dry-run]", tokens_used=0)
 
         full_env = dict(os.environ)
         full_env.update(env or {})
         try:
-            proc = subprocess.run(cmd, cwd=workdir, env=full_env,
-                                   capture_output=True, text=True, timeout=self.timeout_s)
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                env=full_env,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+            )
         except subprocess.TimeoutExpired:
             return AgentResult(transcript=f"[timeout after {self.timeout_s}s]", tokens_used=0)
 
         try:
             payload = json.loads(proc.stdout)
         except json.JSONDecodeError:
-            transcript = f"[unparseable claude -p output] stdout={proc.stdout!r} stderr={proc.stderr!r}"
+            transcript = (
+                f"[unparseable claude -p output] stdout={proc.stdout!r} stderr={proc.stderr!r}"
+            )
             return AgentResult(transcript=transcript, tokens_used=0)
 
         usage = payload.get("usage", {})
@@ -330,6 +356,7 @@ AGENT_ADAPTERS = {"echo": EchoAdapter, "claude-code": ClaudeCodeAdapter}
 
 
 # ---- run orchestration ----
+
 
 def parse_condition(condition: str, dry_run: bool = False):
     """'off' | 'on' | 'ablate:<lane>' | 'ablate:all' -> (memory_adapter, label).
@@ -363,7 +390,7 @@ def materialize_fixture(task: dict, task_dir: Path) -> Path:
     fixture = task["repo_fixture"]
     workdir = Path(tempfile.mkdtemp(prefix=f"smriti-{task['id']}-", dir=SCRATCH_ROOT))
     if fixture.startswith("git:"):
-        url, _, ref = fixture[len("git:"):].partition("#")
+        url, _, ref = fixture[len("git:") :].partition("#")
         subprocess.run(["git", "clone", "--quiet", url, str(workdir)], check=True)
         if ref:
             subprocess.run(["git", "-C", str(workdir), "checkout", "--quiet", ref], check=True)
@@ -428,8 +455,15 @@ def read_injected_ids_in_window(start_ms: int, end_ms: int) -> set:
     return ids
 
 
-def run_one(task: dict, task_dir: Path, condition: str, agent: AgentAdapter, run_id: str,
-            trial: int, dry_run: bool = False) -> Optional[dict]:
+def run_one(
+    task: dict,
+    task_dir: Path,
+    condition: str,
+    agent: AgentAdapter,
+    run_id: str,
+    trial: int,
+    dry_run: bool = False,
+) -> dict | None:
     """Runs one task x condition x trial and returns its scored record.
     ablate:<lane> is a real, scored condition -- see module docstring's
     "Ablation" section."""
@@ -492,7 +526,7 @@ def run_one(task: dict, task_dir: Path, condition: str, agent: AgentAdapter, run
     }
 
 
-def load_resume_state(resume_path: Optional[Path]):
+def load_resume_state(resume_path: Path | None):
     """Reads an existing results/<run_id>.jsonl (if given and present) and
     returns (run_id_to_reuse_or_None, {(task_id, condition, trial) already
     recorded}). Used by run_all to skip work an earlier, interrupted
@@ -507,12 +541,21 @@ def load_resume_state(resume_path: Optional[Path]):
     return run_id, done
 
 
-def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapter,
-            output_dir: Path, trials: int, dry_run: bool = False,
-            resume_path: Optional[Path] = None) -> Optional[Path]:
+def run_all(
+    tasks_dir: Path,
+    task_ids: list,
+    conditions: list,
+    agent: AgentAdapter,
+    output_dir: Path,
+    trials: int,
+    dry_run: bool = False,
+    resume_path: Path | None = None,
+) -> Path | None:
     if trials < 1:
-        raise ValueError("trials must be >= 1 -- a single trial is a coin flip, not a result "
-                          "(README 'Threats to validity': repeated-trial default)")
+        raise ValueError(
+            "trials must be >= 1 -- a single trial is a coin flip, not a result "
+            "(README 'Threats to validity': repeated-trial default)"
+        )
 
     resumed_run_id, done = load_resume_state(resume_path)
     run_id = resumed_run_id or uuid.uuid4().hex[:8]
@@ -523,8 +566,7 @@ def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapt
             task = load_task(task_dir)
             for condition in conditions:
                 if (task_id, condition, trial) in done:
-                    print(f"{task_id} [{condition}] trial {trial}: SKIP "
-                          f"(already in {resume_path})")
+                    print(f"{task_id} [{condition}] trial {trial}: SKIP (already in {resume_path})")
                     continue
                 record = run_one(task, task_dir, condition, agent, run_id, trial, dry_run=dry_run)
                 if record is None:
@@ -532,12 +574,16 @@ def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapt
                 records.append(record)
                 status = "PASS" if record["passed"] else "FAIL"
                 tag = " [dry-run]" if dry_run else ""
-                print(f"{task_id} [{condition}] trial {trial}{tag}: {status} "
-                      f"({record['tokens_used']} tokens)")
+                print(
+                    f"{task_id} [{condition}] trial {trial}{tag}: {status} "
+                    f"({record['tokens_used']} tokens)"
+                )
 
     if dry_run:
-        print(f"\n[dry-run] {len(records)} trial(s) would be recorded; no results file "
-              f"written, no external chitta/claude calls made.")
+        print(
+            f"\n[dry-run] {len(records)} trial(s) would be recorded; no results file "
+            f"written, no external chitta/claude calls made."
+        )
         return None
 
     os.makedirs(output_dir, exist_ok=True)
@@ -552,25 +598,45 @@ def run_all(tasks_dir: Path, task_ids: list, conditions: list, agent: AgentAdapt
 def main():
     parser = argparse.ArgumentParser(description="SMRITI-Bench runner")
     parser.add_argument("--tasks-dir", default=str(Path(__file__).parent / "tasks"))
-    parser.add_argument("--task", action="append", help="task id to run (default: all under tasks-dir)")
-    parser.add_argument("--condition", action="append", default=None,
-                         help="off|on|ablate:<lane>, repeatable (default: off,on)")
+    parser.add_argument(
+        "--task", action="append", help="task id to run (default: all under tasks-dir)"
+    )
+    parser.add_argument(
+        "--condition",
+        action="append",
+        default=None,
+        help="off|on|ablate:<lane>, repeatable (default: off,on)",
+    )
     parser.add_argument("--agent", choices=sorted(AGENT_ADAPTERS), default="echo")
-    parser.add_argument("--trials", type=int, required=True,
-                         help="repeat each task x condition this many times (no default -- "
-                              "README recommends >=5 before trusting a per-task delta_sr; "
-                              "a single trial is a coin flip, not a result)")
-    parser.add_argument("--timeout", type=int, default=600,
-                         help="wall-clock seconds before a claude-code agent run is killed (default 600)")
+    parser.add_argument(
+        "--trials",
+        type=int,
+        required=True,
+        help="repeat each task x condition this many times (no default -- "
+        "README recommends >=5 before trusting a per-task delta_sr; "
+        "a single trial is a coin flip, not a result)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="wall-clock seconds before a claude-code agent run is killed (default 600)",
+    )
     parser.add_argument("--output", default=str(Path(__file__).parent / "results"))
-    parser.add_argument("--dry-run", action="store_true",
-                         help="print the chitta/claude commands each trial would run, without "
-                              "executing them or the daemon-mutating chitta calls; writes no results file")
-    parser.add_argument("--resume", default=None,
-                         help="path to an existing results/<run_id>.jsonl -- skip any "
-                              "task x condition x trial already present in it and append "
-                              "the rest to the same file (same run_id), instead of starting "
-                              "a fresh run from scratch")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the chitta/claude commands each trial would run, without "
+        "executing them or the daemon-mutating chitta calls; writes no results file",
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="path to an existing results/<run_id>.jsonl -- skip any "
+        "task x condition x trial already present in it and append "
+        "the rest to the same file (same run_id), instead of starting "
+        "a fresh run from scratch",
+    )
     args = parser.parse_args()
 
     if args.trials < 1:
@@ -585,9 +651,16 @@ def main():
     else:
         agent = AGENT_ADAPTERS[args.agent]()
 
-    out_path = run_all(tasks_dir, task_ids, conditions, agent, Path(args.output),
-                        trials=args.trials, dry_run=args.dry_run,
-                        resume_path=Path(args.resume) if args.resume else None)
+    out_path = run_all(
+        tasks_dir,
+        task_ids,
+        conditions,
+        agent,
+        Path(args.output),
+        trials=args.trials,
+        dry_run=args.dry_run,
+        resume_path=Path(args.resume) if args.resume else None,
+    )
     if out_path:
         print(f"results: {out_path}")
 

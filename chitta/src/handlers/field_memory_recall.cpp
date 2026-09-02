@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include "chitta/hit_line.hpp"
 #include "chitta/speech_act.hpp"
 #include "chitta/ssl_gloss.hpp"
 
@@ -165,6 +166,48 @@ std::vector<char> prefilter_keep(const std::vector<PrefilterCand>& c,
 } // namespace
 
 namespace chitta {
+
+// Single emission point for the `#<id> [pct%] …` hit line. See the contract on
+// FieldRpcHandler::HitLineOpts in rpc/handlers/field_memory_recall.hpp — hooks
+// parse this format, so it is frozen; only the per-lane flags vary.
+void FieldRpcHandler::format_hits(std::ostringstream& ss, json& results,
+                                  const std::string& query, const HitLineOpts& opts) {
+    set_lexical(results, query);
+
+    float lex_max = 0.0f;
+    if (opts.norm_lexical)
+        for (const auto& r : results) lex_max = std::max(lex_max, r.value("lexical", 0.0f));
+
+    for (auto& r : results) {
+        int pct = display_pct(r);
+        if (opts.norm_lexical && lex_max > 0.0f)
+            pct = static_cast<int>(100.0f * r.value("lexical", 0.0f) / lex_max);
+        if (opts.record_pct) r["display_pct"] = pct;
+
+        const std::string id = r.value("id", "0");
+        ss << hit_line(id, pct, r.value("type", "?"), r.value("ts_ms", int64_t(0)),
+                       r.value("text", ""), opts.show_type, opts.show_date);
+
+        if (!opts.link_atoms) continue;
+        // Memory→span forward edge: hyperlink this belief to the exact atoms its
+        // text references (paths/commands/ids), un-paraphrased. Directly fixes the
+        // ellesmere class — the distilled belief now carries the verbatim path.
+        uint64_t mid = 0;
+        try { mid = std::stoull(id); } catch (...) {}
+        if (mid == 0) continue;
+        auto linked = json::parse(field_store_->span_for_memory_json(mid, 4), nullptr, false);
+        if (!linked.is_array() || linked.empty()) continue;
+        r["atoms"] = linked;
+        ss << "    ↳ ";
+        bool first = true;
+        for (const auto& a : linked) {
+            if (!first) ss << " · ";
+            first = false;
+            ss << a.value("text", "");
+        }
+        ss << "\n";
+    }
+}
 
 ToolResult FieldRpcHandler::tool_remember(const json& params) {
     std::string content = params.value("content", "");
@@ -1086,43 +1129,7 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     // C2 self-monitoring (prompt-core.sh) bins this into KNOWN/THIN/UNKNOWN.
     if (!hits.empty()) ss << " (maxrel " << static_cast<int>(max_rel * 100) << "%)";
     ss << ":\n";
-    set_lexical(results_json, query);
-    for (auto& r : results_json) {
-        int pct = display_pct(r);
-        // Line contract: `#<id> [pct%] ...`. The hooks' SUS exposure block and
-        // the outcome-ledger injected tap parse `^#([0-9]+)`; dropping the id
-        // prefix silently kills exposure/credit tracking (happened once).
-        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "]";
-        int64_t ts = r.value("ts_ms", int64_t(0));
-        if (ts > 0) {
-            std::time_t t = static_cast<std::time_t>(ts / 1000);
-            std::tm* tm = std::gmtime(&t);
-            char buf[16];
-            std::strftime(buf, sizeof(buf), "%Y-%m-%d", tm);
-            ss << " (on: " << buf << ")";
-        }
-        ss << " " << r.value("text", "").substr(0, 400) << "\n";
-
-        // Memory→span forward edge: hyperlink this belief to the exact atoms its
-        // text references (paths/commands/ids), un-paraphrased. Directly fixes the
-        // ellesmere class — the distilled belief now carries the verbatim path.
-        uint64_t mid = 0;
-        try { mid = std::stoull(r.value("id", "0")); } catch (...) {}
-        if (mid != 0) {
-            auto linked = json::parse(field_store_->span_for_memory_json(mid, 4), nullptr, false);
-            if (linked.is_array() && !linked.empty()) {
-                r["atoms"] = linked;
-                ss << "    ↳ ";
-                bool first = true;
-                for (const auto& a : linked) {
-                    if (!first) ss << " · ";
-                    first = false;
-                    ss << a.value("text", "");
-                }
-                ss << "\n";
-            }
-        }
-    }
+    format_hits(ss, results_json, query, {.show_date = true, .link_atoms = true});
 
     // Co-present the Span Lane: a separate, capped, realm-scoped block of verbatim
     // transcript atoms. Disjoint from distilled memories above — no RRF fusion, no
@@ -1273,11 +1280,7 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
     ss << "Found " << hits.size() << " keyword results for '" << query << "'";
     if (!realm.empty()) ss << " in realm '" << realm << "'";
     ss << ":\n";
-    set_lexical(results_json, query);
-    for (const auto& r : results_json) {
-        int pct = display_pct(r);
-        ss << "#" << r.value("id", "0") << " [" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
-    }
+    format_hits(ss, results_json, query, {.show_type = false});
     return ToolResult::ok(ss.str(), {{"results", results_json}});
 }
 
@@ -1418,11 +1421,7 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
 
     std::ostringstream ss;
     ss << "Hybrid recall: " << merged.size() << " results\n";
-    set_lexical(merged, query);
-    for (const auto& r : merged) {
-        int pct = display_pct(r);
-        ss << "#" << r.value("id", "0") << " [" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
-    }
+    format_hits(ss, merged, query, {.show_type = false});
     auto result = ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
     fire_recall_callback(merged, 1);
     return result;
@@ -1521,11 +1520,11 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
         }
     }
 
-    // ── Header/line contract (parsed by hooks/prompt-core.sh) ──────────────
+    // ── Header contract (parsed by hooks/prompt-core.sh) ───────────────────
     // Header: `Smart recall (<route>, ep=<episode_id>): <n> results`
     //   <route> ∈ semantic|keyword|temporal|artifact|hybrid|full — the route the
     //   learner picked; ep=<id> is the bandit episode for route_feedback.
-    // Lines:  `#<id> [<pct>%] [<type>] <text>`
+    // Lines are the shared format_hits() contract, with norm_lexical on:
     //   The hook applies MIN_CONFIDENCE=30 to <pct>. That threshold assumes the
     //   number is comparable ACROSS routes, and it was not: semantic hits print
     //   a cosine (70-100%) while the keyword lane printed raw query-token
@@ -1536,18 +1535,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     //   untouched in the JSON; `display_pct` records what was printed.
     std::ostringstream ss;
     ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
-    set_lexical(results, query);
-    float lex_max = 0.0f;
-    if (keyword_lane)
-        for (const auto& r : results) lex_max = std::max(lex_max, r.value("lexical", 0.0f));
-    for (auto& r : results) {
-        int pct = display_pct(r);
-        if (keyword_lane && lex_max > 0.0f)
-            pct = static_cast<int>(100.0f * r.value("lexical", 0.0f) / lex_max);
-        r["display_pct"] = pct;
-        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "] "
-           << r.value("text", "").substr(0, 400) << "\n";
-    }
+    format_hits(ss, results, query, {.norm_lexical = keyword_lane, .record_pct = true});
     auto result = ToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
     fire_recall_callback(results, 1);
     return result;
@@ -1745,12 +1733,7 @@ ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     std::ostringstream ss;
     ss << "Found " << final_merged.size() << " results (" << passes_run << " pass"
        << (passes_run > 1 ? "es" : "") << "):\n";
-    set_lexical(final_merged, query);
-    for (const auto& r : final_merged) {
-        int pct = display_pct(r);
-        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "] "
-           << r.value("text", "").substr(0, 400) << "\n";
-    }
+    format_hits(ss, final_merged, query, {});
     return ToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
 }
 

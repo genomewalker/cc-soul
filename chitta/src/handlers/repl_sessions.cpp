@@ -52,7 +52,6 @@ ToolResult FieldRpcHandler::tool_repl_execute(const json& params) {
     std::string json_result = field_store_->repl_execute(session_id, code, reset, "", max_output);
     json out = json::parse(json_result, nullptr, false);
     if (out.is_discarded()) return ToolResult::error("repl_execute returned invalid JSON");
-    bool success = out.value("success", false);
     std::string output = out.value("output", "");
     std::string error  = out.value("error",  "");
     std::string text   = output.empty() ? error : output;

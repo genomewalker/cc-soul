@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
-from session_registry import inventory as registry_inventory  # noqa: E402
+from session_registry import (  # noqa: E402
+    inventory as registry_inventory,
+)
+from session_registry import (
+    iter_ancestor_pids,
+)
 from task_ledger import (  # noqa: E402
     lease_claim,
     session_bind,
@@ -38,7 +43,9 @@ def _git_root(path: str) -> str:
     try:
         proc = subprocess.run(
             ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
         return _canonical(proc.stdout.strip()) if proc.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
@@ -62,8 +69,7 @@ def _pid_alive(pid: Any) -> bool:
         return True  # /proc unavailable: keep the old permissive behavior
 
 
-def _entry_live(entry: dict[str, Any], now_ms: int,
-                ttl_ms: int = 900_000) -> bool:
+def _entry_live(entry: dict[str, Any], now_ms: int, ttl_ms: int = 900_000) -> bool:
     if "is_live" in entry:
         return bool(entry["is_live"])
     if entry.get("status") not in (None, "", "active"):
@@ -100,8 +106,7 @@ def _session_id_from_codex(path: Path, first: dict[str, Any]) -> str:
     return match.group(1) if match else path.stem
 
 
-def discover_project_transcripts(project_dir: str,
-                                 limit: int = 100) -> list[dict[str, Any]]:
+def discover_project_transcripts(project_dir: str, limit: int = 100) -> list[dict[str, Any]]:
     """Recover historical Claude and Codex files missing old registrations.
 
     Discovery is project-exact and feeds the deterministic selector; it is
@@ -118,13 +123,15 @@ def discover_project_transcripts(project_dir: str,
     claude_dir = home / ".claude" / "projects" / encoded
     if claude_dir.is_dir():
         for path in claude_dir.glob("*.jsonl"):
-            found.append({
-                "session_id": path.stem,
-                "client": "claude",
-                "project_dir": project,
-                "transcript_path": str(path.resolve()),
-                "discovered": True,
-            })
+            found.append(
+                {
+                    "session_id": path.stem,
+                    "client": "claude",
+                    "project_dir": project,
+                    "transcript_path": str(path.resolve()),
+                    "discovered": True,
+                }
+            )
 
     codex_root = home / ".codex" / "sessions"
     if codex_root.is_dir():
@@ -133,7 +140,7 @@ def discover_project_transcripts(project_dir: str,
             codex_root.rglob("*.jsonl"),
             key=lambda item: _mtime(str(item)),
             reverse=True,
-        )[:max(limit * 4, 200)]
+        )[: max(limit * 4, 200)]
         for path in paths:
             try:
                 with path.open(encoding="utf-8") as handle:
@@ -147,14 +154,16 @@ def discover_project_transcripts(project_dir: str,
             cwd_git = git_cache.get(cwd, "")
             if cwd != project and not (project_git and cwd_git == project_git):
                 continue
-            found.append({
-                "session_id": _session_id_from_codex(path, first),
-                "client": "codex",
-                "model": str(payload.get("model") or ""),
-                "project_dir": cwd,
-                "transcript_path": str(path.resolve()),
-                "discovered": True,
-            })
+            found.append(
+                {
+                    "session_id": _session_id_from_codex(path, first),
+                    "client": "codex",
+                    "model": str(payload.get("model") or ""),
+                    "project_dir": cwd,
+                    "transcript_path": str(path.resolve()),
+                    "discovered": True,
+                }
+            )
 
     found.sort(key=lambda row: _mtime(str(row["transcript_path"])), reverse=True)
     return found[:limit]
@@ -163,10 +172,7 @@ def discover_project_transcripts(project_dir: str,
 def augment_inventory(data: dict[str, Any], project_dir: str) -> dict[str, Any]:
     merged = dict(data)
     transcripts = list(data.get("transcripts", []))
-    known = {
-        str(row.get("session_id") or row.get("transcript_id") or "")
-        for row in transcripts
-    }
+    known = {str(row.get("session_id") or row.get("transcript_id") or "") for row in transcripts}
     for row in discover_project_transcripts(project_dir):
         if row["session_id"] not in known:
             transcripts.append(row)
@@ -174,29 +180,14 @@ def augment_inventory(data: dict[str, Any], project_dir: str) -> dict[str, Any]:
     return merged
 
 
-def _ancestor_pids() -> set[int]:
-    pids: set[int] = set()
-    pid = os.getppid()
-    for _ in range(32):
-        if pid <= 1 or pid in pids:
-            break
-        pids.add(pid)
-        try:
-            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-            pid = int(stat[stat.rfind(")") + 2:].split()[1])
-        except (OSError, ValueError, IndexError):
-            break
-    return pids
-
-
-def infer_current_session_id(data: dict[str, Any], project_dir: str,
-                             client: str = "") -> str:
+def infer_current_session_id(data: dict[str, Any], project_dir: str, client: str = "") -> str:
     """Identify the invoking frontend by registered ancestor PID if possible."""
     now_ms = int(time.time() * 1000)
     live = [row for row in data.get("sessions", []) if _entry_live(row, now_ms)]
-    ancestors = _ancestor_pids()
+    ancestors = set(iter_ancestor_pids())
     pid_matches = [
-        row for row in live
+        row
+        for row in live
         if int(row.get("pid") or -1) in ancestors
         and (not client or (row.get("client") or row.get("kind")) == client)
     ]
@@ -205,29 +196,35 @@ def infer_current_session_id(data: dict[str, Any], project_dir: str,
 
     project = _canonical(project_dir)
     project_matches = [
-        row for row in live
+        row
+        for row in live
         if _canonical(str(row.get("project_dir") or "")) == project
         and (not client or (row.get("client") or row.get("kind")) == client)
     ]
-    return str(project_matches[0].get("session_id") or "") \
-        if len(project_matches) == 1 else ""
+    return str(project_matches[0].get("session_id") or "") if len(project_matches) == 1 else ""
 
 
 def _resolve_thread(value: str) -> str:
     if not value:
         return ""
     matches = [
-        row for row in thread_list(status="active", limit=100)
+        row
+        for row in thread_list(status="active", limit=100)
         if str(row.get("thread_id", "")).startswith(value)
         or value.lower() in str(row.get("title", "")).lower()
     ]
     return str(matches[0]["thread_id"]) if len(matches) == 1 else value
 
 
-def select_resume(data: dict[str, Any], project_dir: str,
-                  current_session_id: str = "", requested_session_id: str = "",
-                  requested_thread: str = "", client: str = "",
-                  min_margin: int = 15) -> dict[str, Any]:
+def select_resume(
+    data: dict[str, Any],
+    project_dir: str,
+    current_session_id: str = "",
+    requested_session_id: str = "",
+    requested_thread: str = "",
+    client: str = "",
+    min_margin: int = 15,
+) -> dict[str, Any]:
     """Return one selected inactive transcript, or an explicit ambiguity/lock."""
     now = time.time()
     now_ms = int(now * 1000)
@@ -236,11 +233,13 @@ def select_resume(data: dict[str, Any], project_dir: str,
 
     daemon_sessions = {
         str(row.get("session_id")): dict(row)
-        for row in data.get("sessions", []) if row.get("session_id")
+        for row in data.get("sessions", [])
+        if row.get("session_id")
     }
     ledger_sessions = {
         str(row.get("session_id")): dict(row)
-        for row in data.get("thread_sessions", []) if row.get("session_id")
+        for row in data.get("thread_sessions", [])
+        if row.get("session_id")
     }
     leases = {
         str(row.get("thread_id")): dict(row)
@@ -264,16 +263,20 @@ def select_resume(data: dict[str, Any], project_dir: str,
         if not _entry_live(row, now_ms):
             continue
         ledger = ledger_sessions.get(sid, {})
-        live_sessions.append({
-            "session_id": sid,
-            "client": row.get("client") or row.get("kind") or ledger.get("client") or "unknown",
-            "model": row.get("model", ""),
-            "project_dir": row.get("project_dir") or ledger.get("project_dir") or "",
-            "thread_id": row.get("thread_id") or ledger.get("thread_id") or "",
-            "transcript_path": row.get("transcript_path") or ledger.get("transcript_path") or "",
-            "pid": row.get("pid"),
-            "last_heartbeat_ms": row.get("last_heartbeat_ms") or row.get("ts_ms"),
-        })
+        live_sessions.append(
+            {
+                "session_id": sid,
+                "client": row.get("client") or row.get("kind") or ledger.get("client") or "unknown",
+                "model": row.get("model", ""),
+                "project_dir": row.get("project_dir") or ledger.get("project_dir") or "",
+                "thread_id": row.get("thread_id") or ledger.get("thread_id") or "",
+                "transcript_path": row.get("transcript_path")
+                or ledger.get("transcript_path")
+                or "",
+                "pid": row.get("pid"),
+                "last_heartbeat_ms": row.get("last_heartbeat_ms") or row.get("ts_ms"),
+            }
+        )
 
     requested_thread_id = _resolve_thread(requested_thread)
     candidates: list[dict[str, Any]] = []
@@ -371,8 +374,13 @@ def select_resume(data: dict[str, Any], project_dir: str,
     }
 
 
-def claim_selected(result: dict[str, Any], current_session_id: str,
-                   client: str, project_dir: str, force: bool = False) -> dict[str, Any]:
+def claim_selected(
+    result: dict[str, Any],
+    current_session_id: str,
+    client: str,
+    project_dir: str,
+    force: bool = False,
+) -> dict[str, Any]:
     selected = result.get("selected") or {}
     thread_id = str(selected.get("thread_id") or "")
     if not current_session_id:
@@ -389,7 +397,8 @@ def claim_selected(result: dict[str, Any], current_session_id: str,
             if prior_status not in ("ended", "interrupted", "completed"):
                 prior_status = "ended"
             session_bind(
-                selected_session_id, thread_id,
+                selected_session_id,
+                thread_id,
                 client=str(selected.get("client") or ""),
                 project_dir=str(selected.get("project_dir") or project_dir),
                 transcript_path=str(selected.get("transcript_path") or ""),
@@ -397,20 +406,27 @@ def claim_selected(result: dict[str, Any], current_session_id: str,
             )
     # Create/refresh the current session row for the lease FK, but let the
     # atomic claim update its thread only after ownership succeeds.
-    session_bind(current_session_id, None, client=client,
-                 project_dir=_canonical(project_dir))
+    session_bind(current_session_id, None, client=client, project_dir=_canonical(project_dir))
     return lease_claim(thread_id, current_session_id, force=force)
 
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(prog="resume_selector")
     parser.add_argument("--project-dir", default=os.getcwd(), dest="project_dir")
-    current_default = next((os.environ.get(name, "") for name in (
-        "CLAUDE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID",
-        "CODEX_CONVERSATION_ID",
-    ) if os.environ.get(name)), "")
-    parser.add_argument("--current-session-id", default=current_default,
-                        dest="current_session_id")
+    current_default = next(
+        (
+            os.environ.get(name, "")
+            for name in (
+                "CLAUDE_SESSION_ID",
+                "CODEX_SESSION_ID",
+                "CODEX_THREAD_ID",
+                "CODEX_CONVERSATION_ID",
+            )
+            if os.environ.get(name)
+        ),
+        "",
+    )
+    parser.add_argument("--current-session-id", default=current_default, dest="current_session_id")
     parser.add_argument("--session-id", default="", dest="requested_session_id")
     parser.add_argument("--thread", default="", dest="requested_thread")
     parser.add_argument("--client", choices=("", "claude", "codex"), default="")
@@ -426,17 +442,26 @@ def _cli() -> None:
         data = augment_inventory(registry_inventory(), args.project_dir)
     if not args.current_session_id:
         args.current_session_id = infer_current_session_id(
-            data, args.project_dir, args.client,
+            data,
+            args.project_dir,
+            args.client,
         )
     result = select_resume(
-        data, args.project_dir, args.current_session_id,
-        args.requested_session_id, args.requested_thread,
-        args.client, args.min_margin,
+        data,
+        args.project_dir,
+        args.current_session_id,
+        args.requested_session_id,
+        args.requested_thread,
+        args.client,
+        args.min_margin,
     )
     if args.claim:
         result["claim"] = claim_selected(
-            result, args.current_session_id, args.client,
-            args.project_dir, args.force,
+            result,
+            args.current_session_id,
+            args.client,
+            args.project_dir,
+            args.force,
         )
     print(json.dumps(result, default=str))
 

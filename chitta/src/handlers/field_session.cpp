@@ -80,11 +80,14 @@ void merge_session_metadata(json& entry, const json& payload) {
     entry["metadata"] = metadata;
 }
 
-std::unordered_map<std::string, json> latest_session_payloads(
-    FieldStore* store, const std::string& kind) {
+// One store round-trip for a whole (domain, kind) event slice, keyed by target.
+// The alternative — get_latest_event() per session id — is O(n) FFI calls; the
+// transcript list was doing up to 2x its limit of them.
+std::unordered_map<std::string, json> latest_event_payloads(
+    FieldStore* store, const std::string& domain, const std::string& kind, size_t cap) {
     std::unordered_map<std::string, json> result;
     json events = json::parse(
-        store->get_events_by_domain_kind("session", kind, 500), nullptr, false);
+        store->get_events_by_domain_kind(domain, kind, cap), nullptr, false);
     if (!events.is_array()) return result;
     // Event queries are newest-first, so the first occurrence for each exact
     // target is the payload that belongs to the native registry row.
@@ -163,12 +166,23 @@ ToolResult FieldRpcHandler::tool_transcript_list(const json& params) {
         list_json = json::array();
     }
 
+    // One batched slice of transcript/register events instead of a per-session
+    // get_latest_event() round-trip; the per-id lookup stays as the fallback for
+    // a registration older than the newest `kRegisterSlice` events.
+    constexpr size_t kRegisterSlice = 500;
+    auto registrations = latest_event_payloads(field_store_, "transcript", "register", kRegisterSlice);
+    auto registration_for = [&](const std::string& sid) -> json {
+        auto it = registrations.find(sid);
+        if (it != registrations.end()) return it->second;
+        return transcript_registration(field_store_, sid);
+    };
+
     std::unordered_set<std::string> seen;
     for (auto& item : list_json) {
         std::string sid = item.value("session_id", "");
         if (sid.empty()) continue;
         seen.insert(sid);
-        json reg = transcript_registration(field_store_, sid);
+        json reg = registration_for(sid);
         for (const auto& [key, value] : reg.items()) item[key] = value;
     }
 
@@ -181,7 +195,7 @@ ToolResult FieldRpcHandler::tool_transcript_list(const json& params) {
             if (list_json.size() >= limit) break;
             std::string sid = session.value("session_id", "");
             if (sid.empty() || seen.count(sid)) continue;
-            json reg = transcript_registration(field_store_, sid);
+            json reg = registration_for(sid);
             if (reg.empty()) continue;
             reg["session_id"] = sid;
             reg["transcript_id"] = sid;
@@ -921,8 +935,8 @@ ToolResult FieldRpcHandler::tool_session_list(const json& params) {
     }
 
     json sessions_out = json::array();
-    auto registrations = latest_session_payloads(field_store_, "register");
-    auto heartbeats = latest_session_payloads(field_store_, "heartbeat");
+    auto registrations = latest_event_payloads(field_store_, "session", "register", 500);
+    auto heartbeats = latest_event_payloads(field_store_, "session", "heartbeat", 500);
     char host_buf[256]{};
     std::string local_host;
     if (gethostname(host_buf, sizeof(host_buf)) == 0) local_host = host_buf;

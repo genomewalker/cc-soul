@@ -2,6 +2,30 @@
 
 Modular hooks for Claude Code integration. Each hook has a single responsibility.
 
+## Python floor: 3.9 — Status as of 2026-09-02
+
+Every `.py` file under `hooks/` and the standalone modules in `chitta-mcp/`
+**must import on Python 3.9**. They run under `#!/usr/bin/env python3`, which on
+the deployment hosts resolves to PyPy 3.9; `/usr/bin/python3` is older still
+(3.6). The single exception is `chitta-mcp/server.py` and what it imports, which
+runs only through the pinned conda env (3.12) and needs the `mcp` SDK, itself
+3.10+ — see `chitta-mcp/pyproject.toml`.
+
+Practically this means:
+
+- Annotations may use `X | None` **only** in a module that carries
+  `from __future__ import annotations`, which makes them strings instead of
+  runtime expressions. Without it, `dict | None` parses on 3.9 and then raises
+  `TypeError` the moment the module is imported.
+- No `match` statements, and no `zip(..., strict=)`.
+- `ruff.toml` pins `target-version = "py39"` so the linter never rewrites code
+  into syntax the hook interpreter cannot run. Raising it re-enables B905 and
+  the unguarded PEP 604 rewrites — read the comment there first.
+
+`python -m compileall` does **not** catch this: annotations are valid syntax on
+3.9 and only fail on import. CI enforces the floor with a real 3.9 interpreter
+in the `lint-python` job's "Import smoke test on the 3.9 floor" step.
+
 ## Hook Scripts
 
 | Script | Hook Event | Purpose |

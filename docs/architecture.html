@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Architecture — cc-soul</title>
-<meta name="description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
+<title>Architecture — chitta</title>
+<meta name="description" content="Technical architecture of chitta: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Architecture — cc-soul">
-<meta property="og:description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
+<meta property="og:title" content="Architecture — chitta">
+<meta property="og:description" content="Technical architecture of chitta: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Architecture — cc-soul">
-<meta name="twitter:description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, and Bayesian self-tuning.">
+<meta name="twitter:title" content="Architecture — chitta">
+<meta name="twitter:description" content="Technical architecture of chitta: chitta-field Rust memory substrate, 8-phase resonance engine, and Bayesian self-tuning.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -87,15 +87,16 @@
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
-      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="architecture.html" class="active">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -103,9 +104,10 @@
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -114,8 +116,9 @@
 <header class="page-header">
   <div class="container">
     <div class="page-header-badge reveal">Technical Architecture</div>
-    <h1 class="reveal reveal-delay-1">How cc-soul thinks.</h1>
+    <h1 class="reveal reveal-delay-1">How chitta thinks.</h1>
     <p class="page-header-sub reveal reveal-delay-2">chitta-field Rust memory substrate, 8-phase resonance, Bayesian self-tuning, and tree-sitter code intelligence&thinsp;&mdash;&thinsp;in a single C++ daemon.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -171,7 +174,7 @@
         <span class="diagram-layer-label">chittad Daemon</span>
         <div class="diagram-boxes">
           <div class="diagram-box highlight-sandal">Thread Pool (2-16)</div>
-          <div class="diagram-box highlight-sandal">RPC Handler (100+ tools)</div>
+          <div class="diagram-box highlight-sandal">RPC Handler (319 tools)</div>
           <div class="diagram-box highlight-sandal">Subconscious (background)</div>
         </div>
       </div>
@@ -187,9 +190,9 @@
       <div class="diagram-layer layer-mind">
         <span class="diagram-layer-label">chitta-field (Rust, statically linked)</span>
         <div class="diagram-boxes">
-          <div class="diagram-box highlight-ember">Embedder &amp; V&#x101;k (ONNX)</div>
+          <div class="diagram-box highlight-ember">Embedder &amp; V&#x101;k (llama.cpp)</div>
           <div class="diagram-box highlight-ember">ResonanceLearner</div>
-          <div class="diagram-box highlight-ember">ThemeManager (xMemory)</div>
+          <div class="diagram-box highlight-ember">Themes (xMemory)</div>
           <div class="diagram-box highlight-ember">SessionContext</div>
           <div class="diagram-box highlight-ember">FieldStore (WAL + sparse codes)</div>
           <div class="diagram-box highlight-ember">Cortical Index (sub-ms recall)</div>
@@ -233,13 +236,14 @@
       </thead>
       <tbody>
         <tr><td class="class-name">FieldStore</td><td class="file-name">chitta-field/src/field.rs</td><td class="role-desc">Central memory substrate: WAL, sparse codes, cortical index, decay</td></tr>
-        <tr><td class="class-name">ChittaFieldHandler</td><td class="file-name">rpc/chitta_field_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 100+ registered tools, backed by FieldStore</td></tr>
+        <tr><td class="class-name">FieldRpcHandler</td><td class="file-name">rpc/field_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 319 registered tools, backed by FieldStore</td></tr>
         <tr><td class="class-name">Embedder</td><td class="file-name">mind/embedder.hpp</td><td class="role-desc">Embedding with LRU cache and circuit breaker</td></tr>
-        <tr><td class="class-name">AntahkaranaYantra</td><td class="file-name">vak_onnx.hpp</td><td class="role-desc">ONNX Runtime inference for bge-base-en-v1.5</td></tr>
+        <tr><td class="class-name">LlamaYantra</td><td class="file-name">vak_llama.hpp</td><td class="role-desc">In-process GGUF embedding through llama.cpp. The default backend</td></tr>
+        <tr><td class="class-name">OllamaYantra</td><td class="file-name">vak_ollama.hpp</td><td class="role-desc">HTTP embedding backend, used when no local GGUF is found</td></tr>
         <tr><td class="class-name">Subconscious</td><td class="file-name">mind/subconscious.hpp</td><td class="role-desc">Background thread: patterns, hygiene, demotion, embedding</td></tr>
-        <tr><td class="class-name">ThemeManager</td><td class="file-name">theme_manager.hpp</td><td class="role-desc">xMemory hierarchical memory organization</td></tr>
+        <tr><td class="class-name">NativeDistiller</td><td class="file-name">native_distiller.hpp</td><td class="role-desc">In-daemon transcript distillation, no external model call</td></tr>
         <tr><td class="class-name">CodeIntel</td><td class="file-name">code_intel.hpp</td><td class="role-desc">Tree-sitter symbol extraction (9 languages)</td></tr>
-        <tr><td class="class-name">SymbolResolver</td><td class="file-name">symbol_resolver.hpp</td><td class="role-desc">Cross-file symbol resolution for call graphs</td></tr>
+        <tr><td class="class-name">QueueProcessor</td><td class="file-name">queue_processor.hpp</td><td class="role-desc">Background embedding and maintenance queue</td></tr>
         <tr><td class="class-name">ThreadPool</td><td class="file-name">rpc/thread_pool.hpp</td><td class="role-desc">Auto-scaling worker pool with watchdog</td></tr>
         <tr><td class="class-name">ProvenanceSpine</td><td class="file-name">provenance.hpp</td><td class="role-desc">Knowledge source tracking and trust scoring</td></tr>
       </tbody>
@@ -473,7 +477,7 @@
         <tr>
           <td class="class-name">call_graph</td>
           <td class="file-name">HashMap&lt;SymbolId, HashSet&lt;SymbolId&gt;&gt;</td>
-          <td class="role-desc">Call graph edges, populated by SymbolResolver via AddSymCallEdge ops.</td>
+          <td class="role-desc">Call graph edges, populated by callsite resolution via AddSymCallEdge ops.</td>
         </tr>
         <tr>
           <td class="class-name">SparseCode</td>
@@ -518,7 +522,7 @@
       <span class="embed-arrow">&rarr;</span>
       <div class="embed-stage">Shabda</div>
       <span class="embed-arrow">&rarr;</span>
-      <div class="embed-stage">AntahkaranaYantra</div>
+      <div class="embed-stage">LlamaYantra</div>
       <span class="embed-arrow">&rarr;</span>
       <div class="embed-stage">Artha</div>
     </div>
@@ -531,8 +535,8 @@
       <tbody>
         <tr><td class="skt-name">VakPatha</td><td class="skt-meaning">Path of speech</td><td class="skt-role">WordPiece tokenizer (vocab.txt)</td></tr>
         <tr><td class="skt-name">Shabda</td><td class="skt-meaning">Sound-form</td><td class="skt-role">Tokenized input (input_ids + attention_mask)</td></tr>
-        <tr><td class="skt-name">Artha</td><td class="skt-meaning">Meaning</td><td class="skt-role">768-dim embedding vector + certainty</td></tr>
-        <tr><td class="skt-name">AntahkaranaYantra</td><td class="skt-meaning">Inner instrument</td><td class="skt-role">ONNX Runtime inference engine</td></tr>
+        <tr><td class="skt-name">Artha</td><td class="skt-meaning">Meaning</td><td class="skt-role">Embedding vector + certainty. 1024 dimensions on a public build</td></tr>
+        <tr><td class="skt-name">LlamaYantra</td><td class="skt-meaning">Inner instrument</td><td class="skt-role">In-process llama.cpp inference over a GGUF model</td></tr>
         <tr><td class="skt-name">SmritiYantra</td><td class="skt-meaning">Memory machine</td><td class="skt-role">Caching wrapper (LRU, 10000 entries)</td></tr>
         <tr><td class="skt-name">ShantaYantra</td><td class="skt-meaning">Silent machine</td><td class="skt-role">Zero-vector fallback</td></tr>
       </tbody>
@@ -540,14 +544,16 @@
 
     <!-- Model specs -->
     <div class="config-block reveal">
-      <div class="config-block-title">Model: bge-base-en-v1.5</div>
-      <pre><span class="kw">Parameters</span>:   <span class="val">110M</span>
-<span class="kw">Dimensions</span>:   <span class="val">768</span>
+      <div class="config-block-title">Model: bge-large-en-v1.5 (public build default)</div>
+      <pre><span class="kw">Dimensions</span>:   <span class="val">1024 — compile-time, -DCHITTA_EMBED_DIM</span>
+<span class="kw">Format</span>:       <span class="val">GGUF, loaded in-process</span>
 <span class="kw">Max sequence</span>: <span class="val">128 tokens</span>
 <span class="kw">Pooling</span>:      <span class="val">Mean pooling with L2 normalization</span>
-<span class="kw">Runtime</span>:      <span class="val">ONNX Runtime, sequential execution mode</span>
+<span class="kw">Runtime</span>:      <span class="val">llama.cpp (CHITTA_WITH_LLAMA_CPP)</span>
+<span class="kw">Fallback</span>:     <span class="val">HTTP endpoint via OllamaYantra when no GGUF is found</span>
 <span class="kw">Batch size</span>:  <span class="val">Up to 32 texts per inference call</span>
 <span class="kw">LRU cache</span>:   <span class="val">1000 entries, tracks hit/miss rate</span></pre>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-3); line-height: 1.8;">The model filename is derived from the compiled embedding identity, so the binary can never load a model from a different vector space than the store was built with. Changing the dimension means a fresh build directory and a re-embed.</p>
     </div>
 
     <!-- Circuit Breaker -->
@@ -609,7 +615,7 @@
       <div class="section-divider"></div>
       <h2 class="heading-section">Code Intelligence</h2>
     </div>
-    <p class="section-intro reveal reveal-delay-1">Tree-sitter parsing extracts structural information from source code: symbols, callsites, imports, and type hierarchy. The <code>SymbolResolver</code> links callsites to known symbols for call graph traversal.</p>
+    <p class="section-intro reveal reveal-delay-1">Tree-sitter parsing extracts structural information from source code: symbols, callsites, imports, and type hierarchy. Callsites are resolved against known symbols to build the call graph.</p>
 
     <!-- Language grid -->
     <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-3);" class="reveal">Supported Languages</h3>
@@ -821,7 +827,7 @@
 <!-- BACK -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
   </div>
 </section>
 
@@ -831,7 +837,7 @@
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

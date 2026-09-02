@@ -28,7 +28,6 @@
 #include <chitta/version.hpp>
 #include <chitta/vak_ollama.hpp>
 #include <chitta/vak_llama.hpp>
-#include <chitta/vak_timeout.hpp>
 #include <chitta/hint_yantra.hpp>
 #include <chitta/embed_queue.hpp>
 #include <chitta/ops_log.hpp>
@@ -257,7 +256,6 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
 
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
-    auto maintenance_start = std::chrono::steady_clock::now();
     std::thread maintenance([&]() {
         auto interval_secs = std::chrono::seconds(interval);
         auto last_sync = std::chrono::steady_clock::now();
@@ -406,7 +404,12 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, chitta::EmbedQueue* e
                             { auto _lk = handler.acquire_lock(); field_store.flush(); }
                             daemon_running = false;
                             ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
-                            if (len > 0) { ::execv(self_path, nullptr); }
+                            // Fallback when systemd is not managing us. execv's
+                            // argv must be a NULL-terminated vector, not NULL —
+                            // passing NULL is UB, so the self-restart path was
+                            // unreliable exactly when systemctl was absent.
+                            char* const self_argv[] = {self_path, nullptr};
+                            if (len > 0) { ::execv(self_path, self_argv); }
                             ::exit(0);
                         } else {
                             // Ack the new mtime so we don't re-probe (and re-warn) every tick.
@@ -1590,7 +1593,9 @@ int main(int argc, char* argv[]) {
     if (!inner_yantra)
         inner_yantra = std::make_shared<chitta::OllamaYantra>(); // always-ready stub
     // EmbedQueue owns all serialization: single worker thread, LRU cache, two-lane queue.
-    // TimeoutYantra is no longer needed — concurrent embed calls are never made directly.
+    // Nothing needs to wrap the yantra in a concurrency guard any more — embed
+    // calls are never made directly, so the storm such a guard existed for cannot
+    // occur. (The old TimeoutYantra wrapper was deleted 2026-09-02.)
     std::shared_ptr<VakYantra> yantra = inner_yantra;
     chitta::EmbedQueue embed_queue(inner_yantra);
 

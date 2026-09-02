@@ -5,11 +5,12 @@ Provides soul.* methods that map to chitta daemon RPC calls.
 Used inside the REPL sandbox for programmatic memory access.
 """
 
+from __future__ import annotations
+
 import json
-import socket
 import os
+import socket
 from dataclasses import dataclass
-from typing import Optional
 
 
 def find_socket() -> str:
@@ -32,6 +33,23 @@ def find_socket() -> str:
     raise RuntimeError("No chitta socket found - is chittad running?")
 
 
+def _numeric_memory_id(raw: object) -> int:
+    """Coerce a daemon memory id to an int.
+
+    The daemon returns either a plain integer or a zero-padded UUID whose last
+    group carries the numeric id in hex. Anything else has no numeric id; 0 is
+    the caller-visible "unknown" value.
+    """
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.startswith("00000000"):
+        try:
+            return int(raw.split("-")[-1], 16)
+        except ValueError:
+            return 0
+    return 0
+
+
 def daemon_call(tool: str, args: dict) -> dict:
     """Call chitta daemon via Unix socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -43,7 +61,7 @@ def daemon_call(tool: str, args: dict) -> dict:
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": tool, "arguments": args}
+            "params": {"name": tool, "arguments": args},
         }
         sock.sendall((json.dumps(request) + "\n").encode())
 
@@ -57,7 +75,7 @@ def daemon_call(tool: str, args: dict) -> dict:
                 break
 
         # Handle encoding issues gracefully
-        result = json.loads(response.decode('utf-8', errors='replace'))
+        result = json.loads(response.decode("utf-8", errors="replace"))
         if "error" in result:
             raise RuntimeError(result["error"].get("message", str(result["error"])))
 
@@ -79,6 +97,7 @@ def daemon_call(tool: str, args: dict) -> dict:
 @dataclass
 class Memory:
     """A memory from the soul."""
+
     id: int
     content: str
     score: float = 0.0
@@ -96,6 +115,7 @@ class Memory:
 @dataclass
 class Triplet:
     """A relationship triplet."""
+
     subject: str
     predicate: str
     object: str
@@ -120,11 +140,9 @@ class SoulAPI:
 
     def _track(self, method: str, args: dict, result):
         """Track call for trajectory."""
-        self._trajectory.append({
-            "method": method,
-            "args": args,
-            "result_preview": str(result)[:200]
-        })
+        self._trajectory.append(
+            {"method": method, "args": args, "result_preview": str(result)[:200]}
+        )
 
     def search(self, query: str, limit: int = 20, threshold: float = 0.0) -> list[Memory]:
         """
@@ -147,7 +165,10 @@ class SoulAPI:
                 short_query = query.split()[0] if " " in query else query[:20]
                 try:
                     result = daemon_call("recall", {"query": short_query, "limit": limit})
-                except:
+                except RuntimeError:
+                    # Even the shortened query failed: the daemon is down or
+                    # the store is unreadable. Empty is the honest answer here
+                    # — a REPL exploration should degrade, not abort.
                     return []
             else:
                 raise
@@ -157,13 +178,7 @@ class SoulAPI:
         items = result.get("memories", result.get("results", []))
         for m in items:
             # Extract ID - could be numeric id or UUID string
-            mem_id = m.get("id", 0)
-            if isinstance(mem_id, str) and mem_id.startswith("00000000"):
-                # Extract numeric suffix from UUID
-                try:
-                    mem_id = int(mem_id.split("-")[-1], 16)
-                except:
-                    mem_id = 0
+            mem_id = _numeric_memory_id(m.get("id", 0))
 
             # Honest display signal: bounded max(cosine, lexical-overlap), mirroring
             # the C++ display_pct. The composite relevance/score is unbounded (>=1 for
@@ -171,13 +186,15 @@ class SoulAPI:
             score = max(float(m.get("similarity") or 0), float(m.get("lexical") or 0))
             content = m.get("content", m.get("text", m.get("summary", "")))
             if score >= threshold:
-                memories.append(Memory(
-                    id=mem_id,
-                    content=content,
-                    score=score,
-                    tags=m.get("tags", []),
-                    created_at=m.get("created_at", "")
-                ))
+                memories.append(
+                    Memory(
+                        id=mem_id,
+                        content=content,
+                        score=score,
+                        tags=m.get("tags", []),
+                        created_at=m.get("created_at", ""),
+                    )
+                )
 
         self._track("search", {"query": query, "limit": limit}, memories)
         return memories
@@ -193,20 +210,17 @@ class SoulAPI:
 
         items = result.get("memories", result.get("results", []))
         for m in items:
-            mem_id = m.get("id", 0)
-            if isinstance(mem_id, str) and mem_id.startswith("00000000"):
-                try:
-                    mem_id = int(mem_id.split("-")[-1], 16)
-                except:
-                    mem_id = 0
+            mem_id = _numeric_memory_id(m.get("id", 0))
 
-            memories.append(Memory(
-                id=mem_id,
-                content=m.get("content", m.get("text", "")),
-                score=max(float(m.get("similarity") or 0), float(m.get("lexical") or 0)),
-                tags=m.get("tags", []),
-                created_at=m.get("created_at", "")
-            ))
+            memories.append(
+                Memory(
+                    id=mem_id,
+                    content=m.get("content", m.get("text", "")),
+                    score=max(float(m.get("similarity") or 0), float(m.get("lexical") or 0)),
+                    tags=m.get("tags", []),
+                    created_at=m.get("created_at", ""),
+                )
+            )
 
         self._track("recall", {"query": query, "limit": limit}, memories)
         return memories
@@ -226,8 +240,9 @@ class SoulAPI:
         self._track("expand", {"memory_id": memory_id, "depth": depth}, result)
         return result
 
-    def triplets(self, subject: str = None, predicate: str = None,
-                 object: str = None, limit: int = 50) -> list[Triplet]:
+    def triplets(
+        self, subject: str = None, predicate: str = None, object: str = None, limit: int = 50
+    ) -> list[Triplet]:
         """
         Query the knowledge graph.
 
@@ -250,8 +265,7 @@ class SoulAPI:
 
         result = daemon_call("query_graph", args)
         triplets = [
-            Triplet(t["subject"], t["predicate"], t["object"])
-            for t in result.get("triplets", [])
+            Triplet(t["subject"], t["predicate"], t["object"]) for t in result.get("triplets", [])
         ]
 
         self._track("triplets", args, triplets)
@@ -264,35 +278,34 @@ class SoulAPI:
         Note: Uses explore_recall for temporal filtering.
         """
         # Use explore_recall which supports temporal queries
-        result = daemon_call("explore_recall", {
-            "query": "*",  # Broad match
-            "hours": hours,
-            "limit": limit
-        })
+        result = daemon_call(
+            "explore_recall",
+            {
+                "query": "*",  # Broad match
+                "hours": hours,
+                "limit": limit,
+            },
+        )
 
         memories = []
         items = result.get("memories", result.get("results", []))
         for m in items:
-            mem_id = m.get("id", 0)
-            if isinstance(mem_id, str) and mem_id.startswith("00000000"):
-                try:
-                    mem_id = int(mem_id.split("-")[-1], 16)
-                except:
-                    mem_id = 0
+            mem_id = _numeric_memory_id(m.get("id", 0))
 
-            memories.append(Memory(
-                id=mem_id,
-                content=m.get("content", m.get("text", "")),
-                score=m.get("recency_score", m.get("score", 1.0)),
-                tags=m.get("tags", []),
-                created_at=m.get("created_at", "")
-            ))
+            memories.append(
+                Memory(
+                    id=mem_id,
+                    content=m.get("content", m.get("text", "")),
+                    score=m.get("recency_score", m.get("score", 1.0)),
+                    tags=m.get("tags", []),
+                    created_at=m.get("created_at", ""),
+                )
+            )
 
         self._track("recent", {"hours": hours, "limit": limit}, memories)
         return memories
 
-    def remember(self, content: str, tags: list[str] = None,
-                 importance: float = 0.5) -> int:
+    def remember(self, content: str, tags: list[str] = None, importance: float = 0.5) -> int:
         """
         Store a new memory.
 

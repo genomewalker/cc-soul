@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Benchmarks — chitta</title>
+<meta name="description" content="SMRITI-Bench measures whether injected memory changes an automated pass/fail check and its token cost, rather than QA-recall F1. Plus chitta's LongMemEval and LoCoMo status.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Benchmarks — chitta">
+<meta property="og:description" content="Outcome-grounded memory benchmarking for coding agents: protocol, first results, and what is not measured yet.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Benchmarks — chitta">
+<meta name="twitter:description" content="Outcome-grounded memory benchmarking for coding agents.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+.submenu-toc { position: sticky; top: 60px; z-index: 90;
+  background: linear-gradient(180deg, rgba(11,11,16,0.98) 0%, rgba(11,11,16,0.95) 100%);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(122,162,247,0.1); margin-top: -1px; }
+.submenu-toc-inner { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-5);
+  display: flex; align-items: center; gap: 4px; overflow-x: auto;
+  scrollbar-width: none; -ms-overflow-style: none; }
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link { display: flex; align-items: center; gap: 8px; padding: 14px 16px;
+  color: #565f89; font-family: var(--font-mono); font-size: 0.75rem;
+  text-decoration: none; white-space: nowrap; transition: all 0.2s ease; position: relative; }
+.submenu-toc-link::before { content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; opacity: 0.4; transition: all 0.2s ease; }
+.submenu-toc-link:hover, .submenu-toc-link.active { color: var(--sandal-300); }
+.submenu-toc-link.active::before { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.status-line { font-family: var(--font-mono); font-size: var(--text-xs);
+  color: #565f89; margin-top: var(--space-3); }
+.caveat { border-left: 2px solid rgba(203,175,134,0.35); padding-left: var(--space-4);
+  margin: var(--space-4) 0; color: var(--ash-300); line-height: 1.8;
+  font-size: var(--text-sm); }
+.caveat strong { color: var(--sandal-300); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">chitta</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html" class="active">Benchmarks</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
+      <li><a href="sadhana.html">Sadhana</a></li>
+      <li><a href="context.html">Context</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
+      <li><a href="constellation.html">Constellation</a></li>
+      <li><a href="dreams/index.html">Dreams</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Measurement</div>
+    <h1 class="reveal reveal-delay-1">Does the memory help?</h1>
+    <p class="page-header-sub reveal reveal-delay-2">A coding agent&rsquo;s memory exists to make it better at the <em>next</em> task, not better at reciting the last one. SMRITI-Bench scores that directly: an objective check either passes or it does not, and the tokens are counted either way.</p>
+    <p class="status-line">Status as of 2026-09-02.</p>
+  </div>
+</header>
+
+<!-- TOC -->
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#sec-why" class="submenu-toc-link" data-section="sec-why">Why</a>
+    <a href="#sec-protocol" class="submenu-toc-link" data-section="sec-protocol">Protocol</a>
+    <a href="#sec-metrics" class="submenu-toc-link" data-section="sec-metrics">Metrics</a>
+    <a href="#sec-results" class="submenu-toc-link" data-section="sec-results">Results</a>
+    <a href="#sec-ablation" class="submenu-toc-link" data-section="sec-ablation">Ablation</a>
+    <a href="#sec-threats" class="submenu-toc-link" data-section="sec-threats">Threats</a>
+    <a href="#sec-other" class="submenu-toc-link" data-section="sec-other">LoCoMo &amp; LongMemEval</a>
+  </div>
+</nav>
+
+<section class="tools-section">
+  <div class="container">
+
+    <!-- WHY -->
+    <div class="tools-category" id="sec-why">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="1" opacity="0.4"/><path d="M10 6 V11 M10 13.5 V14.5" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">The proxy-target gap</span>
+        <span class="tools-category-count">motivation</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">LoCoMo and LongMemEval score conversational question answering: given a long dialogue history, can the system answer a question about it, measured against a reference answer. For a coding agent that is the wrong target. Question-answering recall is a proxy that can rise while the thing that matters &mdash; does the agent ship a working change faster and cheaper because it remembered something &mdash; stays flat or gets worse. A memory system that retrieves plausible but stale context can raise a recall score while actively misleading the agent on a real task.</p>
+        <p class="section-intro">SMRITI-Bench, named for <em>smṛti</em> (स्मृति), closes that gap by scoring the axis chitta is built for. There is no model-as-judge and no reference-answer overlap score. A task either passes its check command or it does not.</p>
+      </div>
+    </div>
+
+    <!-- PROTOCOL -->
+    <div class="tools-category" id="sec-protocol">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="2" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/><path d="M7 7 H13 M7 10 H13 M7 13 H11" stroke="#CBAF86" stroke-width="1"/></svg>
+        </div>
+        <span class="tools-category-name">Protocol</span>
+        <span class="tools-category-count">6 steps</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">A task is a repository fixture, an instruction, a check command, and a set of memories to plant. Each task runs under several memory conditions, several trials each. For every task, condition and trial:</p>
+        <ol class="section-intro" style="line-height: 1.9;">
+          <li>Materialize the fixture into a fresh scratch working directory.</li>
+          <li>Plant the task&rsquo;s memories through a memory adapter, keeping the ids returned. Under the off condition this is a no-op.</li>
+          <li>Run the agent. Memory is <em>not</em> hand-injected into the prompt.</li>
+          <li>Apply the hidden checks, then run the check command. Exit zero is a pass.</li>
+          <li>Append one record: condition, trial, pass/fail, token counts, transcript, whether injection was confirmed.</li>
+          <li>Tear the working directory down and forget every planted id by exact id.</li>
+        </ol>
+        <p class="section-intro">Step three is the part that makes the measurement honest. Memory reaches the agent the way it does in real use &mdash; chitta&rsquo;s own prompt and session hooks recall from the live daemon when the agent process starts &mdash; so what is being measured is the real recall-routing path, not a hand-built context string. The condition is set through the environment: the on condition pins the agent&rsquo;s realm, and the off condition sets the existing global kill switch that makes every memory-injecting hook return immediately.</p>
+        <p class="section-intro">An empty realm was considered for the off condition and rejected: a realm-scoped recall with no hits falls back to unfiltered cross-realm results, so an empty realm does not reliably mean zero injection. The kill switch does.</p>
+        <p class="section-intro">Each task also ships a solution directory, which must make the check pass when copied over the fixture, and a hidden directory holding every test that would reveal the planted convention&rsquo;s exact answer. The hidden directory is applied only after the agent&rsquo;s turn ends and is never part of what the agent sees. A corpus test enforces both, plus the invariant that the check fails on the untouched fixture and passes once the solution is applied &mdash; a task that passes with no work at all is broken.</p>
+      </div>
+    </div>
+
+    <!-- METRICS -->
+    <div class="tools-category" id="sec-metrics">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 16 L8 10 L12 12 L16 5" stroke="#CBAF86" stroke-width="1.2" fill="none"/></svg>
+        </div>
+        <span class="tools-category-name">Metrics</span>
+        <span class="tools-category-count">4 metrics</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <table class="comp-table">
+          <thead><tr><th>Metric</th><th>Definition</th></tr></thead>
+          <tbody>
+            <tr><td>SR</td><td>Success rate per condition, reported with a Wilson 95% interval because the trial counts are small enough that a naive proportion misleads.</td></tr>
+            <tr><td>&Delta;SR</td><td>Success rate with memory on, minus with memory off. The headline number.</td></tr>
+            <tr><td>&Delta;T</td><td>Mean tokens on, minus mean tokens off. A system that adds success but doubles cost is not free.</td></tr>
+            <tr><td>MUI</td><td>Memory utility index: the fraction of memory-on runs where memory demonstrably changed something.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">MUI was rewritten because its first version did not work. Version one asked whether the first 40 characters of a planted memory appeared in the transcript. On real runs that reads exactly zero: agents apply a convention without quoting its wording. The surface-echo check survives as a reference number only.</p>
+        <p class="section-intro">Version two grounds the metric in the outcome ledger instead. A memory-on run earns credit only if the planted memory was confirmed to have reached the agent&rsquo;s session, <em>and</em> the run passed, <em>and</em> a paired memory-off trial for the same task either failed or used at least 1.5&times; the tokens. The first case is credited as a success lift, the second as a cost saving, and the two are mutually exclusive, so they sum to MUI.</p>
+      </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div class="tools-category" id="sec-results">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="8" width="3" height="9" stroke="#9DB2D9" stroke-width="1"/><rect x="8.5" y="5" width="3" height="12" stroke="#CBAF86" stroke-width="1"/><rect x="14" y="11" width="3" height="6" stroke="#9DB2D9" stroke-width="1"/></svg>
+        </div>
+        <span class="tools-category-name">First full matrix</span>
+        <span class="tools-category-count">n=27</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">One full matrix has been run: 9 tasks, memory off and on, 3 trials each, 27 runs per condition, with injection confirmed on all 27 memory-on runs.</p>
+        <table class="comp-table">
+          <thead><tr><th>Measure</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Success rate, memory off</td><td>23 / 27</td></tr>
+            <tr><td>Success rate, memory on</td><td>27 / 27</td></tr>
+            <tr><td>&Delta;SR</td><td>+14.8 pp</td></tr>
+            <tr><td>Token ratio on/off, paired median</td><td>0.52</td></tr>
+            <tr><td>&Delta;T</td><td>&minus;2,137 tokens per task</td></tr>
+            <tr><td>MUI (rescored, version two)</td><td>0.630 (17 / 27)</td></tr>
+            <tr><td>&nbsp;&nbsp;of which success lift</td><td>0.148 (4 / 27)</td></tr>
+            <tr><td>&nbsp;&nbsp;of which cost saving</td><td>0.481 (13 / 27)</td></tr>
+            <tr><td>Surface-echo rate (version one proxy)</td><td>0.0</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">The shape of the result is more interesting than the headline. Every one of the four memory-off failures was a non-deducible institutional convention &mdash; an exit-code contract and a command-line default, neither of which can be derived from the fixture. On the tasks exploration alone can already solve, memory&rsquo;s measurable effect was not success but cost: the agent got there on roughly half the tokens.</p>
+        <div class="caveat">
+          <p><strong>What this is not.</strong> 27 runs per condition is indicative, not conclusive. The protocol&rsquo;s own guidance is at least five trials per task and condition before trusting a per-task &Delta;SR.</p>
+          <p><strong>Not yet run.</strong> The corpus has since grown to 15 tasks and the lane ablation has been wired for real, but no live matrix has been executed over the six new tasks or over any ablation condition. The MUI figures above are a rescore of the existing 9-task data, not a new empirical result.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ABLATION -->
+    <div class="tools-category" id="sec-ablation">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 6 H17 M3 10 H12 M3 14 H8" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Ablation matrix</span>
+        <span class="tools-category-count">6 lanes</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Per-lane ablation isolates each retrieval lane&rsquo;s marginal contribution: success rate with everything on, minus success rate with one lane disabled. It is wired through the environment rather than a daemon flag &mdash; the runner sets <code>CHITTA_ABLATE_LANES</code> on the agent process, and the prompt hook skips any lane named there before issuing its recall call. The ablation happens in the hook that would have made the call. See <a href="recall.html#sec-lanes">the lane table</a> for what each one does.</p>
+        <table class="comp-table">
+          <thead><tr><th>Condition</th><th>Value set</th><th>Isolates</th></tr></thead>
+          <tbody>
+            <tr><td><code>off</code></td><td>kill switch instead</td><td>Baseline: can the agent solve it cold.</td></tr>
+            <tr><td><code>on</code></td><td>nothing</td><td>Full-system upper bound.</td></tr>
+            <tr><td><code>ablate:semantic</code></td><td><code>sem</code></td><td>Value of fuzzy semantic match.</td></tr>
+            <tr><td><code>ablate:keyword</code></td><td><code>kw</code></td><td>Value of exact term overlap.</td></tr>
+            <tr><td><code>ablate:graph</code> / <code>ablate:hybrid</code></td><td><code>hyb</code></td><td>Value of fused, multi-hop retrieval. Both names are aliases for one lane; there is no separate triplet lane.</td></tr>
+            <tr><td><code>ablate:context</code></td><td><code>ctx</code></td><td>Value of conversational continuity.</td></tr>
+            <tr><td><code>ablate:corrections</code></td><td><code>corr</code></td><td>Value of the durable-correction fast path.</td></tr>
+            <tr><td><code>ablate:xr</code></td><td><code>xr</code></td><td>Value of cross-project retrieval.</td></tr>
+            <tr><td><code>ablate:all</code></td><td>every lane</td><td>Sanity check on the wiring: it should behave like <code>off</code>.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">The gap between <code>ablate:all</code> and <code>off</code> is reported as a check on the harness, not as a memory effect. A gap far from zero means the environment variable is not reaching every injection path. Lanes overlap, so single-lane deltas are marginal contributions and must not be summed to explain the on-versus-off gap.</p>
+      </div>
+    </div>
+
+    <!-- THREATS -->
+    <div class="tools-category" id="sec-threats">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L17 16 H3 Z" stroke="#CBAF86" stroke-width="1.2" fill="none"/><path d="M10 8 V11.5 M10 13.5 V14.2" stroke="#9DB2D9" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Threats to validity</span>
+        <span class="tools-category-count">2 caught live</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Two failures were found by running the thing rather than by reasoning about it, and both would have produced publishable-looking numbers that measured nothing.</p>
+        <p class="section-intro"><strong>Fixture leakage.</strong> A pilot ran clean end to end and both conditions passed, making the difference unmeasurable. The transcript showed why: the agent read the expected string straight out of a test file that had been materialized into its working directory. Several other tasks had the same defect, and one fixture carried a code comment narrating the exact gotcha the task was about. Every convention-revealing test now lives in the hidden directory, applied after the agent&rsquo;s turn; a corpus test greps every visible fixture file and every prompt for the task&rsquo;s answer-revealing terms.</p>
+        <p class="section-intro"><strong>Silently misrouted realms.</strong> An earlier run used realm names without a colon. The prompt hook validates a detected realm against a name shape before trusting it, found no match, and fell back to the default realm &mdash; so memory-on runs delivered zero planted memories while looking entirely normal. The ledger join caught it; the success-rate numbers alone never would have. Realm names are now canonical, the hook takes an explicit realm from the environment verbatim, and every record carries whether injection was actually confirmed. That confirmation is reported, not silently corrected for: a low rate is a reason to distrust the run, and a human should see it.</p>
+        <p class="section-intro">Also tracked: memory leaking between runs, mitigated by realm names unique per trial and teardown by exact id; ordering effects, mitigated by interleaving conditions within each task; non-determinism, made visible through Wilson intervals rather than hidden behind a point estimate; and lane overlap in ablation.</p>
+      </div>
+    </div>
+
+    <!-- OTHER -->
+    <div class="tools-category" id="sec-other">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="10" r="4" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/><circle cx="13" cy="10" r="4" stroke="#CBAF86" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">LoCoMo &amp; LongMemEval</span>
+        <span class="tools-category-count">2 harnesses</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="section-intro">Both conversational-recall harnesses live in the repository and both still run. They answer a narrower question than SMRITI-Bench, and are kept for comparability with published work.</p>
+        <table class="comp-table">
+          <thead><tr><th>Harness</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>LongMemEval</td><td>0.780 overall on <code>longmemeval_s</code>, 50 questions, recorded 2026-05-21. Every question in that run is the single-session-user type, and the answers were graded by a model judge using the benchmark&rsquo;s own prompts. It is not a full-suite result.</td></tr>
+            <tr><td>LoCoMo</td><td>Harness present and runnable against the published dataset. No result is recorded in this repository; treat any figure you have seen elsewhere as unverified here.</td></tr>
+          </tbody>
+        </table>
+        <p class="section-intro">Earlier LongMemEval runs on the oracle split, at 5 and 3 questions, are kept in the results directory for history. They are far too small to compare against and are not a status claim.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) { entry.target.classList.add('visible'); observer.unobserve(entry.target); }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    var t = document.querySelector(this.getAttribute('href'));
+    if (!t) return;
+    e.preventDefault();
+    window.scrollTo({ top: t.getBoundingClientRect().top + window.pageYOffset - 140, behavior: 'smooth' });
+    t.classList.remove('collapsed');
+  });
+});
+(function() {
+  var links = document.querySelectorAll('.submenu-toc-link');
+  var secs = [];
+  links.forEach(function(l) {
+    var s = document.getElementById(l.getAttribute('data-section'));
+    if (s) secs.push({ el: s, link: l });
+  });
+  if (!secs.length) return;
+  function update() {
+    var pos = window.scrollY + 180, active = secs[0];
+    secs.forEach(function(s) { if (s.el.offsetTop <= pos) active = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    active.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

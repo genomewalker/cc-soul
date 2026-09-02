@@ -310,9 +310,11 @@ public:
     // Transform utterance into meaning (document mode by default)
     virtual Artha transform(const std::string& vak) = 0;
 
-    // Transform with explicit mode (query vs document)
-    virtual Artha transform(const std::string& vak, EmbedMode mode) {
-        return transform(vak);  // Default: ignore mode (subclasses override)
+    // Transform with explicit mode (query vs document). The base ignores the
+    // mode; asymmetric backends (nomic's search_query/search_document prefixes)
+    // override it. Name omitted so the intentional drop is not a warning.
+    virtual Artha transform(const std::string& vak, EmbedMode /*mode*/) {
+        return transform(vak);
     }
 
     // Transform multiple utterances (batch for efficiency)

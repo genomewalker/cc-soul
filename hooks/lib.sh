@@ -244,6 +244,46 @@ sys.stdout.write(json.dumps({"ack_id":os.environ["ACK_ID"],"tool":os.environ["TO
     fi
 }
 
+# safe_queue_write — queue_write with one retry.
+# Absorbs the transient enqueue failure seen when the daemon rotates the queue
+# file between our open() and write().
+safe_queue_write() {
+    local tool="$1"
+    local args="$2"
+    queue_write "$tool" "$args" && return 0
+    sleep 0.05
+    queue_write "$tool" "$args"
+}
+
+# record_ingest_metric — count turns seen vs turns actually ingested.
+# Reads METRICS_FILE and ALERT_FILE from the calling hook, which set them after
+# sourcing this library; both are resolved at call time.
+# Usage: record_ingest_metric true|false
+record_ingest_metric() {
+    local success="$1" # true|false
+    [[ -f "$METRICS_FILE" ]] || printf '%s\n' '{"turns_total":0,"turns_ingested":0}' > "$METRICS_FILE"
+    if [[ "$success" == "true" ]]; then
+        jq '.turns_total += 1 | .turns_ingested += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
+    else
+        jq '.turns_total += 1' "$METRICS_FILE" > "${METRICS_FILE}.tmp" 2>/dev/null || true
+    fi
+    if [[ -s "${METRICS_FILE}.tmp" ]]; then
+        mv "${METRICS_FILE}.tmp" "$METRICS_FILE"
+    else
+        rm -f "${METRICS_FILE}.tmp"
+    fi
+
+    local total ingested pct
+    total=$(jq -r '.turns_total // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
+    ingested=$(jq -r '.turns_ingested // 0' "$METRICS_FILE" 2>/dev/null || echo 0)
+    if [[ "$total" -gt 0 ]]; then
+        pct=$(( ingested * 100 / total ))
+        if [[ "$total" -ge 20 && "$pct" -lt 95 ]]; then
+            printf '%s ingest_rate=%s%% turns=%s ingested=%s\n' "$(date -Is)" "$pct" "$total" "$ingested" >> "$ALERT_FILE"
+        fi
+    fi
+}
+
 # emit_event — structured soul event with provenance.
 # Usage: emit_event <dedup_file> <category> <source> <content> <confidence> <evidence> <realm> [valence] [arousal] [flags] [refs]
 #   category:   solution|gotcha|preference|decision|failure|pattern|correction|curiosity_gap

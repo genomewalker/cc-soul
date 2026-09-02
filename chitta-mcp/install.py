@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Install/uninstall chitta-mcp for Claude Code and/or Codex CLI."""
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -18,6 +20,7 @@ HOOKS_DIR = Path(__file__).resolve().parent.parent / "hooks"
 
 
 # ── helpers ──────────────────────────────────────────────────────────
+
 
 def _chitta_mcp_path() -> str:
     return shutil.which("chitta-mcp") or "chitta-mcp"
@@ -54,6 +57,7 @@ def _plugin_source_dir() -> Path:
     if src.is_dir():
         return src
     import sysconfig
+
     data = Path(sysconfig.get_path("data")) / "share" / PLUGIN_NAME / "codex-plugin"
     if data.is_dir():
         return data
@@ -66,6 +70,7 @@ def _hooks_source() -> Path:
     if src.is_dir():
         return src
     import sysconfig
+
     data = Path(sysconfig.get_path("data")) / "share" / PLUGIN_NAME / "hooks"
     if data.is_dir():
         return data
@@ -74,12 +79,24 @@ def _hooks_source() -> Path:
 
 # ── Claude Code ──────────────────────────────────────────────────────
 
+
 def _install_claude_code():
     try:
         result = subprocess.run(
-            ["claude", "mcp", "add", "--transport", "stdio", "--scope", "user",
-             "chitta", "--", "chitta-mcp"],
-            capture_output=True, text=True,
+            [
+                "claude",
+                "mcp",
+                "add",
+                "--transport",
+                "stdio",
+                "--scope",
+                "user",
+                "chitta",
+                "--",
+                "chitta-mcp",
+            ],
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             print("  Claude Code: registered")
@@ -98,7 +115,8 @@ def _uninstall_claude_code():
     try:
         result = subprocess.run(
             ["claude", "mcp", "remove", "chitta"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             print("  Claude Code: removed")
@@ -114,6 +132,7 @@ def _uninstall_claude_code():
 
 
 # ── Codex CLI ────────────────────────────────────────────────────────
+
 
 def _generate_codex_hooks(hooks_dir: Path) -> dict:
     """Translate chitta hooks.json to Codex hooks format.
@@ -133,9 +152,7 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
     # PreToolUse payload contracts differ from Claude's and currently reject
     # some chitta outputs (e.g. additionalContext), so we do not install that
     # event for Codex until a dedicated Codex-safe pre-tool hook is provided.
-    supported_events = {
-        "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"
-    }
+    supported_events = {"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"}
 
     for event, matchers in cc_hooks.items():
         if event not in supported_events:
@@ -184,10 +201,12 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
                 codex_hook_list.append(codex_hook)
 
             if codex_hook_list:
-                codex_matchers.append({
-                    "matcher": codex_matcher,
-                    "hooks": codex_hook_list,
-                })
+                codex_matchers.append(
+                    {
+                        "matcher": codex_matcher,
+                        "hooks": codex_hook_list,
+                    }
+                )
 
         codex_hooks[event] = codex_matchers
 
@@ -273,9 +292,12 @@ def _install_codex():
             # (including events not regenerated in this install pass).
             for event in list(existing.get("hooks", {}).keys()):
                 kept = [
-                    m for m in existing["hooks"][event]
-                    if not any(_is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
-                               for h in m.get("hooks", []))
+                    m
+                    for m in existing["hooks"][event]
+                    if not any(
+                        _is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
+                        for h in m.get("hooks", [])
+                    )
                 ]
                 if kept:
                     existing["hooks"][event] = kept
@@ -289,16 +311,21 @@ def _install_codex():
                     # Remove existing chitta matchers (current + legacy cache paths),
                     # then append fresh ones — preserves third-party hooks.
                     kept = [
-                        m for m in existing["hooks"][event]
-                        if not any(_is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
-                                   for h in m.get("hooks", []))
+                        m
+                        for m in existing["hooks"][event]
+                        if not any(
+                            _is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
+                            for h in m.get("hooks", [])
+                        )
                     ]
                     existing["hooks"][event] = kept + matchers
             codex_hooks = existing
         hooks_file.write_text(json.dumps(codex_hooks, indent=2) + "\n")
         print(f"  Codex: hooks written to {hooks_file}")
 
-    skill_names = sorted(d.name for d in (dest / "skills").iterdir() if d.is_dir() and not d.name.startswith("_"))
+    skill_names = sorted(
+        d.name for d in (dest / "skills").iterdir() if d.is_dir() and not d.name.startswith("_")
+    )
     print(f"  Codex: installed to {dest}")
     print(f"  Codex: MCP server → {mcp_path}")
     print(f"  Codex: {len(skill_names)} skills available")
@@ -329,7 +356,8 @@ def _uninstall_codex():
             filtered = []
             for m in matchers:
                 remaining = [
-                    h for h in m.get("hooks", [])
+                    h
+                    for h in m.get("hooks", [])
                     if not _is_cc_soul_hook_command(h.get("command", ""), hooks_dir)
                 ]
                 if remaining:

@@ -1,5 +1,7 @@
 # Sadhana: Autonomous Agents
 
+Status as of 2026-09-02.
+
 **Sadhana** (Sanskrit: साधना, "disciplined practice") — persistent autonomous agents that work toward goals through continuous sense-think-act cycles.
 
 ## Concept
@@ -253,7 +255,14 @@ Uses Anthropic's Claude API:
 Uses local LLM via HTTP (auto-discovered GPU endpoint):
 - Models: `gemma4:26b`, `qwen3-coder`, `llama3.1:8b`
 - No API key needed
-- GPU endpoint auto-discovered (cached URL → SLURM → localhost → chitta-gpu start)
+- GPU endpoint auto-discovered (cached URL → SLURM → localhost → `chitta-gpu start`)
+
+`chitta-gpu` is **not part of this repository**. It ships in the sibling
+[chitta-bridge](https://github.com/genomewalker/chitta-bridge) repo, whose
+`chitta_bridge.gpu_serve:main` entry point installs it. If chitta-bridge is not
+installed, that last discovery step simply finds nothing and the local backend
+is unavailable; nothing else breaks, and distillation still runs natively in the
+daemon with no GPU at all.
 
 ## Use Cases
 

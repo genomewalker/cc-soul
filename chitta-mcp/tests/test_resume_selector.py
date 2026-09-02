@@ -1,9 +1,9 @@
 import json
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-import sys
 
 MCP_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MCP_DIR))
@@ -18,21 +18,38 @@ class ResumeSelectorTests(unittest.TestCase):
     def test_selects_inactive_codex_and_reports_live_claude(self):
         now_ms = int(time.time() * 1000)
         data = {
-            "sessions": [{
-                "session_id": "claude-live", "client": "claude",
-                "project_dir": self.project, "status": "active",
-                "is_live": True, "last_heartbeat_ms": now_ms,
-            }],
-            "transcripts": [
-                {"session_id": "claude-live", "client": "claude",
-                 "project_dir": self.project, "transcript_path": "/tmp/claude.jsonl"},
-                {"session_id": "codex-ended", "client": "codex",
-                 "project_dir": self.project, "transcript_path": "/tmp/codex.jsonl"},
+            "sessions": [
+                {
+                    "session_id": "claude-live",
+                    "client": "claude",
+                    "project_dir": self.project,
+                    "status": "active",
+                    "is_live": True,
+                    "last_heartbeat_ms": now_ms,
+                }
             ],
-            "thread_sessions": [{
-                "session_id": "codex-ended", "client": "codex",
-                "project_dir": self.project, "status": "ended",
-            }],
+            "transcripts": [
+                {
+                    "session_id": "claude-live",
+                    "client": "claude",
+                    "project_dir": self.project,
+                    "transcript_path": "/tmp/claude.jsonl",
+                },
+                {
+                    "session_id": "codex-ended",
+                    "client": "codex",
+                    "project_dir": self.project,
+                    "transcript_path": "/tmp/codex.jsonl",
+                },
+            ],
+            "thread_sessions": [
+                {
+                    "session_id": "codex-ended",
+                    "client": "codex",
+                    "project_dir": self.project,
+                    "status": "ended",
+                }
+            ],
             "thread_leases": [],
         }
         result = select_resume(data, self.project, current_session_id="new-session")
@@ -45,26 +62,38 @@ class ResumeSelectorTests(unittest.TestCase):
         now_ms = int(now * 1000)
         data = {
             "sessions": [
-                {"session_id": "claude-live", "client": "claude",
-                 "project_dir": self.project, "thread_id": "thread-a",
-                 "status": "active", "is_live": True,
-                 "last_heartbeat_ms": now_ms},
-                {"session_id": "codex-live", "client": "codex",
-                 "project_dir": self.project, "thread_id": "thread-b",
-                 "status": "active", "is_live": True,
-                 "last_heartbeat_ms": now_ms},
+                {
+                    "session_id": "claude-live",
+                    "client": "claude",
+                    "project_dir": self.project,
+                    "thread_id": "thread-a",
+                    "status": "active",
+                    "is_live": True,
+                    "last_heartbeat_ms": now_ms,
+                },
+                {
+                    "session_id": "codex-live",
+                    "client": "codex",
+                    "project_dir": self.project,
+                    "thread_id": "thread-b",
+                    "status": "active",
+                    "is_live": True,
+                    "last_heartbeat_ms": now_ms,
+                },
             ],
-            "transcripts": [{
-                "session_id": "older-a", "client": "codex",
-                "project_dir": self.project, "thread_id": "thread-a",
-                "transcript_path": "/tmp/older-a.jsonl",
-            }],
+            "transcripts": [
+                {
+                    "session_id": "older-a",
+                    "client": "codex",
+                    "project_dir": self.project,
+                    "thread_id": "thread-a",
+                    "transcript_path": "/tmp/older-a.jsonl",
+                }
+            ],
             "thread_sessions": [],
             "thread_leases": [
-                {"thread_id": "thread-a", "session_id": "claude-live",
-                 "expires_at": now + 600},
-                {"thread_id": "thread-b", "session_id": "codex-live",
-                 "expires_at": now + 600},
+                {"thread_id": "thread-a", "session_id": "claude-live", "expires_at": now + 600},
+                {"thread_id": "thread-b", "session_id": "codex-live", "expires_at": now + 600},
             ],
         }
         result = select_resume(data, self.project, current_session_id="new-session")
@@ -76,10 +105,18 @@ class ResumeSelectorTests(unittest.TestCase):
         data = {
             "sessions": [],
             "transcripts": [
-                {"session_id": "genopack-new", "client": "codex",
-                 "project_dir": "/tmp/genopack", "transcript_path": "/tmp/new.jsonl"},
-                {"session_id": "cc-soul-old", "client": "codex",
-                 "project_dir": self.project, "transcript_path": "/tmp/old.jsonl"},
+                {
+                    "session_id": "genopack-new",
+                    "client": "codex",
+                    "project_dir": "/tmp/genopack",
+                    "transcript_path": "/tmp/new.jsonl",
+                },
+                {
+                    "session_id": "cc-soul-old",
+                    "client": "codex",
+                    "project_dir": self.project,
+                    "transcript_path": "/tmp/old.jsonl",
+                },
             ],
             "thread_sessions": [],
             "thread_leases": [],
@@ -91,45 +128,64 @@ class ResumeSelectorTests(unittest.TestCase):
 
     def test_equal_project_candidates_are_ambiguous(self):
         rows = [
-            {"session_id": sid, "client": "codex", "project_dir": self.project,
-             "transcript_path": f"/tmp/{sid}.jsonl"}
+            {
+                "session_id": sid,
+                "client": "codex",
+                "project_dir": self.project,
+                "transcript_path": f"/tmp/{sid}.jsonl",
+            }
             for sid in ("one", "two")
         ]
-        result = select_resume({
-            "sessions": [], "transcripts": rows,
-            "thread_sessions": [], "thread_leases": [],
-        }, self.project, current_session_id="new-session")
+        result = select_resume(
+            {
+                "sessions": [],
+                "transcripts": rows,
+                "thread_sessions": [],
+                "thread_leases": [],
+            },
+            self.project,
+            current_session_id="new-session",
+        )
         self.assertEqual(result["status"], "ambiguous")
         self.assertIsNone(result["selected"])
 
     def test_unexpired_self_lease_still_locks_candidate(self):
         data = {
             "sessions": [],
-            "transcripts": [{
-                "session_id": "temporarily-missing", "client": "claude",
-                "project_dir": self.project, "thread_id": "thread-a",
-                "transcript_path": "/tmp/missing.jsonl",
-            }],
+            "transcripts": [
+                {
+                    "session_id": "temporarily-missing",
+                    "client": "claude",
+                    "project_dir": self.project,
+                    "thread_id": "thread-a",
+                    "transcript_path": "/tmp/missing.jsonl",
+                }
+            ],
             "thread_sessions": [],
-            "thread_leases": [{
-                "thread_id": "thread-a", "session_id": "temporarily-missing",
-                "expires_at": time.time() + 600,
-            }],
+            "thread_leases": [
+                {
+                    "thread_id": "thread-a",
+                    "session_id": "temporarily-missing",
+                    "expires_at": time.time() + 600,
+                }
+            ],
         }
         result = select_resume(data, self.project, current_session_id="new-session")
         self.assertEqual(result["status"], "locked")
-        self.assertEqual(result["candidates"][0]["lock_owner_session_id"],
-                         "temporarily-missing")
+        self.assertEqual(result["candidates"][0]["lock_owner_session_id"], "temporarily-missing")
 
     def test_registry_timeout_fails_closed(self):
         data = {
             "session_registry_available": False,
             "sessions": [],
-            "transcripts": [{
-                "session_id": "possibly-live", "client": "claude",
-                "project_dir": self.project,
-                "transcript_path": "/tmp/possibly-live.jsonl",
-            }],
+            "transcripts": [
+                {
+                    "session_id": "possibly-live",
+                    "client": "claude",
+                    "project_dir": self.project,
+                    "transcript_path": "/tmp/possibly-live.jsonl",
+                }
+            ],
             "thread_sessions": [],
             "thread_leases": [],
         }
@@ -179,7 +235,9 @@ class ResumeSelectorTests(unittest.TestCase):
             task_ledger.DB_PATH = Path(tmp) / "ledger.db"
             try:
                 task_ledger.session_bind(
-                    "session", client="codex", metadata={"model": "gpt", "host": "node"},
+                    "session",
+                    client="codex",
+                    metadata={"model": "gpt", "host": "node"},
                 )
                 thread_id = task_ledger.thread_create("work", "project:test")
                 task_ledger.session_bind("session", thread_id)
@@ -196,10 +254,12 @@ class ResumeSelectorTests(unittest.TestCase):
             try:
                 result = {
                     "selected": {
-                        "session_id": "old-codex", "client": "codex",
+                        "session_id": "old-codex",
+                        "client": "codex",
                         "project_dir": self.project,
                         "transcript_path": "/tmp/old-codex.jsonl",
-                        "status": "ended", "thread_id": "",
+                        "status": "ended",
+                        "thread_id": "",
                     }
                 }
                 claim = claim_selected(result, "new-claude", "claude", self.project)

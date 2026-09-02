@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>24 Skills — cc-soul</title>
-<meta name="description" content="Complete reference for all 24 slash-command skills in cc-soul. Memory operations, reasoning, development rituals, pipeline monitoring, maintenance, system management, and benchmarking.">
+<title>31 Skills — chitta</title>
+<meta name="description" content="Complete reference for all 31 slash-command skills in chitta. Memory operations, reasoning, development rituals, pipeline monitoring, maintenance, system management, and benchmarking.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="24 Skills — cc-soul">
-<meta property="og:description" content="Complete reference for all 24 slash-command skills in cc-soul. Memory operations, reasoning, development rituals, pipeline monitoring, maintenance, and system management.">
+<meta property="og:title" content="31 Skills — chitta">
+<meta property="og:description" content="Complete reference for all 31 slash-command skills in chitta. Memory operations, reasoning, development rituals, pipeline monitoring, maintenance, and system management.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="24 Skills — cc-soul">
-<meta name="twitter:description" content="Complete reference for all 24 slash-command skills in cc-soul.">
+<meta name="twitter:title" content="31 Skills — chitta">
+<meta name="twitter:description" content="Complete reference for all 31 slash-command skills in chitta.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -486,15 +486,16 @@ body::before {
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <a href="index.html" class="nav-brand">chitta</a>
     <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links">
-      
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="recall.html">Recall</a></li>
+      <li><a href="benchmarks.html">Benchmarks</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
@@ -502,9 +503,10 @@ body::before {
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html" class="active">Skills</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
       <li><a href="constellation.html">Constellation</a></li>
       <li><a href="dreams/index.html">Dreams</a></li>
-      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 </nav>
@@ -513,8 +515,9 @@ body::before {
 <header class="page-header">
   <div class="container">
     <div class="page-header-badge reveal">Skills Reference</div>
-    <h1 class="reveal reveal-delay-1">24 skills. Invoke with /.</h1>
-    <p class="page-header-sub reveal reveal-delay-2">Skills are slash commands that expand into specialized prompts. They guide Claude through structured workflows&thinsp;&mdash;&thinsp;from soul initialization to autonomous development rituals.</p>
+    <h1 class="reveal reveal-delay-1">31 skills. Invoke with /.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Skills are slash commands that expand into specialized prompts. They are namespaced by plugin, so each is invoked as <code style="color: var(--aura-300);">/chitta:&lt;name&gt;</code>. They guide Claude through structured workflows&thinsp;&mdash;&thinsp;from soul initialization to autonomous development rituals.</p>
+    <p class="reveal reveal-delay-2" style="font-family: var(--font-mono); font-size: var(--text-xs); color: #565f89; margin-top: var(--space-3);">Status as of 2026-09-02.</p>
   </div>
 </header>
 
@@ -522,8 +525,10 @@ body::before {
 <nav class="submenu-toc">
   <div class="submenu-toc-inner">
     <a href="#cat-memory" class="submenu-toc-link" data-section="cat-memory">Memory Operations</a>
+    <a href="#cat-continuity" class="submenu-toc-link" data-section="cat-continuity">Session Continuity</a>
     <a href="#cat-reasoning" class="submenu-toc-link" data-section="cat-reasoning">Reasoning</a>
     <a href="#cat-development" class="submenu-toc-link" data-section="cat-development">Development</a>
+    <a href="#cat-learning" class="submenu-toc-link" data-section="cat-learning">Learning &amp; Curiosity</a>
     <a href="#cat-maintenance" class="submenu-toc-link" data-section="cat-maintenance">Maintenance</a>
     <a href="#cat-system" class="submenu-toc-link" data-section="cat-system">System</a>
     <a href="#cat-benchmarking" class="submenu-toc-link" data-section="cat-benchmarking">Benchmarking</a>
@@ -534,30 +539,43 @@ body::before {
 <section class="tools-section">
   <div class="container">
 
-    <!-- MEMORY OPERATIONS -->
     <div class="tools-category" id="cat-memory">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
           <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="#CBAF86" stroke-width="1.5"/><circle cx="10" cy="10" r="8" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
         </div>
         <span class="tools-category-name">Memory Operations</span>
-        <span class="tools-category-count">9 skills</span>
+        <span class="tools-category-count">8 skills</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/init</span><span class="tool-desc">Initialize soul with foundational beliefs and wisdom</span></div>
-        <div class="tool-row"><span class="tool-name">/checkpoint</span><span class="tool-desc">Save work state before context switches or /clear</span></div>
-        <div class="tool-row"><span class="tool-name">/reawaken</span><span class="tool-desc">Restore context and momentum via Pratyabhij&ntilde;&#x0101; (recognition)</span></div>
-        <div class="tool-row"><span class="tool-name">/explore</span><span class="tool-desc">RLM-style recursive memory graph navigation &mdash; dynamically navigate the memory graph instead of top-k dump</span></div>
-        <div class="tool-row"><span class="tool-name">/health</span><span class="tool-desc">Soul system health check with remediation recommendations</span></div>
-        <div class="tool-row"><span class="tool-name">/introspect</span><span class="tool-desc">Soul self-examination (Sv&#x0101;dhy&#x0101;ya) &mdash; review what&rsquo;s working, identify improvements</span></div>
-        <div class="tool-row"><span class="tool-name">/migrate</span><span class="tool-desc">Import soul data from SQLite or shared chitta files</span></div>
-        <div class="tool-row"><span class="tool-name">/learn</span><span class="tool-desc">Quickly store a learning &mdash; correction, preference, or insight</span></div>
-        <div class="tool-row"><span class="tool-name">/remember</span><span class="tool-desc">Quickly save a memory to the soul</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:init</span><span class="tool-desc">Initialize the soul with foundational beliefs and wisdom</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:checkpoint</span><span class="tool-desc">Capture a moment of clarity before moving forward</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:reawaken</span><span class="tool-desc">Restore context and momentum via Pratyabhij&ntilde;&#x0101; (recognition)</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:explore</span><span class="tool-desc">RLM-style recursive memory exploration &mdash; navigate the memory graph instead of taking a top-k dump</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:health</span><span class="tool-desc">Soul system health check with remediation</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:introspect</span><span class="tool-desc">Soul self-examination (Sv&#x0101;dhy&#x0101;ya)</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:migrate</span><span class="tool-desc">Import soul data from SQLite or shared chitta files</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:remember</span><span class="tool-desc">Quickly save a memory to the soul</span></div>
       </div>
     </div>
 
-    <!-- REASONING -->
+    <div class="tools-category" id="cat-continuity">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 10 a6 6 0 1 1 3 5.2" stroke="#9DB2D9" stroke-width="1.2" fill="none"/><path d="M4 6 V10 H8" stroke="#9DB2D9" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Session Continuity</span>
+        <span class="tools-category-count">3 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/chitta:recap</span><span class="tool-desc">Token-savvy session continuation. Rebuilds working context from the transcript and soul memories in roughly 1500 tokens instead of replaying full history</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:resume</span><span class="tool-desc">Resume a thread by loading its ~800-token context capsule</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:tasks</span><span class="tool-desc">Browse and resume tasks, threads, and background jobs across sessions</span></div>
+      </div>
+    </div>
+
     <div class="tools-category" id="cat-reasoning">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
@@ -568,46 +586,62 @@ body::before {
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/antahkarana</span><span class="tool-desc">Multi-perspective reasoning through six cognitive voices (Manas, Buddhi, Ahamkara, Chitta, Vikalpa, Sakshi)</span></div>
-        <div class="tool-row"><span class="tool-name">/ultrathink</span><span class="tool-desc">First-principles deep thinking protocol for significant problems</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:antahkarana</span><span class="tool-desc">Multi-perspective reasoning through cognitive voices</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:ultrathink</span><span class="tool-desc">First-principles deep thinking for significant problems</span></div>
       </div>
     </div>
 
-    <!-- DEVELOPMENT -->
     <div class="tools-category" id="cat-development">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
           <svg viewBox="0 0 20 20" fill="none"><path d="M7 5 L3 10 L7 15" stroke="#D46A4C" stroke-width="1.2"/><path d="M13 5 L17 10 L13 15" stroke="#D46A4C" stroke-width="1.2"/><line x1="11" y1="4" x2="9" y2="16" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/></svg>
         </div>
         <span class="tools-category-name">Development</span>
-        <span class="tools-category-count">4 skills</span>
+        <span class="tools-category-count">6 skills</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/codebase-learn</span><span class="tool-desc">Learn codebase structure with tree-sitter parsing + SSL pattern extraction. Indexes symbols, relationships, and call graphs.</span></div>
-        <div class="tool-row"><span class="tool-name">/yaj&#xF1;a</span><span class="tool-desc">Autonomous development ritual with role-based coordination. Loops until complete using specialized agents: hot&#x1E5B;&rarr;research, adhvaryu&rarr;implement, udg&#x0101;t&#x1E5B;&rarr;test.</span></div>
-        <div class="tool-row"><span class="tool-name">/long-task</span><span class="tool-desc">Initialize or resume a long-running task session. For complex multi-session work with progress tracking.</span></div>
-        <div class="tool-row"><span class="tool-name">/shepherd</span><span class="tool-desc">Autonomous pipeline monitor using sense-think-act loop. Watches snakemake/nextflow jobs, detects errors, applies fixes from memory, restarts on failure. Run <code>/shepherd dashboard</code> for control center.</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:codebase-learn</span><span class="tool-desc">Learn codebase structure with tree-sitter parsing and SSL pattern extraction</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:yaj&#xF1;a</span><span class="tool-desc">Autonomous development ritual with role-based coordination. Loops until complete using specialized agents: hot&#x1E5B;&rarr;research, adhvaryu&rarr;implement, udg&#x0101;t&#x1E5B;&rarr;test</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:long-task</span><span class="tool-desc">Initialize or resume a long-running task session across multiple sessions</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:shepherd</span><span class="tool-desc">Autonomous pipeline monitor using a sense-think-act loop. Watches snakemake and nextflow jobs, detects errors, applies fixes from memory, restarts on failure</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:kriya</span><span class="tool-desc">Review soul discoveries one by one, accept or discard each, implement the accepted ones, build chitta, and optionally release</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:prog-review</span><span class="tool-desc">First-principles review &mdash; question requirements, delete unnecessary parts, simplify, optimize with evidence, automate last</span></div>
       </div>
     </div>
 
-    <!-- MAINTENANCE -->
+    <div class="tools-category" id="cat-learning">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 6 L10 3 L17 6 L10 9 Z" stroke="#CBAF86" stroke-width="1.2" fill="none"/><path d="M6 8 V13 L10 15 L14 13 V8" stroke="#CBAF86" stroke-width="1" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Learning &amp; Curiosity</span>
+        <span class="tools-category-count">3 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/chitta:learn</span><span class="tool-desc">Learn from web sources, generate a SKILL.md, and store key patterns in soul memory</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:dream</span><span class="tool-desc">Trigger autonomous curiosity-driven exploration. The soul picks a topic from memory gaps or curiosity seeds, searches the web, and stores what it finds as dream-tagged memories</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:hint-corpus</span><span class="tool-desc">Fine-tune the Qwen3-0.6B hint model &mdash; corpus generation, LoRA/unsloth, GGUF export, Ollama</span></div>
+      </div>
+    </div>
+
     <div class="tools-category" id="cat-maintenance">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
           <svg viewBox="0 0 20 20" fill="none"><path d="M12 3 L14 5 L5 14 L3 12 Z" stroke="#CBAF86" stroke-width="1.2"/><circle cx="15" cy="5" r="2" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
         </div>
         <span class="tools-category-name">Maintenance</span>
-        <span class="tools-category-count">2 skills</span>
+        <span class="tools-category-count">3 skills</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/epsilon-yajna</span><span class="tool-desc">Convert verbose memories to SSL v0.2 format. Compress episodes into compact semantic seeds while preserving meaning.</span></div>
-        <div class="tool-row"><span class="tool-name">/mermaid</span><span class="tool-desc">Render Mermaid diagrams as ASCII/Unicode art or SVG</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:epsilon-yajna</span><span class="tool-desc">Convert verbose memories to SSL v0.4 format &mdash; the skill is both encoder and decoder</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:mermaid</span><span class="tool-desc">Render Mermaid diagrams as ASCII/Unicode art or SVG</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:distill-pending</span><span class="tool-desc">Process pending transcript distillation</span></div>
       </div>
     </div>
 
-    <!-- SYSTEM -->
     <div class="tools-category" id="cat-system">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
@@ -618,27 +652,25 @@ body::before {
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/cc-soul-setup</span><span class="tool-desc">Build cc-soul from source (requires cmake, make, C++ compiler)</span></div>
-        <div class="tool-row"><span class="tool-name">/cc-soul-update</span><span class="tool-desc">Update cc-soul binaries (downloads pre-built or builds from source)</span></div>
-        <div class="tool-row"><span class="tool-name">/cc-soul-daemon</span><span class="tool-desc">Start, stop, or check the chittad daemon</span></div>
-        <div class="tool-row"><span class="tool-name">/cc-soul-shutdown</span><span class="tool-desc">Gracefully stop the cc-soul daemon</span></div>
-        <div class="tool-row"><span class="tool-name">/cc-soul-mcp</span><span class="tool-desc">Configure chitta MCP server for direct tool access (mcp__chitta__* tools)</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:cc-soul-setup</span><span class="tool-desc">Build chitta from source (requires cmake, make, a C++ compiler)</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:cc-soul-update</span><span class="tool-desc">Update chitta binaries (downloads pre-built or builds from source)</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:cc-soul-daemon</span><span class="tool-desc">Start, stop, or check the chittad daemon</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:cc-soul-shutdown</span><span class="tool-desc">Gracefully stop the chitta daemon</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:cc-soul-mcp</span><span class="tool-desc">Configure the chitta MCP server for direct tool access (<code>mcp__chitta__*</code>)</span></div>
       </div>
     </div>
 
-    <!-- BENCHMARKING -->
     <div class="tools-category" id="cat-benchmarking">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="tools-category-icon">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3 15 L7 8 L11 11 L17 4" stroke="#D46A4C" stroke-width="1.2" fill="none"/><circle cx="17" cy="4" r="1.5" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/></svg>
         </div>
         <span class="tools-category-name">Benchmarking</span>
-        <span class="tools-category-count">2 skills</span>
+        <span class="tools-category-count">1 skill</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
-        <div class="tool-row"><span class="tool-name">/locomo-benchmark</span><span class="tool-desc">Run LoCoMo long-term conversational memory benchmark</span></div>
-        <div class="tool-row"><span class="tool-name">/distill-pending</span><span class="tool-desc">Process pending transcript distillation</span></div>
+        <div class="tool-row"><span class="tool-name">/chitta:locomo-benchmark</span><span class="tool-desc">Run the LoCoMo benchmark for long-term conversational memory</span></div>
       </div>
     </div>
 
@@ -648,7 +680,7 @@ body::before {
 <!-- BACK -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <a href="index.html" class="back-link">&larr; Back to chitta</a>
   </div>
 </section>
 
@@ -658,7 +690,7 @@ body::before {
     <p class="footer-text">
       Built with conviction. Grounded in philosophy.
       <span class="footer-sep"></span>
-      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/genomewalker/chitta" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>

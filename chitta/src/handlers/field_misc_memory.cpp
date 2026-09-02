@@ -26,7 +26,11 @@ ToolResult FieldRpcHandler::tool_memory_history(const json& params) {
          {"note", "Version history is append-only in chitta-field"}});
 }
 
-ToolResult FieldRpcHandler::tool_memory_revert(const json& params) {
+// Registered but permanently unavailable: chitta-field keeps no per-memory
+// version history, so there is nothing to revert to. Kept because the tool name
+// is part of the frozen RPC surface — it answers with an error rather than
+// vanishing from tools/list.
+ToolResult FieldRpcHandler::tool_memory_revert(const json&) {
     return ToolResult::error(
         "Version history not available in chitta-field backend");
 }

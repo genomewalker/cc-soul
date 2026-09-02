@@ -1,6 +1,17 @@
-# CC-Soul Architecture
+# chitta Architecture
 
-Technical architecture of cc-soul v4.0, a persistent identity and memory system for Claude Code.
+Technical architecture of chitta, a persistent identity and memory system for
+Claude Code and Codex.
+
+> **Status as of 2026-09-02.** This document is partially stale and is being
+> corrected in place. Verified and updated below: the storage layer is
+> chitta-field (Rust, via FFI) and there is no DuckDB anywhere in the daemon;
+> the embedding path is llama.cpp over a GGUF model, not ONNX Runtime; the RPC
+> handler is `FieldRpcHandler` in `rpc/field_handler.hpp` and serves 319 tools.
+> Sections not yet re-verified against the current tree are marked inline.
+> Current, generated references: [API.md](API.md) for the tool surface and the
+> [recall pipeline page](https://genomewalker.github.io/chitta/recall.html) for
+> retrieval.
 
 ---
 
@@ -49,17 +60,17 @@ Technical architecture of cc-soul v4.0, a persistent identity and memory system 
 │  │                                                         │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │ │
 │  │  │ Thread Pool   │  │ RPC Handler  │  │ Subconscious │  │ │
-│  │  │ (2-16 workers)│  │ (100+ tools) │  │ (background) │  │ │
+│  │  │ (2-16 workers)│  │ (319 tools)  │  │ (background) │  │ │
 │  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │ │
 │  │         │                 │                  │          │ │
 │  │         └────────────┬────┘──────────────────┘          │ │
 │  │                      ▼                                  │ │
 │  │  ┌─────────────────────────────────────────────────┐    │ │
-│  │  │              DuckDBMind (C++ orchestrator)       │    │ │
+│  │  │              SoulController (C++ orchestrator)   │    │ │
 │  │  │                                                  │    │ │
-│  │  │  Embedder ←→ VakYantra (ONNX)                   │    │ │
+│  │  │  Embedder ←→ VakYantra (llama.cpp GGUF)         │    │ │
 │  │  │  ResonanceLearner (Bayesian self-tuning)         │    │ │
-│  │  │  ThemeManager (xMemory)                          │    │ │
+│  │  │  ThemeOrgan (xMemory, in chitta-field)           │    │ │
 │  │  │  SessionContext (priming, topics)                 │    │ │
 │  │  │                    │                             │    │ │
 │  │  │          C FFI boundary                         │    │ │
@@ -102,20 +113,22 @@ Technical architecture of cc-soul v4.0, a persistent identity and memory system 
 | Binary | Purpose | Source |
 |--------|---------|--------|
 | `chittad` | Daemon: socket server + RPC handler + subconscious | `chitta/src/simple_cli.cpp` |
-| `chitta` | CLI tool: direct command-line access | `chitta/src/simple_cli.cpp` |
+| `chitta` | CLI tool: direct command-line access, and `chitta mcp` for stdio MCP | `chitta/src/simple_cli.cpp` |
+| `chitta_hintd` | Optional local hint model behind its own socket. Built only with `CHITTA_WITH_LLAMA_CPP=ON`; everything works without it | `chitta/src/` |
 
 ### Core Classes (C++ daemon)
 
 | Class | File | Role |
 |-------|------|------|
-| `DuckDBMind` | `mind/duckdb_mind.hpp` | Central orchestrator: remember, recall, resonate, self-tune |
-| `DuckDBRpcHandler` | `rpc/duckdb_handler.hpp` | JSON-RPC 2.0 handler, 100+ registered tools |
+| `SoulController` | `soul_controller.hpp` | Central orchestrator: remember, recall, resonate, self-tune |
+| `FieldRpcHandler` | `rpc/field_handler.hpp` | JSON-RPC 2.0 handler, 319 registered tools |
 | `Embedder` | `mind/embedder.hpp` | Embedding with LRU cache and circuit breaker |
-| `AntahkaranaYantra` | `vak_onnx.hpp` | ONNX Runtime inference for bge-base-en-v1.5 |
+| `LlamaYantra` | `vak_llama.hpp` | In-process llama.cpp inference over the GGUF embedding model |
+| `OllamaYantra` | `vak_ollama.hpp` | HTTP embedding backend, used when no local GGUF is found |
 | `Subconscious` | `mind/subconscious.hpp` | Background thread: patterns, hygiene, embedding |
-| `ThemeManager` | `theme_manager.hpp` | xMemory hierarchical memory organization |
+| `NativeDistiller` | `native_distiller.hpp` | In-daemon transcript distillation, no external model call |
 | `CodeIntel` | `code_intel.hpp` | Tree-sitter symbol extraction (9 languages) |
-| `SymbolResolver` | `symbol_resolver.hpp` | Cross-file symbol resolution for call graphs |
+| `QueueProcessor` | `queue_processor.hpp` | Background embedding and maintenance queue |
 | `ThreadPool` | `rpc/thread_pool.hpp` | Auto-scaling worker pool with watchdog |
 | `ProvenanceSpine` | `provenance.hpp` | Knowledge source tracking and trust scoring |
 
@@ -333,7 +346,7 @@ Memories with empty retrieval history receive zero boost. The C++ layer passes a
 The embedding pipeline follows a Vedantic naming convention:
 
 ```
-Text → VakPatha (tokenizer) → Shabda (token sequence) → AntahkaranaYantra (ONNX) → Artha (embedding)
+Text → VakPatha (tokenizer) → Shabda (token sequence) → LlamaYantra (llama.cpp) → Artha (embedding)
 ```
 
 ### Components
@@ -343,7 +356,7 @@ Text → VakPatha (tokenizer) → Shabda (token sequence) → AntahkaranaYantra 
 | `VakPatha` | Path of speech | WordPiece tokenizer (vocab.txt) |
 | `Shabda` | Sound-form | Tokenized input (input_ids + attention_mask) |
 | `Artha` | Meaning | 1024-dim embedding vector + certainty (default; matches `EMBED_DIM`) |
-| `AntahkaranaYantra` | Inner instrument | ONNX Runtime inference engine |
+| `LlamaYantra` | Inner instrument | In-process llama.cpp inference engine |
 | `SmritiYantra` | Memory machine | Caching wrapper (LRU, 10000 entries) |
 | `ShantaYantra` | Silent machine | Zero-vector fallback |
 
@@ -353,7 +366,7 @@ Text → VakPatha (tokenizer) → Shabda (token sequence) → AntahkaranaYantra 
 - **Dimensions**: 1024 (default)
 - **Max sequence length**: 128 tokens
 - **Pooling**: Mean pooling with L2 normalization
-- **Runtime**: ONNX Runtime with sequential execution mode
+- **Runtime**: llama.cpp, in-process (`CHITTA_WITH_LLAMA_CPP`). Falls back to an HTTP endpoint via `OllamaYantra` when no local GGUF is found
 - **Batch size**: Up to 32 texts per inference call
 
 ### Embedder (with Circuit Breaker)
@@ -372,7 +385,7 @@ States: CLOSED → (3 failures) → OPEN → (60s cooldown) → HALF_OPEN → (s
 
 ## Resonance Engine
 
-The resonance engine is the core of memory retrieval. `DuckDBMind::full_resonate()` runs 8 phases to find relevant memories:
+The resonance engine is the core of memory retrieval. The `full_resonate` handler (`src/handlers/field_memory_recall.cpp`) runs 8 phases to find relevant memories. Note that the default retrieval path for callers today is the `recall` gateway, not `full_resonate` directly; see the [recall pipeline page](https://genomewalker.github.io/chitta/recall.html):
 
 ### Phase 1: Semantic Seeds
 
@@ -433,7 +446,7 @@ For code-like queries (detected by heuristic: contains `::`, `->`, `_`, `.`, or 
 ### Resonance Configuration
 
 ```cpp
-struct DuckDBResonanceConfig {
+struct ResonanceConfig {   // mind/types.hpp
     float spread_strength = 0.5f;
     float spread_decay = 0.5f;
     int max_hops = 3;
@@ -514,7 +527,7 @@ Inspired by the xMemory paper, themes provide hierarchical organization of memor
 
 ### Tree-sitter Parsing
 
-CC-Soul uses tree-sitter to extract structural information from source code. Supported languages:
+chitta uses tree-sitter to extract structural information from source code. Supported languages:
 
 | Language | Grammar |
 |----------|---------|
@@ -745,7 +758,7 @@ enum class NodeType {
 
 ### Quality Gate
 
-Before storing, `DuckDBMind::remember()` applies (pre-flight in C++ before calling the chitta-field FFI):
+Before storing, the `remember` handler applies (pre-flight in C++ before calling the chitta-field FFI):
 
 1. **Minimum length**: Content must be >= 10 characters
 2. **Deduplication**: Cosine similarity check against recent memories (threshold: 0.95)
@@ -847,7 +860,7 @@ ledger_save(session_id, {
     mood: "confident",
     todos: [{content: "Fix bug", status: "done"}],
     active_files: ["src/main.cpp"],
-    decisions: ["Used DuckDB over SQLite"],
+    decisions: ["Kept the wide pool instead of raising the rerank budget"],
     next_steps: ["Add tests"],
     blockers: [],
     discoveries: ["HNSW rebuild is async"],
@@ -874,7 +887,7 @@ For work spanning multiple sessions:
 
 ### Hook System
 
-CC-Soul integrates via Claude Code hooks:
+chitta integrates via Claude Code hooks:
 
 | Event | Script | Action |
 |-------|--------|--------|
@@ -926,7 +939,7 @@ cd chitta && cmake --build build --parallel
 | Library | Purpose |
 |---------|---------|
 | chitta-field | Memory substrate (Rust static lib, included as submodule) |
-| ONNX Runtime | Embedding inference |
+| llama.cpp | Embedding inference |
 | tree-sitter | Code parsing (+ 9 language grammars) |
 | nlohmann_json | JSON handling |
 | CRoaring | Bitmap operations |

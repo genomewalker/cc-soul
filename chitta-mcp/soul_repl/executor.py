@@ -5,15 +5,16 @@ Provides a safe execution environment with soul.* methods exposed.
 Tracks all code executed for trajectory recording.
 """
 
+from __future__ import annotations
+
 import ast
 import sys
 import traceback
+from dataclasses import dataclass, field
 from io import StringIO
 from typing import Any
-from dataclasses import dataclass, field
 
-from .sandbox import SoulAPI, Memory, Triplet
-
+from .sandbox import Memory, SoulAPI, Triplet
 
 # Safe builtins - no file I/O, no exec/eval, no imports
 SAFE_BUILTINS = {
@@ -32,7 +33,6 @@ SAFE_BUILTINS = {
     "type": type,
     "object": object,
     "bytes": bytes,
-
     # Functions
     "len": len,
     "range": range,
@@ -55,16 +55,13 @@ SAFE_BUILTINS = {
     "getattr": getattr,
     "setattr": setattr,
     "repr": repr,
-    "str": str,
     "print": print,  # Will be redirected to capture output
     "format": format,
     "chr": chr,
     "ord": ord,
-
     # Iteration
     "iter": iter,
     "next": next,
-
     # Exceptions (for try/except)
     "Exception": Exception,
     "ValueError": ValueError,
@@ -104,8 +101,15 @@ def validate_ast(code: str) -> tuple[bool, str]:
         # Check for dangerous function calls
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
-                if node.func.id in ("exec", "eval", "compile", "__import__",
-                                    "open", "input", "breakpoint"):
+                if node.func.id in (
+                    "exec",
+                    "eval",
+                    "compile",
+                    "__import__",
+                    "open",
+                    "input",
+                    "breakpoint",
+                ):
                     return False, f"Forbidden function: {node.func.id}"
 
     return True, ""
@@ -114,6 +118,7 @@ def validate_ast(code: str) -> tuple[bool, str]:
 @dataclass
 class ExecutionResult:
     """Result of code execution."""
+
     success: bool
     output: str
     result: Any = None
@@ -181,9 +186,7 @@ class SoulREPL:
         valid, error = validate_ast(code)
         if not valid:
             return ExecutionResult(
-                success=False,
-                output="",
-                error=f"Code validation failed: {error}"
+                success=False, output="", error=f"Code validation failed: {error}"
             )
 
         # Capture stdout
@@ -210,13 +213,15 @@ class SoulREPL:
             # Evaluate last expression if present
             if last_expr:
                 result = eval(
-                    compile(ast.Expression(last_expr.value), "<repl>", "eval"),
-                    self.namespace
+                    compile(ast.Expression(last_expr.value), "<repl>", "eval"), self.namespace
                 )
                 if result is not None:
                     print(repr(result))
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
+            # This is a REPL: user code may raise anything, and reporting the
+            # traceback back to the caller IS the feature. Narrowing here
+            # would let unlisted exception types escape into the MCP handler.
             error = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
 
         finally:
@@ -224,22 +229,24 @@ class SoulREPL:
 
         output = captured.getvalue()
         if len(output) > self.max_output:
-            output = output[:self.max_output] + f"\n... (truncated, {len(output)} total chars)"
+            output = output[: self.max_output] + f"\n... (truncated, {len(output)} total chars)"
 
         # Record history
-        self.history.append({
-            "code": code,
-            "output": output[:500],
-            "success": not error,
-            "trajectory_count": len(self.soul.trajectory())
-        })
+        self.history.append(
+            {
+                "code": code,
+                "output": output[:500],
+                "success": not error,
+                "trajectory_count": len(self.soul.trajectory()),
+            }
+        )
 
         return ExecutionResult(
             success=not error,
             output=output,
             result=result,
             error=error,
-            trajectory=self.soul.trajectory()
+            trajectory=self.soul.trajectory(),
         )
 
     def trajectory(self) -> list[dict]:
@@ -258,12 +265,13 @@ class SoulREPL:
         """Return namespace subset safe to JSON-serialize (skip builtins/callables)."""
         out = {}
         for k, v in self.namespace.items():
-            if k.startswith('_') or k in ('soul', 'Memory', 'Triplet'):
+            if k.startswith("_") or k in ("soul", "Memory", "Triplet"):
                 continue
             if not isinstance(v, self._SERIALIZABLE):
                 continue
             try:
                 import json as _json
+
                 _json.dumps(v)
                 out[k] = v
             except (TypeError, ValueError):
@@ -273,7 +281,7 @@ class SoulREPL:
     def restore_namespace(self, data: dict) -> None:
         """Restore serializable variables into the sandbox namespace."""
         for k, v in data.items():
-            if not k.startswith('_') and k not in ('soul', 'Memory', 'Triplet'):
+            if not k.startswith("_") and k not in ("soul", "Memory", "Triplet"):
                 self.namespace[k] = v
 
 
@@ -281,7 +289,7 @@ def execute_soul_code(
     code: str,
     max_output: int = 10000,
     initial_namespace: dict | None = None,
-) -> tuple["ExecutionResult", dict]:
+) -> tuple[ExecutionResult, dict]:
     """Execute code in a fresh REPL, optionally seeded with a prior namespace.
 
     Returns (result, serializable_namespace) so callers can persist session state.

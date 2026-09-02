@@ -28,6 +28,10 @@ cleanup() {
 
 trap cleanup EXIT
 
+# `eval` here is justified: every caller passes a string literal written in this
+# file, so nothing external reaches the shell. `eval` (not `bash -c`) keeps the
+# `set -euo pipefail` above in force, so a failing left-hand side of a
+# `... | jq ...` test still fails the test instead of being masked by jq.
 run_test() {
     local name="$1"
     local cmd="$2"

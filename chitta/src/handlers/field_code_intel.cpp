@@ -993,7 +993,7 @@ ToolResult FieldRpcHandler::tool_clear_triplets(const json& params) {
     );
 }
 
-ToolResult FieldRpcHandler::tool_resolve_callsites(const json& params) {
+ToolResult FieldRpcHandler::tool_resolve_callsites(const json&) {
     if (subconscious_) subconscious_->notify_query();
     // FieldStore doesn't have SymbolResolver — callsites are stored as triplets
     return ToolResult::ok(
