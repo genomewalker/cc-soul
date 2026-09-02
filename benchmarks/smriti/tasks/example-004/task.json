@@ -1,0 +1,15 @@
+{
+  "id": "example-004",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement load_setting(key) in config.py: it must read the named setting from this project's config file and return its value. Find the config file yourself — don't assume its location.",
+  "check_cmd": "python3 -m unittest test_config -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] This repo's config lives at config/app.ini, not a root-level app.ini — migrated last quarter; load_setting() and anything else reading config must point at config/app.ini.",
+      "realm": "smriti-example-004",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "config-location", "convention"],
+  "expected_tokens_budget": 3000
+}

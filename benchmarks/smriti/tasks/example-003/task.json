@@ -1,0 +1,15 @@
+{
+  "id": "example-003",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement parse_age(raw) in validate.py: it must parse a numeric string into a non-negative int and reject anything else. Use this project's own error-handling pattern for the rejection, not whatever built-in exception feels natural.",
+  "check_cmd": "python3 -m unittest test_validate -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] This repo centralizes all input-rejection exceptions in errors.py's ValidationError — every validation function raises that, never a bare ValueError/TypeError, so main.py's single top-level handler can catch failures by type.",
+      "realm": "smriti-example-003",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "error-handling", "convention"],
+  "expected_tokens_budget": 3000
+}

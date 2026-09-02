@@ -1,0 +1,15 @@
+{
+  "id": "example-002",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement save_data(obj, path) and load_data(path) in store.py: save_data must persist a dict of basic types to path, and load_data must read it back to an equal dict. Pick a standard-library serialization format.",
+  "check_cmd": "python3 -m unittest test_store -v",
+  "planted_memories": [
+    {
+      "content": "[correction] This repo never uses pickle for save_data/load_data — a 2024 incident where an untrusted pickle file crashed a batch job means all persistence here must use json, even though pickle would round-trip more Python types.",
+      "realm": "smriti-example-002",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "forbidden-dependency", "convention"],
+  "expected_tokens_budget": 3000
+}

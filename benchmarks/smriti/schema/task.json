@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cc-soul/benchmarks/smriti/schema/task.json",
+  "title": "SMRITI-Bench task",
+  "type": "object",
+  "required": ["id", "repo_fixture", "prompt", "check_cmd", "planted_memories", "tags"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Task slug, also its directory name under tasks/."
+    },
+    "repo_fixture": {
+      "type": "string",
+      "description": "Path (relative to this task.json) or git ref to the starting repo state. A plain path is materialized by copy; a ref of the form 'git:<url>#<sha>' is materialized by clone+checkout."
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The instruction handed to the agent. Must not itself contain the planted-memory content — the task must be solvable without it."
+    },
+    "check_cmd": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shell command run from the materialized workdir after the agent finishes. Exit code 0 = pass. Must be deterministic and side-effect-free to rerun."
+    },
+    "planted_memories": {
+      "type": "array",
+      "description": "Memories a working memory system could have retained from a prior session on this repo. Each one shortens the path to the fix; none is required — an agent with no memory access must still be able to pass by reading the fixture and reasoning.",
+      "items": {
+        "type": "object",
+        "required": ["content", "realm", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "content": {"type": "string", "minLength": 1},
+          "realm": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "enum": ["wisdom", "belief", "episode", "correction"]}
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1
+    },
+    "expected_tokens_budget": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Rough token budget for a memory-off solve; used only to flag outlier runs, not to score."
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "example-006",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement format_row(fields) in formatter.py: it must render a row of string fields as this project's output line format. Pick your join character carefully — the obvious one isn't what this pipeline expects.",
+  "check_cmd": "python3 -m unittest test_formatter -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] format_row() must tab-separate fields, not comma-separate — the downstream ingest script (a decades-old awk pipeline) splits on tab and silently misparses a comma inside a field as a new column.",
+      "realm": "smriti-example-006",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "output-format", "convention"],
+  "expected_tokens_budget": 2500
+}

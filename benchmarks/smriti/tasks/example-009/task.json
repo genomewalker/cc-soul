@@ -1,0 +1,15 @@
+{
+  "id": "example-009",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement main(argv) in checker.py: print the line count of the file named in argv[1] and return the right exit code for each outcome — this repo doesn't use the generic exit-code convention for a missing file.",
+  "check_cmd": "python3 -m unittest test_checker -v",
+  "planted_memories": [
+    {
+      "content": "[correction] This repo's CLIs return exit code 3 specifically for 'input file missing' (not the generic 1) — the on-call monitoring dashboard pages differently on 3 vs 1, so mixing them up breaks alert routing.",
+      "realm": "smriti-example-009",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "exit-code", "cli-contract", "convention"],
+  "expected_tokens_budget": 3000
+}

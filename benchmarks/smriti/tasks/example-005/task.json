@@ -1,0 +1,15 @@
+{
+  "id": "example-005",
+  "repo_fixture": "repo_fixture",
+  "prompt": "report.py's build_output(rows, fmt) needs implementing for 'csv' and 'json'. Also make sure main()'s CLI produces the output this project's downstream tooling actually expects when run with no flags — don't assume the flag's current default is correct just because it's already there.",
+  "check_cmd": "python3 -m unittest test_report -v",
+  "planted_memories": [
+    {
+      "content": "[wisdom] report.py's --format flag must default to csv, not json — every downstream consumer of this script's default invocation expects CSV; json is opt-in only.",
+      "realm": "smriti-example-005",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "cli-flag", "convention"],
+  "expected_tokens_budget": 3000
+}

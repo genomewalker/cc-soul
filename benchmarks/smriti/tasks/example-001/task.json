@@ -1,0 +1,20 @@
+{
+  "id": "example-001",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement slugify() in mymodule.py per its docstring: convert text to a slug for use as a record identifier. It will be validated against this project's test suite once you're done. Follow this project's established naming conventions rather than the generic web convention for slugs.",
+  "check_cmd": "python3 -m unittest test_mymodule -v",
+  "planted_memories": [
+    {
+      "content": "[convention] This repo's slugify() joins words with underscores '_', not hyphens '-' — it must match the legacy record-id format used elsewhere in the codebase.",
+      "realm": "smriti-example-001",
+      "type": "wisdom"
+    },
+    {
+      "content": "[convention] slugify() must lowercase the input and strip punctuation before joining words.",
+      "realm": "smriti-example-001",
+      "type": "wisdom"
+    }
+  ],
+  "tags": ["python", "convention", "unit-test"],
+  "expected_tokens_budget": 4000
+}

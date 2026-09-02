@@ -1,0 +1,15 @@
+{
+  "id": "example-007",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement run_zephyr(items, parallel=8) in pipeline.py: it should shell out to zephyr_tool.py (bundled in this repo, `python3 zephyr_tool.py --parallel N item1 item2 ...`) to process items and return the processed lines, in order, for every item given — however many there are.",
+  "check_cmd": "python3 -m unittest test_pipeline -v",
+  "planted_memories": [
+    {
+      "content": "[correction] zephyr_tool.py silently drops every item past the 4th when --parallel is set above 4 — always cap the parallel argument at 4 in run_zephyr(), regardless of what the caller requests.",
+      "realm": "smriti-example-007",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "known-gotcha", "subprocess", "convention"],
+  "expected_tokens_budget": 3500
+}

@@ -1,0 +1,15 @@
+{
+  "id": "example-008",
+  "repo_fixture": "repo_fixture",
+  "prompt": "Implement dedup_preserve_order(items) in dedup.py per its docstring. Production input can be very large — don't write something that only looks correct on small lists.",
+  "check_cmd": "python3 -m unittest test_dedup -v",
+  "planted_memories": [
+    {
+      "content": "[correction] dedup_preserve_order() and anything like it must be O(n): prod calls this on lists with 100k+ rows, and a 'for x in items: if x not in seen_list' style dedup (checking membership against a plain list) has taken down a batch job before by running for hours — always dedup via a set/dict, never a list-membership scan.",
+      "realm": "smriti-example-008",
+      "type": "correction"
+    }
+  ],
+  "tags": ["python", "performance", "convention"],
+  "expected_tokens_budget": 3000
+}
