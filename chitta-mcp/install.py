@@ -148,10 +148,15 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
                 # Resolve ${CLAUDE_PLUGIN_ROOT} to absolute hooks directory
                 cmd = hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/hooks/", str(hooks_dir) + "/")
 
-                # SessionStart: replace session-start-hook.sh with Codex JSON wrapper
-                # (Codex requires SessionStart hooks to output JSON {"context": "..."})
+                # SessionStart: use Codex-specific JSON adapters. Claude's
+                # compact hook emits watchPaths and its resume helper emits
+                # initialUserMessage; neither field exists in Codex's schema.
                 if event == "SessionStart" and cmd.endswith("session-start-hook.sh"):
                     cmd = str(hooks_dir / "codex-session-start-wrapper.sh")
+                elif event == "SessionStart" and cmd.endswith("compact-restore-hook.sh"):
+                    cmd = str(hooks_dir / "codex-compact-restore-wrapper.sh")
+                elif event == "SessionStart" and cmd.endswith("resume-inject-hook.sh"):
+                    continue
                 elif event == "UserPromptSubmit" and cmd.endswith("prompt-hook.sh"):
                     cmd = str(hooks_dir / "codex-prompt-hook.sh")
                 elif event == "Stop" and cmd.endswith("stop-hook.sh"):
@@ -164,6 +169,8 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
 
                 # SessionStart: subconscious.sh needs more time in Codex (daemon startup)
                 timeout = hook.get("timeout")
+                if event == "SessionStart" and cmd.endswith("codex-compact-restore-wrapper.sh"):
+                    timeout = 12
                 if event == "SessionStart" and "subconscious.sh" in cmd:
                     timeout = 15
 

@@ -3,12 +3,104 @@
 
 #include "../../include/chitta/rpc/field_handler.hpp"
 
+#include <cerrno>
+#include <csignal>
+#include <unistd.h>
+
 namespace chitta {
 
 namespace {
 constexpr size_t kMaxPreviewChars = 500;
 constexpr size_t kMaxTranscriptPageSize = 100;
 constexpr size_t kMaxTranscriptCharsPerTurn = 2000;
+
+int64_t session_now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+json parse_object(const std::string& raw) {
+    json value = json::parse(raw, nullptr, false);
+    return value.is_object() ? value : json::object();
+}
+
+json object_param(const json& params, const char* key) {
+    if (!params.contains(key)) return json::object();
+    const auto& value = params[key];
+    if (value.is_object()) return value;
+    if (value.is_string()) return parse_object(value.get<std::string>());
+    return json::object();
+}
+
+json transcript_registration(FieldStore* store, const std::string& session_id) {
+    auto raw = store->get_latest_event("transcript", "register", session_id);
+    return raw ? parse_object(*raw) : json::object();
+}
+
+std::string resolve_transcript_path(FieldStore* store, const std::string& session_id,
+                                    const std::string& supplied = "") {
+    if (!supplied.empty() && std::filesystem::is_regular_file(supplied)) return supplied;
+    if (!session_id.empty()) {
+        json reg = transcript_registration(store, session_id);
+        std::string registered = reg.value("path", reg.value("transcript_path", ""));
+        if (!registered.empty() && std::filesystem::is_regular_file(registered)) return registered;
+    }
+
+    const char* home_cstr = std::getenv("HOME");
+    if (!home_cstr || session_id.empty()) return "";
+    const std::vector<std::string> patterns = {
+        std::string(home_cstr) + "/.claude/projects/*/" + session_id + ".jsonl",
+        std::string(home_cstr) + "/.codex/sessions/*/*/*/*" + session_id + ".jsonl",
+    };
+    for (const auto& pattern : patterns) {
+        glob_t g{};
+        std::string found;
+        if (glob(pattern.c_str(), GLOB_TILDE, nullptr, &g) == 0 && g.gl_pathc > 0) {
+            found = g.gl_pathv[0];
+        }
+        globfree(&g);
+        if (!found.empty()) return found;
+    }
+    return "";
+}
+
+void merge_session_metadata(json& entry, const json& payload) {
+    for (const auto& key : {"pid", "transcript_path", "project_dir", "client",
+                            "model", "thread_id", "host"}) {
+        if (payload.contains(key)) entry[key] = payload[key];
+    }
+    json metadata = json::object();
+    if (payload.contains("metadata")) {
+        if (payload["metadata"].is_object()) metadata = payload["metadata"];
+        else if (payload["metadata"].is_string()) metadata = parse_object(payload["metadata"]);
+    }
+    for (const auto& key : {"client", "model", "thread_id", "host"}) {
+        if (metadata.contains(key)) entry[key] = metadata[key];
+    }
+    entry["metadata"] = metadata;
+}
+
+std::unordered_map<std::string, json> latest_session_payloads(
+    FieldStore* store, const std::string& kind) {
+    std::unordered_map<std::string, json> result;
+    json events = json::parse(
+        store->get_events_by_domain_kind("session", kind, 500), nullptr, false);
+    if (!events.is_array()) return result;
+    // Event queries are newest-first, so the first occurrence for each exact
+    // target is the payload that belongs to the native registry row.
+    for (const auto& event : events) {
+        std::string sid = event.value("target", "");
+        if (sid.empty() || result.count(sid)) continue;
+        if (event.contains("payload") && event["payload"].is_object()) {
+            result.emplace(sid, event["payload"]);
+        } else if (event.contains("payload") && event["payload"].is_string()) {
+            result.emplace(sid, parse_object(event["payload"].get<std::string>()));
+        } else {
+            result.emplace(sid, json::object());
+        }
+    }
+    return result;
+}
 }
 
 ToolResult FieldRpcHandler::tool_transcript_register(const json& params) {
@@ -20,6 +112,7 @@ ToolResult FieldRpcHandler::tool_transcript_register(const json& params) {
     if (transcript_path.empty()) return ToolResult::error("transcript_path is required");
 
     json payload = {
+        {"transcript_id", session_id},
         {"path",      transcript_path},
         {"realm",     realm},
         {"last_line", 0}
@@ -41,20 +134,11 @@ ToolResult FieldRpcHandler::tool_transcript_get(const json& params) {
     std::string session_id = params.value("session_id", "");
     if (session_id.empty()) return ToolResult::error("session_id is required");
 
-    auto hits = field_store_->recall_keyword(session_id, 5);
-    for (const auto& h : hits) {
-        if (h.kind == "transcript" || h.content.find(session_id) != std::string::npos) {
-            std::string preview = h.content.size() > kMaxPreviewChars
-                ? utf8_trunc(h.content, kMaxPreviewChars) + "..."
-                : h.content;
-            return ToolResult::ok("Found transcript event", {
-                {"found",      true},
-                {"session_id", session_id},
-                {"memory_id",  h.memory_id},
-                {"content_preview", preview},
-                {"note",       "session state tracked via events"}
-            });
-        }
+    json reg = transcript_registration(field_store_, session_id);
+    if (!reg.empty()) {
+        reg["found"] = true;
+        reg["session_id"] = session_id;
+        return ToolResult::ok("Found transcript registration", reg);
     }
 
     return ToolResult::ok("Transcript not found", {
@@ -66,7 +150,8 @@ ToolResult FieldRpcHandler::tool_transcript_get(const json& params) {
 ToolResult FieldRpcHandler::tool_transcript_list(const json& params) {
     size_t limit = static_cast<size_t>(params.value("limit", 50));
 
-    // Use native cf_transcript_list if available
+    // Native registry is authoritative. Merge the durable register-event payload
+    // to recover path, realm, and frontend metadata.
     std::string raw = field_store_->transcript_list(limit);
     json list_json;
     try {
@@ -78,16 +163,32 @@ ToolResult FieldRpcHandler::tool_transcript_list(const json& params) {
         list_json = json::array();
     }
 
-    // Fall back to keyword recall when native list is empty
-    if (list_json.empty()) {
-        auto hits = field_store_->recall_keyword("transcript register", limit);
-        for (const auto& h : hits) {
-            list_json.push_back({
-                {"memory_id", h.memory_id},
-                {"content",   h.content},
-                {"kind",      h.kind},
-                {"realm",     h.realm}
-            });
+    std::unordered_set<std::string> seen;
+    for (auto& item : list_json) {
+        std::string sid = item.value("session_id", "");
+        if (sid.empty()) continue;
+        seen.insert(sid);
+        json reg = transcript_registration(field_store_, sid);
+        for (const auto& [key, value] : reg.items()) item[key] = value;
+    }
+
+    // Compatibility recovery: old register events did not populate the native
+    // TranscriptRegistry. Session IDs give us an exact, bounded lookup without
+    // the previous unrelated keyword-recall fallback.
+    json sessions = json::parse(field_store_->session_list(false), nullptr, false);
+    if (sessions.is_array()) {
+        for (const auto& session : sessions) {
+            if (list_json.size() >= limit) break;
+            std::string sid = session.value("session_id", "");
+            if (sid.empty() || seen.count(sid)) continue;
+            json reg = transcript_registration(field_store_, sid);
+            if (reg.empty()) continue;
+            reg["session_id"] = sid;
+            reg["transcript_id"] = sid;
+            reg["turn_count"] = 0;
+            reg["progress_pct"] = 0.0;
+            list_json.push_back(reg);
+            seen.insert(sid);
         }
     }
 
@@ -141,20 +242,7 @@ ToolResult FieldRpcHandler::tool_transcript_parse(const json& params) {
 
     if (session_id.empty()) return ToolResult::error("session_id is required");
 
-    // Try to locate the transcript path via glob
-    std::string path;
-    {
-        const char* home_cstr = std::getenv("HOME");
-        if (home_cstr) {
-            std::string pattern = std::string(home_cstr)
-                + "/.claude/projects/*/" + session_id + ".jsonl";
-            glob_t g{};
-            if (glob(pattern.c_str(), GLOB_TILDE, nullptr, &g) == 0 && g.gl_pathc > 0) {
-                path = g.gl_pathv[0];
-            }
-            globfree(&g);
-        }
-    }
+    std::string path = resolve_transcript_path(field_store_, session_id);
 
     if (path.empty()) {
         return ToolResult::error("Could not find transcript for session: " + session_id);
@@ -175,7 +263,16 @@ ToolResult FieldRpcHandler::tool_transcript_parse(const json& params) {
         auto obj = json::parse(line, nullptr, false);
         if (obj.is_discarded()) continue;
         std::string type = obj.value("type", "");
-        if (type == "user" || type == "assistant") ++turn_count;
+        if (type == "user" || type == "assistant") {
+            ++turn_count;
+        } else if (type == "response_item" && obj.contains("payload")) {
+            const auto& payload = obj["payload"];
+            std::string ptype = payload.value("type", "");
+            std::string role = payload.value("role", "");
+            if (ptype == "message" && (role == "user" || role == "assistant")) {
+                ++turn_count;
+            }
+        }
     }
 
     bool ready = turn_count >= min_turns;
@@ -265,19 +362,7 @@ ToolResult FieldRpcHandler::tool_read_transcript(const json& params) {
     std::string keyword    = params.value("keyword", "");
     bool metadata_only     = params.value("metadata_only", false);
 
-    // Resolve path from session_id if not provided
-    if (path.empty() && !session_id.empty()) {
-        const char* home_cstr = std::getenv("HOME");
-        if (home_cstr) {
-            std::string pattern = std::string(home_cstr)
-                + "/.claude/projects/*/" + session_id + ".jsonl";
-            glob_t g{};
-            if (glob(pattern.c_str(), GLOB_TILDE, nullptr, &g) == 0 && g.gl_pathc > 0) {
-                path = g.gl_pathv[0];
-            }
-            globfree(&g);
-        }
-    }
+    path = resolve_transcript_path(field_store_, session_id, path);
 
     if (path.empty()) {
         return ToolResult::error("No transcript path provided and could not find session");
@@ -456,20 +541,7 @@ ToolResult FieldRpcHandler::tool_get_turns(const json& params) {
 
     if (session_id.empty()) return ToolResult::error("session_id is required");
 
-    // Locate transcript path
-    std::string path;
-    {
-        const char* home_cstr = std::getenv("HOME");
-        if (home_cstr) {
-            std::string pattern = std::string(home_cstr)
-                + "/.claude/projects/*/" + session_id + ".jsonl";
-            glob_t g{};
-            if (glob(pattern.c_str(), GLOB_TILDE, nullptr, &g) == 0 && g.gl_pathc > 0) {
-                path = g.gl_pathv[0];
-            }
-            globfree(&g);
-        }
-    }
+    std::string path = resolve_transcript_path(field_store_, session_id);
 
     if (path.empty()) {
         return ToolResult::ok("Transcript not found for session", {
@@ -784,17 +856,20 @@ ToolResult FieldRpcHandler::tool_session_register(const json& params) {
     std::string realm           = params.value("realm", "brahman");
     std::string transcript_path = params.value("transcript_path", "");
     std::string project_dir     = params.value("project_dir", "");
-    std::string metadata        = params.value("metadata", "{}");
+    json metadata_obj           = object_param(params, "metadata");
+    std::string client          = params.value("client", metadata_obj.value("client", "unknown"));
     int32_t pid = params.contains("pid")
         ? params["pid"].get<int32_t>()
         : static_cast<int32_t>(getpid());
 
     json payload = {
+        {"kind",            client},
+        {"client",          client},
         {"realm",           realm},
         {"pid",             pid},
         {"transcript_path", transcript_path},
         {"project_dir",     project_dir},
-        {"metadata",        metadata}
+        {"metadata",        metadata_obj}
     };
 
     uint64_t event_id = field_store_->emit_event(
@@ -813,10 +888,10 @@ ToolResult FieldRpcHandler::tool_session_register(const json& params) {
 
 ToolResult FieldRpcHandler::tool_session_heartbeat(const json& params) {
     std::string session_id = params.value("session_id", get_session_id());
-    std::string metadata   = params.value("metadata", "");
+    json payload = {{"metadata", object_param(params, "metadata")}};
 
     uint64_t event_id = field_store_->emit_event(
-        "session", "heartbeat", session_id, metadata);
+        "session", "heartbeat", session_id, payload.dump());
 
     if (event_id == 0) return ToolResult::error("Failed to send heartbeat");
 
@@ -827,52 +902,18 @@ ToolResult FieldRpcHandler::tool_session_heartbeat(const json& params) {
 }
 
 ToolResult FieldRpcHandler::tool_session_list(const json& params) {
-    bool active_only = params.value("active_only", false);
-
-    // Fetch all session register events from the event log (replayed from WAL on startup).
-    std::string reg_raw = field_store_->get_events_by_domain_kind("session", "register", 200);
-    json reg_events;
-    try {
-        reg_events = json::parse(reg_raw, nullptr, false);
-    } catch (...) {
-        reg_events = json::array();
+    std::string status_filter = params.value("status", "active");
+    bool active_only = params.value("active_only", status_filter == "active");
+    std::string realm_filter = params.value("realm", "");
+    int64_t ttl_seconds = params.value("ttl_seconds", int64_t(900));
+    if (const char* env_ttl = std::getenv("CHITTA_SESSION_TTL_SECONDS")) {
+        try { ttl_seconds = std::stoll(env_ttl); } catch (...) {}
     }
-    if (reg_events.is_discarded() || !reg_events.is_array()) {
-        reg_events = json::array();
-    }
+    ttl_seconds = std::max<int64_t>(30, ttl_seconds);
+    int64_t now_ms = session_now_ms();
 
-    // Build map: session_id -> latest register event (dedup by target).
-    std::unordered_map<std::string, json> by_session;
-    for (const auto& ev : reg_events) {
-        std::string sid = ev.value("target", "");
-        if (sid.empty()) continue;
-        auto it = by_session.find(sid);
-        if (it == by_session.end()) {
-            by_session[sid] = ev;
-        } else {
-            // Keep newer (events are newest-first from get_events_by_domain_kind,
-            // so first occurrence is already the latest — skip duplicates).
-        }
-    }
-
-    if (active_only) {
-        // Fetch deregister events and remove those sessions.
-        std::string dereg_raw = field_store_->get_events_by_domain_kind("session", "deregister", 200);
-        json dereg_events;
-        try {
-            dereg_events = json::parse(dereg_raw, nullptr, false);
-        } catch (...) {
-            dereg_events = json::array();
-        }
-        if (!dereg_events.is_discarded() && dereg_events.is_array()) {
-            for (const auto& ev : dereg_events) {
-                std::string sid = ev.value("target", "");
-                if (!sid.empty()) by_session.erase(sid);
-            }
-        }
-    }
-
-    if (by_session.empty()) {
+    json native = json::parse(field_store_->session_list(false), nullptr, false);
+    if (!native.is_array() || native.empty()) {
         return ToolResult::ok("No sessions found", {
             {"count",    0},
             {"sessions", json::array()}
@@ -880,25 +921,41 @@ ToolResult FieldRpcHandler::tool_session_list(const json& params) {
     }
 
     json sessions_out = json::array();
-    for (const auto& [sid, ev] : by_session) {
-        json entry = {
-            {"session_id", sid},
-            {"realm",      ev.value("realm", "")},
-            {"ts_ms",      ev.value("ts_ms", 0)},
-            {"event_id",   ev.value("event_id", 0)}
-        };
-        // Merge payload fields (pid, transcript_path, project_dir, metadata).
-        if (ev.contains("payload") && ev["payload"].is_object()) {
-            for (const auto& [k, v] : ev["payload"].items()) {
-                entry[k] = v;
-            }
-        }
+    auto registrations = latest_session_payloads(field_store_, "register");
+    auto heartbeats = latest_session_payloads(field_store_, "heartbeat");
+    char host_buf[256]{};
+    std::string local_host;
+    if (gethostname(host_buf, sizeof(host_buf)) == 0) local_host = host_buf;
+    for (auto entry : native) {
+        std::string sid = entry.value("session_id", "");
+        if (sid.empty()) continue;
+        auto reg = registrations.find(sid);
+        if (reg != registrations.end()) merge_session_metadata(entry, reg->second);
+        auto beat = heartbeats.find(sid);
+        if (beat != heartbeats.end()) merge_session_metadata(entry, beat->second);
+        if (!realm_filter.empty() && entry.value("realm", "") != realm_filter) continue;
+
+        int64_t last_heartbeat = entry.value("last_heartbeat_ms", int64_t(0));
+        bool fresh = last_heartbeat > 0 && now_ms - last_heartbeat <= ttl_seconds * 1000;
+        bool registry_active = entry.value("status", "") == "active";
+        int32_t pid = entry.value("pid", int32_t(0));
+        std::string host = entry.value("host", "");
+        bool local_pid = host.empty() || local_host.empty() || host == local_host;
+        bool pid_alive = pid <= 0 || !local_pid || kill(pid, 0) == 0 || errno == EPERM;
+        bool live = registry_active && fresh && pid_alive;
+        entry["is_live"] = live;
+        entry["heartbeat_age_ms"] = last_heartbeat > 0 ? now_ms - last_heartbeat : -1;
+        entry["status"] = live ? "active" : (registry_active ? "stale" : "closed");
+        if (active_only && !live) continue;
+        if (!status_filter.empty() && status_filter != "all"
+            && entry.value("status", "") != status_filter) continue;
         sessions_out.push_back(entry);
     }
 
-    // Sort by ts_ms descending.
+    // Sort by actual heartbeat rather than register-event retrieval order.
     std::sort(sessions_out.begin(), sessions_out.end(), [](const json& a, const json& b) {
-        return a.value("ts_ms", int64_t(0)) > b.value("ts_ms", int64_t(0));
+        return a.value("last_heartbeat_ms", int64_t(0))
+             > b.value("last_heartbeat_ms", int64_t(0));
     });
 
     std::ostringstream ss;

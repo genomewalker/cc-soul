@@ -4,6 +4,8 @@ Thread inference: decide whether current session extends/creates/pivots/seals a 
 Reads transcript JSONL, computes TF-IDF fingerprint, compares to existing threads.
 Pure stdlib — no numpy/sklearn.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import math
@@ -14,7 +16,15 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from task_ledger import thread_list, thread_create, thread_seal, thread_update
+from task_ledger import (
+    lease_claim,
+    lease_list,
+    session_bind,
+    thread_create,
+    thread_list,
+    thread_seal,
+    thread_update,
+)
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -30,6 +40,16 @@ _STOPWORDS = {
 }
 
 
+def _clean_user_text(text: str) -> str:
+    for tag in (
+        "environment_context", "recommended_plugins", "system-reminder",
+        "task-notification", "local-command-stdout", "local-command-stderr",
+    ):
+        text = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", " ", text,
+                      flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def extract_user_turns(transcript_path: str, limit: int = 15) -> list[str]:
     texts: list[str] = []
     try:
@@ -40,19 +60,59 @@ def extract_user_turns(transcript_path: str, limit: int = 15) -> list[str]:
                     continue
                 try:
                     entry = json.loads(line)
-                    if entry.get("type") != "user":
-                        continue
-                    msg = entry.get("message", {})
-                    if isinstance(msg, dict):
-                        for block in msg.get("content", []):
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                texts.append(block.get("text", ""))
-                    elif isinstance(msg, str):
-                        texts.append(msg)
+                    entry_type = entry.get("type")
+                    extracted: list[str] = []
+                    if entry_type == "user":
+                        msg = entry.get("message", {})
+                        if isinstance(msg, dict):
+                            content = msg.get("content", [])
+                            if isinstance(content, str):
+                                extracted.append(content)
+                            elif isinstance(content, list):
+                                for block in content:
+                                    if isinstance(block, dict) and block.get("type") == "text":
+                                        extracted.append(block.get("text", ""))
+                        elif isinstance(msg, str):
+                            extracted.append(msg)
+                    elif entry_type == "response_item":
+                        payload = entry.get("payload", {})
+                        if payload.get("type") == "message" and payload.get("role") == "user":
+                            for block in payload.get("content", []):
+                                if isinstance(block, dict) and block.get("type") in (
+                                    "text", "input_text", "output_text"
+                                ):
+                                    extracted.append(block.get("text", ""))
+                    text = _clean_user_text("\n".join(extracted))
+                    if text and text not in texts:
+                        texts.append(text)
                 except Exception:
                     pass
     except Exception:
         pass
+    return texts[-limit:]
+
+
+def snapshot_user_turns(snapshot_path: str, limit: int = 15) -> list[str]:
+    """Load the Stop hook's bounded user-turn history.
+
+    Thread inference only needs the latest messages for its fingerprint.  The
+    snapshot path avoids reopening a transcript that can be hundreds of MB.
+    stop-transcript-snapshot.py's add_user() already runs every value through
+    _clean_user_text before storing it, so re-cleaning here is redundant.
+    """
+    try:
+        payload = json.loads(Path(snapshot_path).read_text())
+    except (OSError, TypeError, ValueError):
+        return []
+    values = payload.get("user_turns", []) if isinstance(payload, dict) else []
+    if not isinstance(values, list):
+        return []
+    texts: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        if value not in texts:
+            texts.append(value)
     return texts[-limit:]
 
 
@@ -99,8 +159,22 @@ def _title_from_fingerprint(fp: dict) -> str:
     return " ".join(w for w, _ in top) or "session"
 
 
-def infer(transcript_path: str, realm: str, min_turns: int = 3) -> dict:
-    texts = extract_user_turns(transcript_path, limit=15)
+def _bind_and_claim(result: dict, session_id: str, thread_id: str,
+                    client: str, project_dir: str,
+                    transcript_path: str) -> dict:
+    if not session_id:
+        return result
+    session_bind(session_id, thread_id, client, project_dir, transcript_path)
+    # Claiming is deliberately non-forcing: two live frontends may work in the
+    # same repository, but they may not silently take over the same thread.
+    result["lease"] = lease_claim(thread_id, session_id)
+    return result
+
+
+def infer(transcript_path: str, realm: str, min_turns: int = 3,
+          session_id: str = "", client: str = "", project_dir: str = "",
+          user_turns: list[str] | None = None) -> dict:
+    texts = user_turns[-15:] if user_turns is not None else extract_user_turns(transcript_path, limit=15)
     if len(texts) < min_turns:
         return {"action": "skip", "reason": f"too few turns ({len(texts)}<{min_turns})"}
 
@@ -110,15 +184,22 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3) -> dict:
     now = time.time()
 
     active_threads = thread_list(realm=realm, status="active", limit=10)
+    live_leases = {
+        str(row.get("thread_id")): row
+        for row in lease_list(active_only=True)
+        if row.get("thread_id")
+    }
 
     if not active_threads:
         tid = thread_create(title=title, realm=realm, fingerprint=fp_json)
-        return {
+        result = {
             "action": "create",
             "thread_id": tid,
             "title": title,
             "top_terms": list(fp)[:8],
         }
+        return _bind_and_claim(result, session_id, tid, client, project_dir,
+                               transcript_path)
 
     best_score = 0.0
     best_thread: dict | None = None
@@ -133,33 +214,68 @@ def infer(transcript_path: str, realm: str, min_turns: int = 3) -> dict:
             best_thread = t
 
     if best_score >= 0.55:
+        owner = str(live_leases.get(best_thread["thread_id"], {}).get("session_id") or "")
+        if owner and owner != session_id:
+            tid = thread_create(title=title, realm=realm, fingerprint=fp_json)
+            result = {
+                "action": "create",
+                "reason": "matching_thread_locked",
+                "thread_id": tid,
+                "locked_thread_id": best_thread["thread_id"],
+                "score": round(best_score, 3),
+                "owner_session_id": owner,
+            }
+            return _bind_and_claim(result, session_id, tid, client, project_dir,
+                                   transcript_path)
         thread_update(best_thread["thread_id"], last_active_at=now, topic_fingerprint=fp_json)
-        return {
+        result = {
             "action": "extend",
             "thread_id": best_thread["thread_id"],
             "title": best_thread["title"],
             "score": round(best_score, 3),
         }
+        return _bind_and_claim(result, session_id, best_thread["thread_id"],
+                               client, project_dir, transcript_path)
 
     if best_score >= 0.30:
+        owner = str(live_leases.get(best_thread["thread_id"], {}).get("session_id") or "")
+        if owner and owner != session_id:
+            # Similar work may proceed concurrently, but it becomes a distinct
+            # thread rather than sealing or taking over the live owner's thread.
+            tid = thread_create(title=title, realm=realm, fingerprint=fp_json)
+            result = {
+                "action": "create",
+                "reason": "similar_thread_locked",
+                "thread_id": tid,
+                "locked_thread_id": best_thread["thread_id"],
+                "owner_session_id": owner,
+                "title": title,
+                "score": round(best_score, 3),
+            }
+            return _bind_and_claim(result, session_id, tid, client, project_dir,
+                                   transcript_path)
         thread_seal(best_thread["thread_id"], reason=f"topic_pivot score={best_score:.2f}")
         tid = thread_create(title=title, realm=realm, fingerprint=fp_json,
                             parent=best_thread["thread_id"])
-        return {
+        result = {
             "action": "pivot",
             "thread_id": tid,
             "sealed_id": best_thread["thread_id"],
             "title": title,
             "score": round(best_score, 3),
         }
+        return _bind_and_claim(result, session_id, tid, client, project_dir,
+                               transcript_path)
 
     tid = thread_create(title=title, realm=realm, fingerprint=fp_json)
-    return {
+    result = {
         "action": "create",
         "thread_id": tid,
         "title": title,
         "score": round(best_score, 3),
     }
+    return _bind_and_claim(result, session_id, tid, client, project_dir,
+                           transcript_path)
 
 
 def _cli() -> None:
@@ -167,8 +283,14 @@ def _cli() -> None:
     p.add_argument("--transcript", required=True)
     p.add_argument("--realm", default="")
     p.add_argument("--min-turns", type=int, default=3, dest="min_turns")
+    p.add_argument("--session-id", default="", dest="session_id")
+    p.add_argument("--client", default="")
+    p.add_argument("--project-dir", default="", dest="project_dir")
+    p.add_argument("--snapshot", default="")
     args = p.parse_args()
-    result = infer(args.transcript, args.realm, args.min_turns)
+    user_turns = snapshot_user_turns(args.snapshot) if args.snapshot else None
+    result = infer(args.transcript, args.realm, args.min_turns,
+                   args.session_id, args.client, args.project_dir, user_turns)
     print(json.dumps(result, default=str))
 
 

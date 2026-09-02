@@ -134,7 +134,8 @@ void FieldRpcHandler::register_session_transcript_tools() {
         {"inputSchema",{{"type","object"},{"properties",{
             {"session_id",{{"type","string"}}},{"realm",{{"type","string"}}},
             {"pid",{{"type","integer"}}},{"transcript_path",{{"type","string"}}},
-            {"project_dir",{{"type","string"}}},{"metadata",{{"type","string"}}}
+            {"project_dir",{{"type","string"}}},{"metadata",{{"type","string"}}},
+            {"client",{{"type","string"}}}
         }}}}
     });
     handlers_["session_register"] = [this](const json& p) { return tool_session_register(p); };
@@ -148,7 +149,8 @@ void FieldRpcHandler::register_session_transcript_tools() {
 
     tools_.push_back({{"name","session_list"},{"description","List active sessions"},
         {"inputSchema",{{"type","object"},{"properties",{
-            {"realm",{{"type","string"}}},{"status",{{"type","string"}}}
+            {"realm",{{"type","string"}}},{"status",{{"type","string"}}},
+            {"active_only",{{"type","boolean"}}},{"ttl_seconds",{{"type","integer"}}}
         }}}}
     });
     handlers_["session_list"] = [this](const json& p) { return tool_session_list(p); };

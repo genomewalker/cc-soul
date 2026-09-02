@@ -540,14 +540,27 @@ void QueueProcessor::run() {
                 } else if (tool == "session_register") {
                     std::string sid = args.value("session_id", "");
                     if (!sid.empty()) {
-                        field_store_.emit_event("session", "register", sid, args.dump());
+                        if (!args.contains("kind")) {
+                            json metadata = json::object();
+                            if (args.contains("metadata") && args["metadata"].is_object()) {
+                                metadata = args["metadata"];
+                            } else if (args.contains("metadata") && args["metadata"].is_string()) {
+                                metadata = json::parse(args["metadata"].get<std::string>(), nullptr, false);
+                            }
+                            args["kind"] = metadata.is_object()
+                                ? metadata.value("client", "unknown") : "unknown";
+                        }
+                        field_store_.emit_event("session", "register", sid, args.dump(), 0,
+                                                args.value("realm", "brahman"));
                         queue_count_++;
                     }
                 } else if (tool == "session_heartbeat") {
                     std::string sid = args.value("session_id", "");
                     if (!sid.empty()) {
+                        json metadata = args.contains("metadata")
+                            ? args["metadata"] : json::object();
                         field_store_.emit_event("session", "heartbeat", sid,
-                                                args.value("metadata", "{}"));
+                                                json({{"metadata", metadata}}).dump());
                         queue_count_++;
                     }
                 } else if (tool == "session_deregister") {
@@ -560,6 +573,7 @@ void QueueProcessor::run() {
                     std::string session_id = args.value("session_id", "");
                     std::string path = args.value("transcript_path", "");
                     if (!path.empty()) {
+                        args["transcript_id"] = session_id;
                         std::cerr << "[queue] transcript_register: session=" << session_id << " path=" << path << "\n";
                         field_store_.emit_event("transcript", "register",
                                                 session_id, args.dump());

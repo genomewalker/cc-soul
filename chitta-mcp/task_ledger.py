@@ -5,6 +5,8 @@ Pure stdlib — no external dependencies.
 
 CLI: python3 -m task_ledger <command> [--<field> <value> ...]
 """
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -64,11 +66,37 @@ CREATE TABLE IF NOT EXISTS artifacts (
     metadata_json      TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS thread_sessions (
+    session_id       TEXT PRIMARY KEY,
+    thread_id        TEXT REFERENCES threads(thread_id),
+    client           TEXT NOT NULL DEFAULT '',
+    project_dir      TEXT NOT NULL DEFAULT '',
+    transcript_path  TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'active'
+                         CHECK(status IN ('active','ended','interrupted','completed')),
+    started_at       REAL NOT NULL,
+    last_active_at   REAL NOT NULL,
+    ended_at         REAL,
+    metadata_json    TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS thread_leases (
+    thread_id          TEXT PRIMARY KEY REFERENCES threads(thread_id),
+    session_id         TEXT NOT NULL REFERENCES thread_sessions(session_id),
+    generation         INTEGER NOT NULL DEFAULT 1,
+    acquired_at        REAL NOT NULL,
+    last_heartbeat_at  REAL NOT NULL,
+    expires_at         REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_inbox_state_realm  ON inbox(delivery_state, target_realm);
 CREATE INDEX IF NOT EXISTS idx_inbox_task          ON inbox(task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_task      ON artifacts(task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_path      ON artifacts(path);
 CREATE INDEX IF NOT EXISTS idx_threads_realm_status ON threads(realm, status);
+CREATE INDEX IF NOT EXISTS idx_thread_sessions_thread ON thread_sessions(thread_id, status);
+CREATE INDEX IF NOT EXISTS idx_thread_sessions_project ON thread_sessions(project_dir, last_active_at);
+CREATE INDEX IF NOT EXISTS idx_thread_leases_session ON thread_leases(session_id);
 """
 
 
@@ -149,6 +177,177 @@ def thread_update(thread_id: str, **fields) -> bool:
             [*cols.values(), thread_id],
         )
         return cur.rowcount > 0
+
+
+# ─── Session/thread ownership ────────────────────────────────────────────────
+
+def session_bind(session_id: str, thread_id: str | None = None,
+                 client: str = "", project_dir: str = "",
+                 transcript_path: str = "", status: str = "active",
+                 metadata: dict | None = None) -> bool:
+    """Upsert the durable session→thread association used by both frontends."""
+    if not session_id:
+        return False
+    now = time.time()
+    with connect() as conn:
+        # BEGIN IMMEDIATE (same as lease_claim): the metadata read-merge-write
+        # below must not interleave with a concurrent bind for this session.
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT metadata_json FROM thread_sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        merged_metadata: dict = {}
+        if existing:
+            try:
+                merged_metadata = json.loads(existing["metadata_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                merged_metadata = {}
+        if metadata is not None:
+            merged_metadata.update(metadata)
+        conn.execute(
+            "INSERT INTO thread_sessions"
+            "(session_id,thread_id,client,project_dir,transcript_path,status,"
+            " started_at,last_active_at,metadata_json)"
+            " VALUES(?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(session_id) DO UPDATE SET"
+            " thread_id=COALESCE(excluded.thread_id,thread_sessions.thread_id),"
+            " client=CASE WHEN excluded.client<>'' THEN excluded.client ELSE thread_sessions.client END,"
+            " project_dir=CASE WHEN excluded.project_dir<>'' THEN excluded.project_dir ELSE thread_sessions.project_dir END,"
+            " transcript_path=CASE WHEN excluded.transcript_path<>'' THEN excluded.transcript_path ELSE thread_sessions.transcript_path END,"
+            " status=excluded.status,last_active_at=excluded.last_active_at,"
+            " ended_at=NULL,metadata_json=excluded.metadata_json",
+            (session_id, thread_id, client, project_dir, transcript_path, status,
+             now, now, json.dumps(merged_metadata)),
+        )
+    return True
+
+
+def session_touch(session_id: str) -> bool:
+    now = time.time()
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE thread_sessions SET last_active_at=?,status='active',ended_at=NULL"
+            " WHERE session_id=?",
+            (now, session_id),
+        )
+        conn.execute(
+            "UPDATE thread_leases SET last_heartbeat_at=?,expires_at=?"
+            " WHERE session_id=?",
+            (now, now + 900.0, session_id),
+        )
+        return cur.rowcount > 0
+
+
+def session_close(session_id: str, status: str = "ended") -> bool:
+    if status not in ("ended", "interrupted", "completed"):
+        status = "ended"
+    now = time.time()
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE thread_sessions SET status=?,last_active_at=?,ended_at=?"
+            " WHERE session_id=?",
+            (status, now, now, session_id),
+        )
+        conn.execute("DELETE FROM thread_leases WHERE session_id=?", (session_id,))
+        return cur.rowcount > 0
+
+
+def session_get(session_id: str) -> dict | None:
+    with connect() as conn:
+        return _row(conn.execute(
+            "SELECT * FROM thread_sessions WHERE session_id=?", (session_id,)
+        ).fetchone())
+
+
+def session_list(project_dir: str | None = None, status: str | None = None,
+                 thread_id: str | None = None, limit: int = 100) -> list[dict]:
+    sql = "SELECT * FROM thread_sessions WHERE 1=1"
+    params: list = []
+    if project_dir is not None:
+        sql += " AND project_dir=?"
+        params.append(project_dir)
+    if status is not None:
+        sql += " AND status=?"
+        params.append(status)
+    if thread_id is not None:
+        sql += " AND thread_id=?"
+        params.append(thread_id)
+    sql += " ORDER BY last_active_at DESC LIMIT ?"
+    params.append(limit)
+    with connect() as conn:
+        return _rows(conn.execute(sql, params).fetchall())
+
+
+def lease_claim(thread_id: str, session_id: str, ttl: int = 900,
+                force: bool = False) -> dict:
+    """Atomically acquire/renew exclusive ownership of a resumable thread."""
+    now = time.time()
+    expires = now + max(30, ttl)
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT * FROM thread_leases WHERE thread_id=?", (thread_id,)
+        ).fetchone()
+        if existing and existing["session_id"] != session_id \
+                and existing["expires_at"] > now and not force:
+            return {
+                "claimed": False,
+                "reason": "live_owner",
+                "thread_id": thread_id,
+                "owner_session_id": existing["session_id"],
+                "expires_at": existing["expires_at"],
+                "generation": existing["generation"],
+            }
+        same_owner = bool(existing and existing["session_id"] == session_id)
+        generation = existing["generation"] if same_owner \
+            else (existing["generation"] + 1 if existing else 1)
+        acquired_at = existing["acquired_at"] if same_owner else now
+        conn.execute(
+            "INSERT INTO thread_leases"
+            "(thread_id,session_id,generation,acquired_at,last_heartbeat_at,expires_at)"
+            " VALUES(?,?,?,?,?,?)"
+            " ON CONFLICT(thread_id) DO UPDATE SET"
+            " session_id=excluded.session_id,generation=excluded.generation,"
+            " acquired_at=excluded.acquired_at,last_heartbeat_at=excluded.last_heartbeat_at,"
+            " expires_at=excluded.expires_at",
+            (thread_id, session_id, generation, acquired_at, now, expires),
+        )
+        conn.execute(
+            "UPDATE thread_sessions SET thread_id=?,status='active',last_active_at=?"
+            " WHERE session_id=?",
+            (thread_id, now, session_id),
+        )
+        return {
+            "claimed": True,
+            "thread_id": thread_id,
+            "session_id": session_id,
+            "expires_at": expires,
+            "generation": generation,
+        }
+
+
+def lease_release(session_id: str, thread_id: str | None = None) -> bool:
+    sql = "DELETE FROM thread_leases WHERE session_id=?"
+    params: list = [session_id]
+    if thread_id:
+        sql += " AND thread_id=?"
+        params.append(thread_id)
+    with connect() as conn:
+        cur = conn.execute(sql, params)
+        return cur.rowcount > 0
+
+
+def lease_list(active_only: bool = True) -> list[dict]:
+    now = time.time()
+    sql = "SELECT * FROM thread_leases"
+    params: list = []
+    if active_only:
+        sql += " WHERE expires_at>?"
+        params.append(now)
+    sql += " ORDER BY last_heartbeat_at DESC"
+    with connect() as conn:
+        return _rows(conn.execute(sql, params).fetchall())
 
 
 # ─── Inbox ────────────────────────────────────────────────────────────────────
@@ -320,6 +519,44 @@ def _cli() -> None:
     s.add_argument("--last-active-at", type=float, dest="last_active_at")
     s.add_argument("--fingerprint")
 
+    s = sub.add_parser("session_bind")
+    s.add_argument("--session-id", required=True, dest="session_id")
+    s.add_argument("--thread-id", dest="thread_id")
+    s.add_argument("--client", default="")
+    s.add_argument("--project-dir", default="", dest="project_dir")
+    s.add_argument("--transcript-path", default="", dest="transcript_path")
+    s.add_argument("--status", default="active")
+    s.add_argument("--metadata")
+
+    s = sub.add_parser("session_touch")
+    s.add_argument("--session-id", required=True, dest="session_id")
+
+    s = sub.add_parser("session_close")
+    s.add_argument("--session-id", required=True, dest="session_id")
+    s.add_argument("--status", default="ended")
+
+    s = sub.add_parser("session_get")
+    s.add_argument("--session-id", required=True, dest="session_id")
+
+    s = sub.add_parser("session_list")
+    s.add_argument("--project-dir", dest="project_dir")
+    s.add_argument("--status")
+    s.add_argument("--thread-id", dest="thread_id")
+    s.add_argument("--limit", type=int, default=100)
+
+    s = sub.add_parser("lease_claim")
+    s.add_argument("--thread-id", required=True, dest="thread_id")
+    s.add_argument("--session-id", required=True, dest="session_id")
+    s.add_argument("--ttl", type=int, default=900)
+    s.add_argument("--force", action="store_true")
+
+    s = sub.add_parser("lease_release")
+    s.add_argument("--session-id", required=True, dest="session_id")
+    s.add_argument("--thread-id", dest="thread_id")
+
+    s = sub.add_parser("lease_list")
+    s.add_argument("--all", action="store_true", dest="include_expired")
+
     s = sub.add_parser("inbox_push")
     s.add_argument("--task-id", default="", dest="task_id")
     s.add_argument("--event-type", required=True, dest="event_type")
@@ -386,6 +623,27 @@ def _cli() -> None:
         if args.fingerprint:
             fields["topic_fingerprint"] = args.fingerprint
         result = thread_update(args.thread_id, **fields)
+    elif args.cmd == "session_bind":
+        metadata = json.loads(args.metadata) if args.metadata else None
+        result = session_bind(args.session_id, args.thread_id, args.client,
+                              args.project_dir, args.transcript_path,
+                              args.status, metadata)
+    elif args.cmd == "session_touch":
+        result = session_touch(args.session_id)
+    elif args.cmd == "session_close":
+        result = session_close(args.session_id, args.status)
+    elif args.cmd == "session_get":
+        result = session_get(args.session_id)
+    elif args.cmd == "session_list":
+        result = session_list(args.project_dir, args.status,
+                              args.thread_id, args.limit)
+    elif args.cmd == "lease_claim":
+        result = lease_claim(args.thread_id, args.session_id,
+                             args.ttl, args.force)
+    elif args.cmd == "lease_release":
+        result = lease_release(args.session_id, args.thread_id)
+    elif args.cmd == "lease_list":
+        result = lease_list(not args.include_expired)
     elif args.cmd == "inbox_push":
         payload = json.loads(args.payload) if args.payload else None
         result = inbox_push(args.task_id, args.event_type, args.digest,

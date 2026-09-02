@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import install as mcp_install
+from sync_tools import get_socket_path
 
 
 def _repo_root() -> Path:
@@ -321,7 +322,7 @@ def print_status() -> int:
     print(_status_line("chittad", _command_version(str(claude_home / "bin" / "chittad")) or "missing"))
     print(_status_line("daemon", _systemd_daemon_state()))
     print(_status_line("mind path", str(claude_home / "mind")))
-    print(_status_line("socket", str(claude_home / "mind" / "chittad.sock")))
+    print(_status_line("socket", get_socket_path()))
     print(_status_line("chitta-mcp", chitta_mcp_version or "missing"))
 
     print("\nClaude Code adapter")

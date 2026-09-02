@@ -31,8 +31,8 @@ jq \
   .hooks = (.hooks // {}) |
   .hooks.SessionStart = (strip_ours(.hooks.SessionStart) + [
     {"matcher":"startup","hooks":[{"type":"command","command":($root+"/hooks/codex-session-start-wrapper.sh"),"timeout":10}]},
-    {"matcher":"compact","hooks":[{"type":"command","command":($root+"/hooks/compact-restore-hook.sh"),"timeout":5}]},
-    {"matcher":"resume","hooks":[{"type":"command","command":($root+"/hooks/codex-session-start-wrapper.sh"),"timeout":10},{"type":"command","command":($root+"/hooks/resume-inject-hook.sh"),"timeout":3}]},
+    {"matcher":"compact","hooks":[{"type":"command","command":($root+"/hooks/codex-compact-restore-wrapper.sh"),"timeout":12}]},
+    {"matcher":"resume","hooks":[{"type":"command","command":($root+"/hooks/codex-session-start-wrapper.sh"),"timeout":10}]},
     {"matcher":"clear","hooks":[{"type":"command","command":($root+"/hooks/codex-session-start-wrapper.sh"),"timeout":10}]}
   ]) |
   .hooks.UserPromptSubmit = (strip_ours(.hooks.UserPromptSubmit) + [
@@ -49,7 +49,10 @@ jq \
     {"matcher":"ScheduleWakeup","hooks":[{"type":"command","command":($root+"/hooks/codex-pretool-wrapper.sh ScheduleWakeup"),"timeout":10}]}
   ]) |
   .hooks.Stop = (strip_ours(.hooks.Stop) + [
-    {"matcher":".*","hooks":[{"type":"command","command":($root+"/hooks/codex-stop-hook.sh")}]}
+    {"matcher":".*","hooks":[{"type":"command","command":($root+"/hooks/codex-stop-hook.sh"),"timeout":30}]}
+  ]) |
+  .hooks.SessionEnd = (strip_ours(.hooks.SessionEnd) + [
+    {"matcher":".*","hooks":[{"type":"command","command":($root+"/hooks/session-end-hook.sh"),"timeout":5}]}
   ]) |
   .hooks.PostToolUse = (strip_ours(.hooks.PostToolUse) + [
     {"matcher":"Bash","hooks":[{"type":"command","command":($root+"/hooks/log-bash-history.sh"),"timeout":5},{"type":"command","command":($root+"/hooks/post-bash-hook.sh"),"timeout":5}]},

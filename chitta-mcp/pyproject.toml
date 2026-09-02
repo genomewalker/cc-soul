@@ -26,4 +26,8 @@ chitta-mcp-sync = "sync_tools:sync"
 chitta-stack = "stack:main"
 
 [tool.setuptools]
-py-modules = ["server", "install", "sync_tools", "tools_static", "stack"]
+py-modules = [
+    "server", "install", "sync_tools", "tools_static", "stack",
+    "task_ledger", "resume_capsule", "resume_selector",
+    "session_registry", "thread_inference",
+]

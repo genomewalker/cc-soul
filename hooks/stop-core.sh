@@ -69,6 +69,21 @@ if [[ -z "$SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
 fi
 [[ -z "$SESSION_ID" ]] && SESSION_ID="unknown"
 
+# Stop fires once per completed assistant turn for both frontends. Refresh the
+# shared session and thread lease before any of the hook's early-exit paths.
+# Rate-limited: the daemon's liveness TTL is 900s, so a heartbeat every single
+# turn (2 python3 spawns + sqlite opens) is far more often than needed — skip
+# while the last one is still under 120s old.
+_PLUGIN_DIR="$(resolve_cc_soul_root 2>/dev/null || dirname "$SCRIPT_DIR")"
+if [[ "$SESSION_ID" != "unknown" ]]; then
+    _HB_MARKER="${MIND_PATH}/.hb_${SESSION_ID}"
+    _HB_AGE=999999
+    [[ -f "$_HB_MARKER" ]] && _HB_AGE=$(( $(date +%s) - $(stat -c %Y "$_HB_MARKER" 2>/dev/null || echo 0) ))
+    if [[ "$_HB_AGE" -ge 120 ]]; then
+        printf '%s' "$INPUT" | registry_call 1 heartbeat --queued && touch "$_HB_MARKER" 2>/dev/null
+    fi
+fi
+
 # Kill msg-notify daemon immediately — before any early-exit paths
 # Use both PID file and process pattern to catch orphans
 if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
@@ -175,194 +190,60 @@ map_category() {
     esac
 }
 
-# Transcript helpers: support both JSON array transcripts and Codex JSONL.
-# The three transcript_* extractors below are called 9 times between them, each
-# re-parsing the whole transcript in a fresh python3. Every call site sits inside
-# $( ), so a shell-variable cache would die with the subshell — memoize on disk.
-# ceiling: assumes TRANSCRIPT_PATH does not change while the hook runs.
+# Build one bounded transcript snapshot for every consumer below.  Codex and
+# Claude both provide last_assistant_message on Stop, so the transcript is only
+# needed for incremental tool/file metadata, recent user turns, and telemetry.
+# The cursor is committed after lossless turn storage; a timed-out hook retries
+# the same slice rather than silently losing it.
 _TCACHE=$(mktemp -d)
 trap 'rm -rf "$_TCACHE"' EXIT
+_SNAPSHOT_FILE="$_TCACHE/stop-snapshot.json"
+_SNAPSHOT_HELPER="$SCRIPT_DIR/stop-transcript-snapshot.py"
+_CURSOR_DIR="${CC_SOUL_HOOK_STATE_DIR:-${MIND_PATH}/hook-state}"
+_CURSOR_KEY=$(printf '%s\n%s\n' "$SESSION_ID" "$TRANSCRIPT_PATH" | sha256sum | awk '{print $1}')
+_CURSOR_FILE="${_CURSOR_DIR}/${_CURSOR_KEY}.json"
+mkdir -p "$_CURSOR_DIR" 2>/dev/null || true
+
+if [[ -x "$_SNAPSHOT_HELPER" ]]; then
+    printf '%s' "$INPUT" | CC_SOUL_PLUGIN_DIR="$_PLUGIN_DIR" timeout "${CC_SOUL_SNAPSHOT_TIMEOUT:-20}" \
+        python3 "$_SNAPSHOT_HELPER" snapshot \
+        --transcript "$TRANSCRIPT_PATH" \
+        --cursor "$_CURSOR_FILE" \
+        --bootstrap-bytes "${CC_SOUL_STOP_BOOTSTRAP_BYTES:-4194304}" \
+        --max-increment-bytes "${CC_SOUL_STOP_MAX_INCREMENT_BYTES:-33554432}" \
+        > "$_SNAPSHOT_FILE" 2>/dev/null || true
+fi
+
+if ! jq -e '.format == "cc-soul-stop-snapshot-v1"' "$_SNAPSHOT_FILE" >/dev/null 2>&1; then
+    _event_response=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null || true)
+    jq -nc --arg response "$_event_response" --arg session_id "$SESSION_ID" '
+      {
+        format:"cc-soul-stop-snapshot-v1", session_id:$session_id,
+        response:$response, last_user:"", user_turns:[], tools:[], files:[],
+        tool_spans:[], counts:{user:0,assistant:0}, markers:[],
+        token_usage:{total_input_tokens:0,total_output_tokens:0,total_cache_read:0,total_cache_creation:0,n_messages:0},
+        next_state:null
+      }' > "$_SNAPSHOT_FILE"
+fi
 
 transcript_role_text() {
-    local role="$1" _cf="$_TCACHE/role.$role"
-    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" "$role" <<'PY' > "$_cf"
-import json, sys
-p, role = sys.argv[1], sys.argv[2]
-def text_from_content(content):
-    if isinstance(content, list):
-        out=[]
-        for b in content:
-            if isinstance(b, dict) and b.get("type") in ("text","input_text","output_text"):
-                t=b.get("text","")
-                if t: out.append(t)
-        return "\n".join(out)
-    if isinstance(content, str):
-        return content
-    return ""
-def emit(role_v, content_v):
-    if role_v == role:
-        t=text_from_content(content_v).strip()
-        if t: print(t)
-with open(p, "r", encoding="utf-8", errors="ignore") as f:
-    first = f.read(1); f.seek(0)
-    if first == "[":
-        try:
-            arr = json.load(f)
-        except Exception:
-            arr = []
-        for it in arr:
-            emit(it.get("role",""), it.get("message",{}).get("content",[]))
-    else:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            try:
-                d=json.loads(line)
-            except Exception:
-                continue
-            t=d.get("type","")
-            # Claude Code format: type="assistant"|"user" with message.content
-            if t in ("assistant","user"):
-                emit(t, d.get("message",{}).get("content",[]))
-                continue
-            # Codex format: type="response_item" with payload.role/content
-            if t != "response_item":
-                continue
-            pl=d.get("payload",{})
-            if pl.get("type") != "message":
-                continue
-            emit(pl.get("role",""), pl.get("content",[]))
-PY
-    cat "$_cf"
+    case "$1" in
+        assistant) jq -r '.response // ""' "$_SNAPSHOT_FILE" ;;
+        user) jq -r '.last_user // ""' "$_SNAPSHOT_FILE" ;;
+        *) return 0 ;;
+    esac
 }
 
 transcript_tool_names() {
-    local _cf="$_TCACHE/tool_names"
-    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" <<'PY' > "$_cf"
-import json, sys
-p=sys.argv[1]
-seen=set(); out=[]
-def add_tool(name):
-    if name and name not in seen:
-        seen.add(name); out.append(name)
-with open(p, "r", encoding="utf-8", errors="ignore") as f:
-    first = f.read(1); f.seek(0)
-    if first == "[":
-        try: arr=json.load(f)
-        except Exception: arr=[]
-        for it in arr:
-            if it.get("role")!="assistant": continue
-            for b in it.get("message",{}).get("content",[]) or []:
-                if isinstance(b, dict) and b.get("type")=="tool_use":
-                    add_tool(b.get("name",""))
-    else:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            try: d=json.loads(line)
-            except Exception: continue
-            t=d.get("type","")
-            # Claude Code format: type="assistant", tool_use blocks in message.content
-            if t=="assistant":
-                for b in d.get("message",{}).get("content",[]) or []:
-                    if isinstance(b, dict) and b.get("type")=="tool_use":
-                        add_tool(b.get("name",""))
-                continue
-            # Codex format: type="response_item" with payload.type="function_call"
-            if t!="response_item": continue
-            pl=d.get("payload",{})
-            if pl.get("type")!="function_call": continue
-            add_tool(pl.get("name",""))
-print("\n".join(out))
-PY
-    cat "$_cf"
+    jq -r '.tools[]?' "$_SNAPSHOT_FILE"
 }
 
 transcript_tool_files_json() {
-    local _cf="$_TCACHE/tool_files"
-    [[ -f "$_cf" ]] || python3 - "$TRANSCRIPT_PATH" <<'PY' > "$_cf"
-import json, sys
-p=sys.argv[1]
-seen=[]; seen_set=set()
-def add_path(x):
-    if not x or not isinstance(x, str): return
-    if x in seen_set: return
-    seen_set.add(x); seen.append(x)
-with open(p, "r", encoding="utf-8", errors="ignore") as f:
-    first = f.read(1); f.seek(0)
-    if first == "[":
-        try: arr=json.load(f)
-        except Exception: arr=[]
-        for it in arr:
-            if it.get("role")!="assistant": continue
-            for b in it.get("message",{}).get("content",[]) or []:
-                if isinstance(b, dict) and b.get("type")=="tool_use":
-                    inp=b.get("input",{}) if isinstance(b.get("input",{}), dict) else {}
-                    add_path(inp.get("file_path")); add_path(inp.get("path"))
-    else:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            try: d=json.loads(line)
-            except Exception: continue
-            t=d.get("type","")
-            # Claude Code format: type="assistant", tool_use blocks in message.content
-            if t=="assistant":
-                for b in d.get("message",{}).get("content",[]) or []:
-                    if isinstance(b, dict) and b.get("type")=="tool_use":
-                        inp=b.get("input",{})
-                        if not isinstance(inp, dict): inp={}
-                        add_path(inp.get("file_path")); add_path(inp.get("path"))
-                continue
-            # Codex format: type="response_item" with payload.type="function_call"
-            if t!="response_item": continue
-            pl=d.get("payload",{})
-            if pl.get("type")!="function_call": continue
-            args=pl.get("arguments")
-            if isinstance(args, str):
-                try: args=json.loads(args)
-                except Exception: args={}
-            if not isinstance(args, dict): args={}
-            add_path(args.get("file_path")); add_path(args.get("path"))
-print(json.dumps(seen))
-PY
-    cat "$_cf"
+    jq -c '.files // []' "$_SNAPSHOT_FILE"
 }
 
 transcript_role_count() {
-    local role="$1"
-    python3 - "$TRANSCRIPT_PATH" "$role" <<'PY'
-import json, sys
-p, role = sys.argv[1], sys.argv[2]
-count = 0
-def has_text(content):
-    if isinstance(content, list):
-        for b in content:
-            if isinstance(b, dict) and b.get("type") in ("text","input_text","output_text") and b.get("text","").strip():
-                return True
-        return False
-    return isinstance(content, str) and bool(content.strip())
-with open(p, "r", encoding="utf-8", errors="ignore") as f:
-    first = f.read(1); f.seek(0)
-    if first == "[":
-        try: arr = json.load(f)
-        except Exception: arr = []
-        for it in arr:
-            if it.get("role","") == role and has_text(it.get("message",{}).get("content",[])):
-                count += 1
-    else:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            try: d=json.loads(line)
-            except Exception: continue
-            if d.get("type") != "response_item": continue
-            pl=d.get("payload",{})
-            if pl.get("type") != "message": continue
-            if pl.get("role","") == role and has_text(pl.get("content",[])):
-                count += 1
-print(count)
-PY
+    jq -r --arg role "$1" '.counts[$role] // 0' "$_SNAPSHOT_FILE"
 }
 
 # Extract last assistant message
@@ -388,12 +269,19 @@ FILES_JSON=$(transcript_tool_files_json 2>/dev/null || echo "[]")
 HAS_ERROR=false
 echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=true
 
-# Store assistant turn
-safe_queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
+# Store assistant turn, then advance the transcript cursor.  If durable queueing
+# fails, leave the cursor untouched so the next Stop event retries this slice.
+if safe_queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"; then
+    timeout 3 python3 "$_SNAPSHOT_HELPER" commit \
+        --snapshot "$_SNAPSHOT_FILE" --cursor "$_CURSOR_FILE" \
+        >/dev/null 2>&1 || true
+    record_ingest_metric "true"
+else
+    record_ingest_metric "false"
+fi
 
 # Raw turn ingest removed: verbatim turn_assistant episodes flooded semantic recall.
 # Lossless storage (store_turn above) preserves the full transcript.
-record_ingest_metric "true"
 
 # Structured LLM extraction is designed in docs/STRUCTURED_EXTRACTOR_DESIGN.md.
 # The `distill_turn` op has no daemon-side handler yet, so enqueue is held
@@ -426,27 +314,8 @@ EVENT_SNAPSHOT=""
 
 # ── Per-turn lightweight ledger save (mood=in_progress) ──────────────────
 # Runs every turn so /clear can find a recent ledger even without a pre-compact.
-# Extract user's last message as the snapshot goal for the resume card.
-_last_user=$(python3 - "$TRANSCRIPT_PATH" <<'PY' 2>/dev/null | tail -1 | head -c 300
-import json, sys
-p = sys.argv[1]
-msgs = []
-with open(p, "r", errors="ignore") as f:
-    for line in f:
-        try:
-            d = json.loads(line.strip())
-        except Exception:
-            continue
-        if d.get("type") == "user":
-            c = d.get("message", {}).get("content", "")
-            if isinstance(c, list):
-                c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
-            if isinstance(c, str) and c.strip():
-                msgs.append(c.strip())
-if msgs:
-    print(msgs[-1])
-PY
-)
+# Extract user's last message from the shared incremental snapshot.
+_last_user=$(transcript_role_text "user" | head -c 300)
 _next_line=$(echo "$RESPONSE" | grep -iEm1 'next[: ].{10,}|TODO[: ].{10,}' | head -c 150 || true)
 _snap_text=""
 [[ -n "$_last_user" ]] && _snap_text="Goal: ${_last_user}"
@@ -460,6 +329,40 @@ queue_write "ledger_save" "$(jq -n \
     --arg snapshot "$_snap_text" \
     --arg updated_at "$_updated" \
     '{session_id: $session_id, project: $project, mood: $mood, snapshot: $snapshot, updated_at: $updated_at}')" 2>/dev/null || true
+
+# Infer/update the task thread every completed turn, then bind this exact
+# session to it. A session-scoped marker replaces the old global
+# .current_thread_id, which was unsafe when Claude and Codex shared a project.
+_MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
+if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -f "$_MCP_DIR/thread_inference.py" ]]; then
+    _client="claude"
+    [[ "$TRANSCRIPT_PATH" == *"/.codex/sessions/"* ]] && _client="codex"
+    _project_dir=$(echo "$INPUT" | jq -r '.cwd // .project_dir // empty' 2>/dev/null || true)
+    [[ -z "$_project_dir" ]] && _project_dir="$PWD"
+    # Fire-and-forget: thread inference is enrichment, not part of the turn's
+    # critical path, and the Stop hook no longer needs to block on it. The
+    # EXIT trap removes _TCACHE (and _SNAPSHOT_FILE inside it) as soon as this
+    # script returns, so hand the background job its own persistent copy of
+    # the snapshot and let it clean that copy up itself.
+    _TI_SNAPSHOT="$(mktemp "${TMPDIR:-/tmp}/cc-soul-thread-snapshot.XXXXXX")"
+    cp "$_SNAPSHOT_FILE" "$_TI_SNAPSHOT" 2>/dev/null || true
+    (
+        _infer_out=$(timeout 5 python3 "$_MCP_DIR/thread_inference.py" \
+            --transcript "$TRANSCRIPT_PATH" --realm "${REALM:-}" \
+            --snapshot "$_TI_SNAPSHOT" \
+            --session-id "$SESSION_ID" --client "$_client" \
+            --project-dir "$_project_dir" 2>/dev/null || echo "{}")
+        _thread_id=$(echo "$_infer_out" | jq -r '.thread_id // empty' 2>/dev/null || true)
+        if [[ -n "$_thread_id" ]]; then
+            echo "$_thread_id" > "$MIND_PATH/.current_thread_${SESSION_ID}" 2>/dev/null || true
+            # Global copy: post-bash-hook (fallback) and shell-integration's
+            # PROMPT_COMMAND (no session context at all) read this path.
+            echo "$_thread_id" > "$MIND_PATH/.current_thread_id" 2>/dev/null || true
+        fi
+        rm -f "$_TI_SNAPSHOT" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    disown
+fi
 # ─────────────────────────────────────────────────────────────────────────
 
 # Error checkpoint
@@ -486,17 +389,6 @@ if [[ "$EVENT_CHECKPOINT" == "true" ]]; then
         --arg mood "$EVENT_MOOD" \
         --arg snapshot "$EVENT_SNAPSHOT" \
         '{session_id: $session_id, project: $project, transcript_path: $transcript_path, mood: $mood, snapshot: $snapshot}')
-    # ── Task ledger: thread inference ───────────────────────────────────────
-    _PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
-    _MCP_DIR="$_PLUGIN_DIR/chitta-mcp"
-    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-        _infer_out=$(timeout 5 python3 "$_MCP_DIR/thread_inference.py"             --transcript "$TRANSCRIPT_PATH" --realm "${REALM:-}" 2>/dev/null || echo "{}")
-        _thread_id=$(echo "$_infer_out" | python3 -c             "import sys,json; d=json.load(sys.stdin); print(d.get('thread_id',''))" 2>/dev/null || echo "")
-        if [[ -n "$_thread_id" ]]; then
-            echo "$_thread_id" > "$MIND_PATH/.current_thread_id" 2>/dev/null || true
-        fi
-    fi
-    # ── End task ledger ───────────────────────────────────────────────────────
     queue_write "ledger_save" "$EVENT_ARGS"
 fi
 
@@ -618,9 +510,10 @@ done <<< "$RESPONSE"
 # ===========================================
 # AUTO-LEARNING: Detect missed learning opportunities
 # ===========================================
-# Read user's last message (saved by UserPromptSubmit)
-LAST_USER_MSG=""
-if [[ -f "$MIND_PATH/.last_user_message" ]]; then
+# Prefer the session-scoped transcript snapshot.  The legacy global marker is
+# only a compatibility fallback and is unsafe when Claude and Codex overlap.
+LAST_USER_MSG=$(transcript_role_text "user")
+if [[ -z "$LAST_USER_MSG" && -f "$MIND_PATH/.last_user_message" ]]; then
     LAST_USER_MSG=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null)
 fi
 
@@ -644,24 +537,8 @@ _turns_since_store=$(( TURN_INDEX - _last_store ))
 if [[ "$CLAUDE_LEARNED" == "false" && $_turns_since_store -ge $STORE_INTERVAL && ${TURN_INDEX:-0} -gt 0 ]]; then
     # Extract a meaningful summary: first non-empty non-marker assistant line
     _auto_summary=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -5 | head -c 300 | tr '\n' ' ')
-    # Also pull the last tool result (file edited, command run) as context
-    _auto_tool=""
-    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-        _auto_tool=$(python3 -c "
-import json,sys
-lines=open('$TRANSCRIPT_PATH').readlines()[-100:]
-tools=[]
-for l in lines:
-    try:
-        d=json.loads(l)
-        if d.get('type')=='tool_use' and d.get('name') in ('Bash','Edit','Write'):
-            inp=d.get('input',{})
-            c=inp.get('command') or inp.get('file_path','')
-            if c: tools.append(c[:80])
-    except: pass
-print('; '.join(tools[-3:]))
-" 2>/dev/null || true)
-    fi
+    # Reuse current-turn tool metadata from the shared snapshot.
+    _auto_tool=$(transcript_tool_names | tail -3 | paste -sd ';' -)
     _auto_content="[auto-store turn=$TURN_INDEX realm=${REALM:-brahman}]"
     [[ -n "$_auto_summary" ]] && _auto_content="$_auto_content $_auto_summary"
     [[ -n "$_auto_tool" ]] && _auto_content="$_auto_content | tools: $_auto_tool"
@@ -796,16 +673,8 @@ fi
 # ==============================================
 # SUS Phase 3: Extract session token usage (periodic)
 # ==============================================
-if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && $STOP_ENRICH_TURN -eq 1 ]]; then
-    _sus3_token_usage=$(grep -F '"type":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | \
-        jq -s '[.[].message.usage // {}] |
-        {
-            total_input_tokens: (map(.input_tokens // 0) | add // 0),
-            total_output_tokens: (map(.output_tokens // 0) | add // 0),
-            total_cache_read: (map(.cache_read_input_tokens // 0) | add // 0),
-            total_cache_creation: (map(.cache_creation_input_tokens // 0) | add // 0),
-            n_messages: length
-        }' 2>/dev/null || echo '{"n_messages":0}')
+if [[ $STOP_ENRICH_TURN -eq 1 ]]; then
+    _sus3_token_usage=$(jq -c '.token_usage // {n_messages:0}' "$_SNAPSHOT_FILE" 2>/dev/null || echo '{"n_messages":0}')
 
     _sus3_n_msg=$(echo "$_sus3_token_usage" | jq -r '.n_messages // 0')
 
@@ -959,7 +828,7 @@ fi
 # ===========================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
-    "$SCRIPT_DIR/span-capture.sh" "$TRANSCRIPT_PATH" "$LAST_USER_MSG" 2>&1 || true
+    "$SCRIPT_DIR/span-capture.sh" "$_SNAPSHOT_FILE" "$LAST_USER_MSG" 2>&1 || true
 fi
 
 # Clean up temp files
@@ -970,6 +839,9 @@ rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PR
 # ===========================================
 SESSION_ID="${SESSION_ID:-unknown}"
 TURNS=$(transcript_role_count "assistant")
+if ! [[ "$TURNS" =~ ^[0-9]+$ ]] || [[ "$TURNS" -le 0 ]]; then
+    TURNS=$(( (TURN_INDEX + 1) / 2 ))
+fi
 
 # Extract active files from tool calls
 ACTIVE_FILES=$(transcript_tool_files_json 2>/dev/null || echo "[]")
@@ -978,8 +850,9 @@ ACTIVE_FILES=$(transcript_tool_files_json 2>/dev/null || echo "[]")
 # Extract tools used
 TOOLS_USED=$(transcript_tool_names | paste -sd ', ' - | head -c 200)
 
-# Extract assistant text for marker detection
-ASSISTANT_TEXT=$(transcript_role_text "assistant" | tail -n 5000)
+# Marker detection is turn-scoped. Historical markers are accumulated by the
+# snapshot helper instead of rematerializing all assistant messages here.
+ASSISTANT_TEXT="$RESPONSE"
 
 # Extract typed markers
 DECISIONS="[]"
@@ -994,17 +867,10 @@ DISCOVERIES="[]"
 DISCOVERIES_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '\[(SOLUTION|GOTCHA)\].*$' | head -10)
 [[ -n "$DISCOVERIES_RAW" ]] && DISCOVERIES=$(echo "$DISCOVERIES_RAW" | jq -R . | jq -s .)
 
-# Extract pending tasks from transcript
+# The transcript is not a task database. Task/thread state is already owned by
+# task_ledger, so the old regex over every historical JSON line was both costly
+# and structurally unreliable.
 TODOS="[]"
-TASK_INFO=$(grep -oE '"subject"\s*:\s*"[^"]*".*"status"\s*:\s*"(pending|in_progress)"' "$TRANSCRIPT_PATH" 2>/dev/null | head -5 || true)
-if [[ -n "$TASK_INFO" ]]; then
-    TODOS=$(echo "$TASK_INFO" | while read -r line; do
-        subj=$(echo "$line" | grep -oE '"subject"\s*:\s*"[^"]*"' | sed 's/"subject"\s*:\s*"//' | sed 's/"$//')
-        stat=$(echo "$line" | grep -oE '"status"\s*:\s*"[^"]*"' | sed 's/"status"\s*:\s*"//' | sed 's/"$//')
-        echo "{\"content\":\"$subj\",\"status\":\"$stat\"}"
-    done | jq -s .)
-    [[ -z "$TODOS" || "$TODOS" == "null" ]] && TODOS="[]"
-fi
 
 # Detect mood from session content
 if echo "$RESPONSE" | grep -qiE '(error|failed|bug|stuck)'; then
@@ -1187,29 +1053,8 @@ fi
 SESSION_SUMMARY_FILE="${MIND_PATH}/.session_summary_written_${SESSION_ID}"
 if [[ -n "${SESSION_ID:-}" && -n "${TRANSCRIPT_PATH:-}" && -f "$TRANSCRIPT_PATH" \
       && ! -f "$SESSION_SUMMARY_FILE" && "${TURN_INDEX:-0}" -ge 5 ]]; then
-    _decisions=$(python3 - <<'PYEOF' 2>/dev/null
-import json, sys, re, os
-path = os.environ.get("TRANSCRIPT_PATH", "")
-if not path or not os.path.exists(path): sys.exit(0)
-lines = open(path).readlines()[-600:]
-hits = []
-for line in lines:
-    try:
-        d = json.loads(line)
-        role = d.get("role","")
-        content = ""
-        if isinstance(d.get("content"), str):
-            content = d["content"]
-        elif isinstance(d.get("content"), list):
-            content = " ".join(b.get("text","") for b in d["content"] if isinstance(b,dict))
-        if not content: continue
-        for m in re.finditer(r'\[(DECISION|SOLUTION|CORRECTION|MILESTONE)\]\s*([^\n]{10,200})', content):
-            hits.append(f"[{m.group(1)}] {m.group(2).strip()}")
-    except: pass
-if hits:
-    print("\n".join(hits[:12]))
-PYEOF
-    )
+    _decisions=$(jq -r '.markers[]? | select(test("^\\[(DECISION|SOLUTION|CORRECTION|MILESTONE)\\]"))' \
+        "$_SNAPSHOT_FILE" 2>/dev/null | head -12)
     if [[ -n "$_decisions" ]]; then
         _realm_json=$(printf '%s' "${REALM:-brahman}" | jq -Rs .)
         _content_json=$(printf '[session-summary:%s] %s' "${SESSION_ID:0:8}" "$_decisions" | jq -Rs .)
@@ -1221,5 +1066,12 @@ PYEOF
     fi
 fi
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Outcome ledger tap (additive, Phase 1): closes out this Stop cycle so the
+# credit report can bound each injection's outcome window.
+if [[ -f "${SCRIPT_DIR}/outcome-ledger.sh" ]]; then
+    source "${SCRIPT_DIR}/outcome-ledger.sh" 2>/dev/null
+    ledger_append '{"event":"session_end"}' "$SESSION_ID" 2>/dev/null || true
+fi
 
 exit 0

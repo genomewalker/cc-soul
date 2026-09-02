@@ -1,59 +1,54 @@
 ---
 name: resume
 description: Resume a thread by loading its ~800-token context capsule
-execution: direct
 ---
 
-Load the resume capsule for a thread and surface it as context for continuing work.
+# Resume a thread safely across Claude and Codex
 
-Usage: `/resume` (shows picker) or `/resume <thread_id_prefix>`
+Use the shared `chitta-mcp/resume_selector.py`; do not read the global newest
+transcript and do not use `.current_thread_id`. Claude and Codex may be live in
+the same project on different threads, but only one live session may own a
+given thread.
 
-## Implementation
+## Select
 
-### If a thread_id or prefix was given as argument
+Resolve this plugin's `chitta-mcp` directory as described by the recap skill.
+Determine the invoking client from its `CODEX_*` or `CLAUDE_*` session
+environment. Run:
 
 ```bash
-_MCP_DIR=$(find $HOME/.claude/plugins/cache/genomewalker-cc-soul -name 'task_ledger.py' 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-
-# Find matching thread
-python3 "$_MCP_DIR/task_ledger.py" thread_list --status active --limit 20
+python3 "$_MCP_DIR/resume_selector.py" --project-dir "$PWD" --client "$CLIENT"
 ```
 
-Match the argument against thread_id prefix or title (case-insensitive substring). If multiple match, present them via AskUserQuestion.
+For `/resume <thread id prefix or title>`, add `--thread <argument>`. Always
+show the returned live Claude/Codex sessions so the user can see parallel work
+and ownership.
 
-### If no argument — show picker
+- On `locked`, report the owner session/client/model/thread and stop.
+- On `registry_unavailable`, stop and retry after Chitta responds; do not infer
+  that no session is live.
+- On `ambiguous`, show the candidates and ask which thread/session to use.
+- On `none`, say no resumable project-exact thread was found and offer `/tasks`.
+- On `selected`, rerun the identical command with `--claim`.
 
-List active threads:
-```bash
-python3 "$_MCP_DIR/task_ledger.py" thread_list --status active --limit 10
-```
+Continue only if the atomic claim returns `claimed: true`. Never pass `--force`
+unless the user explicitly requests takeover of a known live owner.
 
-Present with AskUserQuestion. Each option: `<title> [<thread_id[:8]>] — <realm>`
+## Load
 
-### Load the capsule
+Use the claimed `selected.thread_id`:
 
 ```bash
 python3 "$_MCP_DIR/resume_capsule.py" build --thread-id <thread_id>
 ```
 
-The result JSON has a `summary` field — display it verbatim. It contains:
-- Active tasks with job IDs, git branches, conda envs, blockers
-- Last 3 completed tasks with digests
-- Failed tasks
-- Recent artifacts with sizes
-- Next work items
+Display the capsule's `summary` verbatim. It includes active tasks, job IDs,
+branches, environments, blockers, completed work, failures, artifacts, and
+next actions. Then orient to its realm, branch, environment, and active files.
 
-### After displaying
+If capsule construction fails, fall back to the selected exact transcript via
+the recap procedure. Do not fall back to another session by recency.
 
-Ask: "Continue from here?" If yes, set the current thread context:
-```bash
-echo "<thread_id>" > "$HOME/.claude/mind/.current_thread_id"
-```
-
-And note the realm, git branch, conda env, and open files from the capsule so you can orient yourself immediately.
-
-## Error cases
-
-- Thread not found: say so, offer to run `/tasks` instead.
-- Capsule build fails: fall back to raw thread_list output.
-- DB missing: "No task history yet — tasks are tracked automatically once you run analyses."
+The successful lease and session-to-thread binding are the durable current
+context. No global marker file is required. Prompt and Stop heartbeats from
+either frontend keep the lease alive; SessionEnd releases it.

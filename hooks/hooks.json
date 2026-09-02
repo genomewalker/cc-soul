@@ -91,7 +91,21 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
+            "timeout": 30,
             "statusMessage": "preserving state\u2026"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-end-hook.sh",
+            "timeout": 5,
+            "statusMessage": "releasing session…"
           }
         ]
       }

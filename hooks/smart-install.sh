@@ -274,33 +274,26 @@ create_directories() {
 install_hooks() {
     local hooks_src="$PLUGIN_DIR/hooks"
     local hooks_dst="${HOME}/.claude/hooks"
+    local hooks_manifest="$hooks_src/install-manifest.txt"
 
     mkdir -p "$hooks_dst"
 
-    # Individual hook scripts
-    local hooks=(
-        subconscious.sh
-        session-start-hook.sh
-        prompt-hook.sh
-        prompt-core.sh
-        stop-hook.sh
-        stop-core.sh
-        pre-compact-hook.sh
-        pre-tool-hook.sh
-        log-bash-history.sh
-        post-bash-hook.sh
-    )
-
-    for script in "${hooks[@]}"; do
+    [[ -f "$hooks_manifest" ]] || {
+        echo "[cc-soul] Missing canonical hook manifest: $hooks_manifest" >&2
+        return 1
+    }
+    while IFS= read -r script; do
+        [[ -z "$script" || "$script" == \#* ]] && continue
         if [[ -f "$hooks_src/$script" ]]; then
             if [[ ! -f "$hooks_dst/$script" ]] || \
                ! cmp -s "$hooks_src/$script" "$hooks_dst/$script"; then
-                cp "$hooks_src/$script" "$hooks_dst/"
-                chmod +x "$hooks_dst/$script"
+                local stage="$hooks_dst/.${script}.cc-soul-install"
+                install -m 0755 "$hooks_src/$script" "$stage"
+                mv -f "$stage" "$hooks_dst/$script"
                 echo "[cc-soul] Installed $script"
             fi
         fi
-    done
+    done < "$hooks_manifest"
 }
 
 # Configure hooks in settings.json
@@ -315,6 +308,28 @@ configure_hooks() {
 
     # Skip if settings file doesn't exist
     [[ ! -f "$settings_file" ]] && return 0
+
+    # Plugin hooks.json is canonical when enabled. Clean old user-level copies
+    # so this legacy entrypoint cannot reintroduce double execution.
+    if jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings_file" &>/dev/null; then
+        local cleanup_stage="${settings_file}.cc-soul-cleanup"
+        jq '
+          def is_cc_soul_hook:
+            ((.command? // "") | test("(subconscious|session-start-hook|compact-restore-hook|resume-inject-hook|prompt-hook|stop-hook|session-end-hook|pre-compact-hook|subagent-stop-hook|file-changed-hook|pre-tool-hook|post-bash-hook|log-bash-history|memory-intercept)\\.sh"));
+          def strip_cc_soul:
+            map(.hooks = ((.hooks // []) | map(select((is_cc_soul_hook | not)))))
+            | map(select((.hooks | length) > 0));
+          .hooks = ((.hooks // {}) | with_entries(.value |= strip_cc_soul))
+          | .hooks = (.hooks | with_entries(select((.value | length) > 0)))
+        ' "$settings_file" > "$cleanup_stage"
+        if ! cmp -s "$settings_file" "$cleanup_stage"; then
+            mv -f "$cleanup_stage" "$settings_file"
+            echo "[cc-soul] Plugin enabled; removed duplicate user-level cc-soul hooks"
+        else
+            rm -f "$cleanup_stage"
+        fi
+        return 0
+    fi
 
     local current
     current=$(cat "$settings_file")
@@ -342,14 +357,14 @@ configure_hooks() {
 
     # UserPromptSubmit: memory resonance on each message
     if ! echo "$updated" | jq -e '.hooks.UserPromptSubmit[]? | select(.hooks[]?.command | contains("prompt-hook.sh"))' &>/dev/null; then
-        local prompt_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/prompt-hook.sh","statusMessage":"resonating…"}]}'
+        local prompt_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/prompt-hook.sh","timeout":10,"statusMessage":"resonating…"}]}'
         updated=$(echo "$updated" | jq --argjson hook "$prompt_hook" '.hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) + [$hook])')
         ((added++)) || true
     fi
 
     # Stop: preserve state and auto-learn
     if ! echo "$updated" | jq -e '.hooks.Stop[]? | select(.hooks[]?.command | contains("stop-hook.sh"))' &>/dev/null; then
-        local stop_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/stop-hook.sh","statusMessage":"preserving state…"}]}'
+        local stop_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/stop-hook.sh","timeout":30,"statusMessage":"preserving state…"}]}'
         updated=$(echo "$updated" | jq --argjson hook "$stop_hook" '.hooks.Stop = ((.hooks.Stop // []) + [$hook])')
         ((added++)) || true
     fi

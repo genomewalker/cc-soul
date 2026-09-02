@@ -1,239 +1,115 @@
 ---
 name: recap
 description: "Token-savvy session continuation. Rebuilds working context from transcript + soul memories in ~1500 tokens instead of replaying full history. Use when starting a new session to continue previous work."
-aliases: [context-resume, session-rebuild]
-execution: direct
 ---
 
-# Recap: Token-Savvy Session Continuation
+# Recap: multimodel-safe session continuation
 
-Reconstructs working context from a previous session's transcript and soul memories,
-fitting the result into ~1500 tokens.
+Reconstruct a bounded working context from an exact Claude or Codex transcript.
+Claude and Codex share one Chitta registry and one thread ledger. Never choose a
+transcript from global file recency and never resume a live session.
 
-## Step 0: Detect Environment
+## 1. Resolve the shared implementation
 
-**First, determine which tool you are running in:**
+Locate `chitta-mcp/resume_selector.py` in this plugin root. Prefer
+`$CC_SOUL_PLUGIN_DIR`, then the source root containing this skill, then the
+newest installed `~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*`,
+then the Python environment from the `chitta-mcp` executable (read its shebang
+and import `resume_selector` to locate the module directory).
+If the selector is unavailable, stop and report that cc-soul must be updated;
+do not fall back to "newest transcript" heuristics.
 
-```bash
-# Codex: ~/.codex/sessions/ exists and has recent content
-# Claude Code: ~/.claude/projects/ with encoded-cwd dirs
-ls ~/.codex/sessions/ 2>/dev/null && echo "CODEX" || echo "CLAUDE"
-```
+Set the invoking client to `codex` when a `CODEX_*` session variable is present,
+otherwise `claude` when a `CLAUDE_*` session variable is present. The selector
+also identifies the current session from its registered ancestor PID.
 
-Then follow the appropriate path below.
+## 2. Inventory before selecting
 
----
-
-## Claude Code Path
-
-### Step 1 (Claude): Identify the session
-
-```bash
-# Transcript files: ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
-# encoded-cwd = working dir with / → - and leading -
-# Example: /maps/projects/foo/bar → -maps-projects-foo-bar
-ls -t ~/.claude/projects/-<encoded-cwd>/*.jsonl | head -5
-```
-
-Pick the **second most recent** (first = current session being written to).
-Session_id = filename without `.jsonl`.
-
-### Step 2 (Claude): Extract key signals
-
-Read user messages in two passes:
-
-```tool
-mcp__chitta__read_transcript({
-  session_id: "<id>",
-  role_filter: "user",
-  max_chars_per_turn: 150,
-  limit: 30
-})
-```
-
-```tool
-mcp__chitta__read_transcript({
-  session_id: "<id>",
-  role_filter: "user",
-  max_chars_per_turn: 150,
-  start_turn: -30,
-  limit: 30
-})
-```
-
-Read last 15 assistant messages:
-
-```tool
-mcp__chitta__read_transcript({
-  session_id: "<id>",
-  role_filter: "assistant",
-  max_chars_per_turn: 200,
-  start_turn: -20,
-  limit: 15
-})
-```
-
----
-
-## Codex Path
-
-### Step 1 (Codex): Find recent sessions for current project
+Run:
 
 ```bash
-# Codex transcripts: ~/.codex/sessions/YYYY/MM/DD/rollout-<datetime>-<uuid>.jsonl
-# Session meta (first line) contains cwd — use to filter by current project
-CWD=$(pwd)
-python3 - <<'EOF'
-import os, json, glob
-cwd = os.getcwd()
-sessions = []
-for f in glob.glob(os.path.expanduser("~/.codex/sessions/**/*.jsonl"), recursive=True):
-    try:
-        first = json.loads(open(f).readline())
-        if first.get("payload", {}).get("cwd") == cwd:
-            sessions.append((os.path.getmtime(f), f))
-    except: pass
-for mtime, path in sorted(sessions, reverse=True)[:5]:
-    sid = os.path.basename(path).replace(".jsonl", "").split("-", 3)[-1]  # UUID part
-    size = os.path.getsize(path)
-    print(f"{path}  [{sid}]  {size//1024}KB")
-EOF
+python3 "$_MCP_DIR/resume_selector.py" --project-dir "$PWD" --client "$CLIENT"
 ```
 
-Pick the most recent (the current session has no prior turns worth recapping).
-Session path = the full file path. Session_id = the UUID suffix after the timestamp.
+Arguments map as follows:
 
-### Step 2 (Codex): Extract key signals from transcript
+- `/recap <session_id>`: add `--session-id <session_id>`.
+- `/recap <thread id or title>`: add `--thread <value>`.
+- `/recap last N`: do not select; show the first N candidates.
 
-Use python3 to parse the Codex JSONL format (different from Claude's format):
+Always surface the `live_sessions` inventory before proceeding. Show client,
+model, short session ID, project, thread, and PID. This inventory includes both
+Claude and Codex, so parallel work in the same project is visible.
 
-```bash
-# Read user messages from a Codex transcript
-python3 - <<'EOF'
-import json, sys
+Handle `status` strictly:
 
-TRANSCRIPT = "/path/to/rollout-....jsonl"  # fill in
-MAX_CHARS = 150
-LIMIT = 40
-ROLE_FILTER = "user"  # or "assistant" or "" for both
+- `registry_unavailable`: Chitta did not answer the liveness query. Stop and
+  retry later; never interpret a timeout as an empty live-session list.
+- `locked`: report the owning live session/client/thread. Do not read, recap, or
+  resume it.
+- `ambiguous`: show the candidate session/client/project/thread choices and ask
+  the user to choose. Never break a tie using mtime alone.
+- `none`: report that no registered or project-exact historical transcript was
+  found.
+- `selected`: continue with that exact session and transcript only.
 
-turns = []
-for line in open(TRANSCRIPT):
-    d = json.loads(line)
-    if d.get("type") == "response_item":
-        p = d["payload"]
-        role = p.get("role", "")
-        if ROLE_FILTER and role != ROLE_FILTER:
-            continue
-        content = p.get("content", "")
-        if isinstance(content, list):
-            content = " ".join(b.get("text","") for b in content if isinstance(b,dict) and b.get("type")=="text")
-        content = str(content).strip()
-        if content:
-            turns.append((role, content[:MAX_CHARS]))
+## 3. Atomically claim the thread
 
-# First half
-for role, text in turns[:20]:
-    print(f"[{role}] {text}")
-print("--- tail ---")
-for role, text in turns[-20:]:
-    print(f"[{role}] {text}")
-EOF
-```
+Before reading or presenting continuation context, rerun the same command with
+`--claim`. This closes the race between selection and takeover. Continue only
+when `claim.claimed` is true. If the claim reports `live_owner`, show that owner
+and stop. Never use `--force` unless the user explicitly asks to take over a
+known live thread.
 
-Run twice: once for user messages (ROLE_FILTER="user"), once for assistant (ROLE_FILTER="assistant").
+The selector may create a durable thread for a historical transcript that
+predates thread tracking. It records the current session as the new owner; do
+not write a global `.current_thread_id` file.
 
-**When reading user messages, IGNORE these noise patterns:**
-- `<local-command-*>` blocks (model switches, login, plugin commands)
-- `<command-name>` blocks (slash commands)
-- `<task-notification>` blocks (agent completions)
-- `<system-reminder>` blocks (hook output)
-- `[Request interrupted by user]`
-- Repeated identical messages
+## 4. Read bounded exact context
 
-**Focus ONLY on lines that express intent:** questions, requests, corrections, confirmations.
+Use the selected `session_id` with Chitta's exact transcript reader, or parse
+the selected `transcript_path` if MCP is unavailable. Read at most:
 
----
+- First 20 and last 30 user turns, 180 characters each.
+- Last 20 assistant turns, 240 characters each.
 
-## Step 3: Get soul context
+Support both formats:
 
-Query soul for memories relevant to what was being worked on:
+- Claude: top-level `type=user|assistant`, content in `message.content`.
+- Codex: top-level `type=response_item`, with
+  `payload.type=message`, `payload.role`, and `payload.content`.
 
-```tool
-mcp__chitta__smart_context({
-  task: "<summarize what user was working on from step 2>",
-  mode: "fast",
-  limit: 300
-})
-```
+Ignore environment blocks, system/developer reminders, command markup, task
+notifications, interruption markers, and duplicate messages. User corrections
+and explicit scope changes have highest priority.
 
-## Step 4: Get current environment state
+Query Chitta smart context using the recovered task as the query, then inspect
+`git status --short` and `git log --oneline -5` in the selected project.
 
-```bash
-git status --short
-git log --oneline -5
-```
+## 5. Produce the recap
 
-## Step 5: Synthesize the recap block
-
-Combine everything into a structured block under 1500 tokens:
+Keep the result near 1500 tokens:
 
 ```markdown
-## Session Recap: <session_id>
+## Session Recap: <short session id> (<client/model>)
 
 ### What was being done
-<2-3 sentences from user messages — the primary task and subtasks>
+<primary task and scope>
 
-### Key decisions made
-<Bullet list of important choices/fixes from assistant messages>
+### Key decisions
+<important choices and user corrections>
 
 ### Current state
-- **Branch**: <branch>
-- **Uncommitted**: <files or "clean">
+- Project/branch
+- Uncommitted files
+- Other live Claude/Codex sessions in this project
 
 ### Pending work
-<What was left unfinished — derived from last user messages + soul context>
+<unfinished work and next action>
 
 ### Key context
-<Critical facts that would be lost without replay — error patterns,
- architectural decisions, corrections the user made>
+<critical errors, constraints, and architectural facts>
 ```
 
-## Rules
-
-1. **Never replay full tool outputs** — those are the token killers
-2. **User corrections are highest priority** — always include them
-3. **Skip system-reminder content** — it's noise for resume purposes
-4. **Skip task-notification content** — ephemeral
-5. **Decisions > descriptions** — "chose X because Y" not "I looked at file Z"
-6. **Include file paths only if they're actively being edited**
-
-## Token Budget
-
-| Section | Target |
-|---------|--------|
-| What was being done | 200 tokens |
-| Key decisions | 400 tokens |
-| Current state | 150 tokens |
-| Pending work | 300 tokens |
-| Key context | 450 tokens |
-| **Total** | **~1500 tokens** |
-
-## When to use /recap vs /compact
-
-| Situation | Action | Why |
-|-----------|--------|-----|
-| Same session, context growing | `/compact` | Preserves conversation, trims tool output |
-| New session, continue previous work | `/recap` | ~1500 tokens vs replaying full history |
-| Session idle >5 min (cache expired) | New session + `/recap` | Avoids cache-write repricing of stale context |
-| >20 subagents spawned | `/compact` or new + `/recap` | Each subagent cold-starts a cache |
-| Transcript >20MB | New session + `/recap` | Reduces cache-write volume |
-
-**Cost perspective**: A 50MB session that resumes after cache expiry re-prices all context
-at cache-write rates (~$18.75/MTok). Starting fresh with /recap costs ~$0.03.
-
-## Arguments
-
-- No args: resume from most recent previous session for current project (auto-detect)
-- `<session_id>`: resume from specific session
-- `last N`: show last N sessions to pick from
+Do not replay full tool output. Prefer decisions and pending work over a diary of
+actions. Mention files only when they are still active.

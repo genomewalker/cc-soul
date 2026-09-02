@@ -19,6 +19,7 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 # Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
+PLUGIN_DIR="$(resolve_cc_soul_root 2>/dev/null || dirname "$SCRIPT_DIR")"
 
 SOCKET_PATH=$(get_socket_path)
 
@@ -62,6 +63,13 @@ fi
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 daemon_available || exit 0
 
+# Register every Claude session through the same adapter used by Codex.  This
+# records the exact transcript, project, frontend kind, and long-lived parent
+# PID in Chitta and in the shared task ledger before any early-exit path.
+if [[ -n "$SESSION_ID" ]]; then
+    printf '%s' "$INPUT" | registry_call 8 register --client claude
+fi
+
 # Detect subagent session: SubagentStart hook writes sentinel before session starts
 SENTINEL="${MIND_PATH}/.pending_subagent_start"
 IS_SUBAGENT=false
@@ -74,8 +82,8 @@ if [[ "$HOOK_SOURCE" == "startup" && -f "$SENTINEL" ]]; then
 fi
 
 if [[ "$IS_SUBAGENT" == "true" ]]; then
-    # Register session only (no output — SubagentStart hook already injected context)
-    [[ -n "$SESSION_ID" ]] && timeout "$MAX_WAIT" "$CHITTA_BIN" session_register --session_id "$SESSION_ID" --realm "brahman" --pid "${PPID:-$$}" >/dev/null 2>&1 || true
+    # The shared adapter above registered this session. SubagentStart already
+    # injected context, so this hook remains silent.
     exit 0
 fi
 
@@ -119,9 +127,6 @@ fi
 # Background maintenance: auto-index and realm-retag
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Determine plugin directory (for script paths)
-PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
-
 # Auto-index codebase (10-minute rate limit built into script)
 if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
     AUTO_INDEX_SCRIPT="$PLUGIN_DIR/scripts/auto-index.sh"
@@ -138,10 +143,8 @@ if [[ -x "$REALM_RETAG_SCRIPT" ]]; then
     disown
 fi
 
-# Queue transcript registration (fire-and-forget)
+# Trigger transcript distillation once the shared registry has recorded it.
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-    queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
-
     # Trigger distillation of any pending un-distilled transcripts (handles post-compaction case)
     queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
 fi
@@ -153,14 +156,10 @@ if [[ -d "$STAGING_DIR" ]] && ls "$STAGING_DIR"/*.json >/dev/null 2>&1; then
     mv "$STAGING_DIR"/*.json "$STAGING_DIR/archive/" 2>/dev/null || true
 fi
 
-# Register session in cross-session messaging registry
-# Use CLI instead of netcat (netcat to socket doesn't work reliably)
-# PPID = Claude's PID (parent of this hook script)
+# Export session environment variables for other processes. Registration itself
+# is handled above by session_registry.py for both Claude and Codex.
 if [[ -n "$SESSION_ID" ]]; then
     CLAUDE_PID=${PPID:-$$}
-    timeout "$MAX_WAIT" chitta session_register --session_id "$SESSION_ID" --realm "$REALM" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
-
-    # Export session environment variables for other processes
     SESSION_ENV_FILE="$HOME/.claude/mind/.session_env_$$"
     mkdir -p "$(dirname "$SESSION_ENV_FILE")"
     cat > "$SESSION_ENV_FILE" << EOF
@@ -425,7 +424,7 @@ else
             --limit 6 \
             --text-only 2>/dev/null || true)
 
-        _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -v '^\[episode\]' | wc -l)
+        _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -vE '^(#[0-9]+ )?(\[[0-9]+%\] )?\[episode\]' | wc -l)
 
         # Pass 2: unfiltered fallback — covers projects whose memories live under brahman
         if [[ "${_recall_lines:-0}" -le 1 ]]; then
@@ -434,13 +433,13 @@ else
                 --query "${_project_kw} ${_recall_query}" \
                 --limit 6 \
                 --text-only 2>/dev/null || true)
-            _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -v '^\[episode\]' | wc -l)
+            _recall_lines=$(echo "$_recall_raw" | grep -v '^\s*$' | grep -v 'No memories' | grep -vE '^(#[0-9]+ )?(\[[0-9]+%\] )?\[episode\]' | wc -l)
         fi
 
         if [[ "${_recall_lines:-0}" -gt 1 ]]; then
             echo ""
             echo "[recall:${REALM}]"
-            echo "$_recall_raw" | grep -v '^\[episode\]' | grep -v 'No memories' | head -c 1200
+            echo "$_recall_raw" | grep -vE '^(#[0-9]+ )?(\[[0-9]+%\] )?\[episode\]' | grep -v 'No memories' | head -c 1200
             echo ""
             echo "[/recall:${REALM}]"
             echo "[soul] If context above is sparse for the current task, call mcp__chitta__recall or mcp__chitta__smart_context for deeper retrieval."

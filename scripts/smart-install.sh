@@ -221,11 +221,35 @@ build_chitta_field() {
     local src_root="$1"
     local cf_dir="$src_root/chitta-field"
 
-    # Already built? Check if .a exists AND is newer than the source (ffi.rs is the key file)
+    # Preserve the embedding identity of an existing personal deployment. The
+    # public release defaults to 1024-d BGE, while older/personal stores commonly
+    # use 768-d Nomic. Rebuilding without this inference creates query vectors
+    # that the existing chitta-field store rejects after an otherwise successful
+    # upgrade.
+    if [[ -z "${CHITTA_EMBED_DIM:-}" ]]; then
+        local existing_service="${HOME}/.config/systemd/user/chittad.service"
+        local existing_model=""
+        if [[ -f "$existing_service" ]]; then
+            existing_model=$(grep -oP '(?<=--embed-model )\S+' "$existing_service" 2>/dev/null || true)
+        fi
+        if [[ "$existing_model" == *nomic-embed-text* ]]; then
+            export CHITTA_EMBED_DIM=768
+            export CHITTA_EMBED_MODEL_ID="${CHITTA_EMBED_MODEL_ID:-nomic-embed-text-v1.5}"
+            echo "[cc-soul] Preserving embedding identity: ${CHITTA_EMBED_MODEL_ID} (${CHITTA_EMBED_DIM}-d)"
+        fi
+    fi
+
+    local build_identity="${CHITTA_EMBED_DIM:-1024}:${CHITTA_EMBED_MODEL_ID:-bge-large-en-v1.5}"
+    local identity_file="$cf_dir/target/release/.chitta-embed-identity"
+
+    # Already built? Require both fresh source and the same embedding identity.
     local lib_a="$cf_dir/target/release/libchitta_field.a"
     if [[ -f "$lib_a" ]]; then
         local ffi_src="$cf_dir/src/ffi.rs"
-        if [[ ! -f "$ffi_src" ]] || [[ "$lib_a" -nt "$ffi_src" ]]; then
+        local prior_identity=""
+        [[ -f "$identity_file" ]] && prior_identity=$(<"$identity_file")
+        if { [[ ! -f "$ffi_src" ]] || [[ "$lib_a" -nt "$ffi_src" ]]; } && \
+           [[ "$prior_identity" == "$build_identity" ]]; then
             echo "[cc-soul] chitta-field already built (up to date)"
             export CHITTA_FIELD_ROOT="$cf_dir"
             return 0
@@ -276,20 +300,28 @@ build_chitta_field() {
     local pyo3_python=""
     if [[ -n "${PYO3_PYTHON:-}" && -x "${PYO3_PYTHON}" ]]; then
         pyo3_python="${PYO3_PYTHON}"
+    elif command -v chitta-mcp &>/dev/null; then
+        local mcp_python
+        mcp_python=$(head -n 1 "$(command -v chitta-mcp)" 2>/dev/null | sed 's/^#!//')
+        [[ -x "$mcp_python" ]] && pyo3_python="$mcp_python"
     elif command -v python3 &>/dev/null; then
         pyo3_python="$(command -v python3)"
     elif command -v python &>/dev/null; then
         pyo3_python="$(command -v python)"
     fi
+    export CHITTA_BUILD_PYTHON="$pyo3_python"
 
+    rm -f "$lib_a"
     (cd "$cf_dir" && \
         unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER LDFLAGS CFLAGS CXXFLAGS PYO3_ENVIRONMENT_SIGNATURE VIRTUAL_ENV CONDA_PREFIX && \
-        RUSTC="$rustc_cmd" PYO3_PYTHON="$pyo3_python" PYTHON_SYS_EXECUTABLE="$pyo3_python" "$cargo_cmd" build --release 2>&1 | tail -8)
+        RUSTC="$rustc_cmd" PYO3_PYTHON="$pyo3_python" PYTHON_SYS_EXECUTABLE="$pyo3_python" "$cargo_cmd" build --release --lib 2>&1 | tail -8)
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2
         return 1
     fi
+
+    printf '%s\n' "$build_identity" > "$identity_file"
 
     export CHITTA_FIELD_ROOT="$cf_dir"
     echo "[cc-soul] chitta-field built"
@@ -359,20 +391,42 @@ build_from_source() {
     if [[ -n "$CHITTA_FIELD_ROOT" ]]; then
         cmake_args="$cmake_args -DCHITTA_FIELD_ROOT=$CHITTA_FIELD_ROOT"
     fi
+    # CMake's FindPython3 needs development headers/libraries, not merely the
+    # PATH-first interpreter. Reuse the interpreter already validated for pyo3
+    # so conda/HPC installs with a minimal system Python configure correctly.
+    if [[ -n "${CHITTA_BUILD_PYTHON:-}" && -x "${CHITTA_BUILD_PYTHON}" ]]; then
+        local python_root
+        python_root=$(cd "$(dirname "${CHITTA_BUILD_PYTHON}")/.." && pwd)
+        cmake_args="$cmake_args -DPython3_EXECUTABLE=${CHITTA_BUILD_PYTHON} -DPython3_ROOT_DIR=${python_root}"
+
+        # HPC login nodes often expose an old system GCC even when the Python
+        # environment carries the modern C++ toolchain required by chittad
+        # (C++20 semaphores). Prefer that matching compiler pair when present.
+        local conda_cc="$python_root/bin/x86_64-conda-linux-gnu-gcc"
+        local conda_cxx="$python_root/bin/x86_64-conda-linux-gnu-g++"
+        if [[ -x "$conda_cc" && -x "$conda_cxx" ]]; then
+            cmake_args="$cmake_args -DCMAKE_C_COMPILER=${conda_cc} -DCMAKE_CXX_COMPILER=${conda_cxx}"
+        fi
+    fi
     # Pass rustup-managed cargo explicitly so cmake doesn't pick up conda/system cargo
     local _cargo_exe
     _cargo_exe=$(find_cargo 2>/dev/null) && cmake_args="$cmake_args -DCARGO_EXECUTABLE=$_cargo_exe"
     cmake_args="$cmake_args -DCHITTA_WITH_LLAMA_CPP=ON"
 
     # Configure - cmake .. runs from build_dir, so source is one level up ($src_chitta)
-    if ! cmake "$src_chitta" $cmake_args 2>&1 | tail -10; then
+    cmake "$src_chitta" $cmake_args 2>&1 | tail -10
+    local cmake_rc=${PIPESTATUS[0]}
+    if [[ $cmake_rc -ne 0 ]]; then
         echo "[cc-soul] ERROR: cmake configuration failed" >&2
         return 1
     fi
 
-    # Build (outputs to $src_root/bin per CMakeLists.txt)
+    # Build only the production binaries. Some optional helpers/tests have
+    # additional host-runtime requirements and must not block installation.
     local nproc_val=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-    if ! make -j"$nproc_val" 2>&1 | tail -10; then
+    cmake --build . --target chitta_tool chittad --parallel "$nproc_val" 2>&1 | tail -10
+    local make_rc=${PIPESTATUS[0]}
+    if [[ $make_rc -ne 0 ]]; then
         echo "[cc-soul] ERROR: build failed" >&2
         return 1
     fi
@@ -490,33 +544,27 @@ link_user_binaries() {
 install_hooks() {
     local hooks_src="$PLUGIN_DIR/hooks"
     local hooks_dst="${HOME}/.claude/hooks"
+    local hooks_manifest="$hooks_src/install-manifest.txt"
 
     mkdir -p "$hooks_dst"
 
-    # Individual hook scripts
-    local hooks=(
-        subconscious.sh
-        session-start-hook.sh
-        prompt-hook.sh
-        stop-hook.sh
-        pre-compact-hook.sh
-        pre-tool-hook.sh
-        post-bash-hook.sh
-        log-bash-history.sh
-    )
-
-    for script in "${hooks[@]}"; do
+    [[ -f "$hooks_manifest" ]] || {
+        echo "[cc-soul] Missing canonical hook manifest: $hooks_manifest" >&2
+        return 1
+    }
+    while IFS= read -r script; do
+        [[ -z "$script" || "$script" == \#* ]] && continue
         if [[ -f "$hooks_src/$script" ]]; then
-            # Ensure plugin cache copy is executable (Claude Code runs hooks from here)
             chmod +x "$hooks_src/$script"
             if [[ ! -f "$hooks_dst/$script" ]] || \
                ! cmp -s "$hooks_src/$script" "$hooks_dst/$script"; then
-                cp "$hooks_src/$script" "$hooks_dst/"
-                chmod +x "$hooks_dst/$script"
+                local stage="$hooks_dst/.${script}.cc-soul-install"
+                install -m 0755 "$hooks_src/$script" "$stage"
+                mv -f "$stage" "$hooks_dst/$script"
                 echo "[cc-soul] Installed $script"
             fi
         fi
-    done
+    done < "$hooks_manifest"
 }
 
 # Install CLAUDE.md as user-level rule
@@ -539,8 +587,32 @@ install_python_packages() {
         return 0
     fi
 
-    local python_cmd
-    python_cmd=$(command -v python3 || command -v python)
+    local python_cmd=""
+    # Prefer the interpreter behind an existing chitta-mcp entrypoint.  On HPC
+    # hosts PATH may put an old PyPy/conda `python3` first even though the working
+    # MCP install uses a newer CPython; selecting PATH blindly then makes the
+    # requires-python check fail and the quiet pip command leaves MCP stale.
+    if command -v chitta-mcp &>/dev/null; then
+        local existing_entry existing_python
+        existing_entry=$(command -v chitta-mcp)
+        existing_python=$(head -n 1 "$existing_entry" 2>/dev/null | sed 's/^#!//')
+        if [[ -x "$existing_python" ]] && \
+           "$existing_python" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' 2>/dev/null; then
+            python_cmd="$existing_python"
+        fi
+    fi
+    if [[ -z "$python_cmd" ]]; then
+        local candidate
+        for candidate in "$(command -v python3 2>/dev/null || true)" \
+                         "$(command -v python 2>/dev/null || true)" /usr/bin/python3; do
+            [[ -x "$candidate" ]] || continue
+            if "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' 2>/dev/null; then
+                python_cmd="$candidate"
+                break
+            fi
+        done
+    fi
+    [[ -n "$python_cmd" ]] || { echo "[cc-soul] Python >=3.10 not found; skipping Python packages" >&2; return 0; }
 
     # Install chitta-mcp (MCP server)
     local mcp_dir="$PLUGIN_DIR/chitta-mcp"
@@ -551,7 +623,7 @@ install_python_packages() {
         else
             # Reinstall if version changed
             local installed_ver
-            installed_ver=$(python3 -c "import importlib.metadata; print(importlib.metadata.version('chitta-mcp'))" 2>/dev/null || echo "")
+            installed_ver=$($python_cmd -c "import importlib.metadata; print(importlib.metadata.version('chitta-mcp'))" 2>/dev/null || echo "")
             local pkg_ver
             pkg_ver=$(grep '^version' "$mcp_dir/pyproject.toml" 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo "")
             [[ -n "$pkg_ver" && "$installed_ver" != "$pkg_ver" ]] && reinstall=true
@@ -608,9 +680,27 @@ configure_hooks() {
     # Skip if settings file doesn't exist
     [[ ! -f "$settings_file" ]] && return 0
 
-    # Skip if cc-soul plugin is enabled (plugin manages its own hooks via hooks.json)
+    # When the plugin is enabled, its hooks.json is authoritative. Remove
+    # legacy user-level cc-soul hook entries instead of merely skipping new
+    # additions; otherwise Claude executes both copies with different timeouts.
     if jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings_file" &>/dev/null; then
-        echo "[cc-soul] Plugin enabled, skipping hook config (plugin manages hooks)"
+        local cleanup_stage="${settings_file}.cc-soul-cleanup"
+        jq '
+          def is_cc_soul_hook:
+            ((.command? // "") | test("(subconscious|session-start-hook|compact-restore-hook|resume-inject-hook|prompt-hook|stop-hook|session-end-hook|pre-compact-hook|subagent-stop-hook|file-changed-hook|pre-tool-hook|post-bash-hook|log-bash-history|memory-intercept)\\.sh"));
+          def strip_cc_soul:
+            map(.hooks = ((.hooks // []) | map(select((is_cc_soul_hook | not)))))
+            | map(select((.hooks | length) > 0));
+          .hooks = ((.hooks // {}) | with_entries(.value |= strip_cc_soul))
+          | .hooks = (.hooks | with_entries(select((.value | length) > 0)))
+        ' "$settings_file" > "$cleanup_stage"
+        if ! cmp -s "$settings_file" "$cleanup_stage"; then
+            mv -f "$cleanup_stage" "$settings_file"
+            echo "[cc-soul] Plugin enabled; removed duplicate user-level cc-soul hooks"
+        else
+            rm -f "$cleanup_stage"
+            echo "[cc-soul] Plugin enabled; hook config already canonical"
+        fi
         return 0
     fi
 
@@ -658,15 +748,22 @@ configure_hooks() {
 
     # UserPromptSubmit: memory resonance on each message
     if ! echo "$updated" | jq -e '.hooks.UserPromptSubmit[]? | select(.hooks[]?.command | contains("prompt-hook.sh"))' &>/dev/null; then
-        local prompt_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/prompt-hook.sh","statusMessage":"resonating…"}]}'
+        local prompt_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/prompt-hook.sh","timeout":10,"statusMessage":"resonating…"}]}'
         updated=$(echo "$updated" | jq --argjson hook "$prompt_hook" '.hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) + [$hook])')
         ((added++)) || true
     fi
 
     # Stop: preserve state and auto-learn
     if ! echo "$updated" | jq -e '.hooks.Stop[]? | select(.hooks[]?.command | contains("stop-hook.sh"))' &>/dev/null; then
-        local stop_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/stop-hook.sh","statusMessage":"preserving state…"}]}'
+        local stop_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/stop-hook.sh","timeout":30,"statusMessage":"preserving state…"}]}'
         updated=$(echo "$updated" | jq --argjson hook "$stop_hook" '.hooks.Stop = ((.hooks.Stop // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # SessionEnd: close the durable session and release any thread lease.
+    if ! echo "$updated" | jq -e '.hooks.SessionEnd[]? | select(.hooks[]?.command | contains("session-end-hook.sh"))' &>/dev/null; then
+        local session_end_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/session-end-hook.sh","timeout":5,"statusMessage":"releasing session…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$session_end_hook" '.hooks.SessionEnd = ((.hooks.SessionEnd // []) + [$hook])')
         ((added++)) || true
     fi
 
@@ -836,8 +933,13 @@ main() {
     fi
 
     local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
+    local installed_binary_version=""
+    if [[ -x "$BIN_DIR/chitta" ]]; then
+        installed_binary_version=$("$BIN_DIR/chitta" --version 2>/dev/null | awk '{print $NF}' | head -1)
+    fi
 
-    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" ]]; then
+    if [[ "$current_version" == "$installed_version" && \
+          "$current_version" == "$installed_binary_version" && -x "$BIN_DIR/chitta" ]]; then
         echo "[cc-soul] Already at v$current_version"
         exit 0
     fi
@@ -869,6 +971,10 @@ main() {
         if has_cxx_compiler; then
             echo "[cc-soul] Building from source with llama.cpp embeddings..."
             build_from_source "$src_root" || {
+                if [[ -n "${CHITTA_EMBED_DIM:-}" && "${CHITTA_EMBED_DIM}" != "1024" ]]; then
+                    echo "[cc-soul] ERROR: Source build failed; refusing public 1024-d binaries for a ${CHITTA_EMBED_DIM}-d store" >&2
+                    exit 1
+                fi
                 echo "[cc-soul] WARNING: Source build failed, trying pre-built binaries" >&2
                 download_binaries "$current_version" "$platform" || {
                     echo "[cc-soul] ERROR: Build failed and no compatible pre-built binaries were found" >&2
@@ -902,6 +1008,12 @@ main() {
     # Configure hooks in settings.json
     configure_hooks
 
+    # Keep user hooks, the active Claude cache, Codex hook wiring, and mirrored
+    # recap/resume skills on the same revision as this installer.
+    if [[ -x "$PLUGIN_DIR/scripts/sync-installed-hooks.sh" ]]; then
+        "$PLUGIN_DIR/scripts/sync-installed-hooks.sh"
+    fi
+
     # Install Python packages (MCP server, TUI)
     download_embed_model "$current_version"
     install_python_packages
@@ -920,6 +1032,19 @@ main() {
     # Run database migrations if needed
     if [[ -f "${HOME}/.claude/mind/chitta.duckdb" && -x "$BIN_DIR/chittad" ]]; then
         "$BIN_DIR/chittad" upgrade --path "${HOME}/.claude/mind" 2>/dev/null | grep -E "^\[migrations\]|Already at" || true
+    fi
+
+    # setup_systemd_service starts the daemon once, but stop_daemon above stops it
+    # again so migrations can run against a quiescent store.  A manual systemd
+    # stop suppresses Restart=always, so explicitly bring the enabled service back
+    # after migration instead of leaving both frontends without memory until the
+    # next hook happens to repair it.
+    if command -v systemctl &>/dev/null && systemctl --user is-enabled chittad &>/dev/null 2>&1; then
+        if systemctl --user start chittad; then
+            echo "[cc-soul] chittad service restarted"
+        else
+            echo "[cc-soul] WARNING: chittad service did not restart" >&2
+        fi
     fi
 
     # Version change notification

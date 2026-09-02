@@ -11,7 +11,7 @@
 # per participant per room turn, for state nobody reads.
 if [[ -n "$CC_SOUL_HEADLESS" ]]; then
     cat >/dev/null
-    printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart"}}'
+    printf '%s\n' '{}'
     exit 0
 fi
 
@@ -22,7 +22,6 @@ CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 INPUT="$(cat)"
 
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
 HOOK_SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
@@ -37,17 +36,15 @@ if [[ "$HOOK_SOURCE" != "compact" ]]; then
     rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
 fi
 
-# 3) Lightweight Codex registration (no free-form output)
-if [[ -n "$SESSION_ID" && -x "$CHITTA_BIN" ]]; then
-    # Register session for cross-session messaging / recall
-    timeout 2 "$CHITTA_BIN" session_register --session_id "$SESSION_ID" --realm "brahman" --pid "${PPID:-$$}" >/dev/null 2>&1 || true
-
-    # Register transcript path for later distillation if available
-    if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-        queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"brahman\"}"
-    fi
+# 3) Register the native Codex session and transcript in the shared multimodel
+# registry. The adapter resolves a missing transcript_path by session ID and
+# records the long-lived Codex ancestor PID, project, model, and client kind.
+if [[ -n "$SESSION_ID" ]]; then
+    printf '%s' "$INPUT" | registry_call 8 register --client codex
 fi
 
-# Codex expects valid JSON only.
-printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart"}}'
+# This hook injects no context. Codex's SessionStart output schema accepts an
+# empty top-level object; using it avoids needless coupling to the nested
+# hookSpecificOutput wire format.
+printf '%s\n' '{}'
 exit 0

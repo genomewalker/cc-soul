@@ -3,6 +3,55 @@
 #
 # Common functions used across session-start, prompt, and stop hooks.
 
+# Resolve the cc-soul root whether a hook runs from the source tree, a Claude
+# plugin cache, or a user-level hook symlink/copy. Callers should still verify
+# the particular file they need exists.
+resolve_cc_soul_root() {
+    local candidate real_root
+    for candidate in \
+        "${CC_SOUL_PLUGIN_DIR:-}" \
+        "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")")"; do
+        if [[ -n "$candidate" && -d "$candidate/chitta-mcp" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    # Marketplace installs are versioned. `sort -V` makes the newest installed
+    # source the compatibility fallback for copied ~/.claude/hooks scripts.
+    real_root=$(for candidate in \
+        "$HOME"/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*; do
+        [[ -d "$candidate/chitta-mcp" ]] && printf '%s\n' "$candidate"
+    done 2>/dev/null | sort -V | tail -1)
+    if [[ -n "$real_root" ]]; then
+        printf '%s\n' "$real_root"
+        return 0
+    fi
+    return 1
+}
+
+# Shared session_registry.py invocation used by session-start, session-end,
+# codex-session-start, prompt-core, and stop-core hooks. Resolves the plugin
+# root the same way each of those call sites did, is a no-op (fail-open,
+# non-fatal) when the registry script isn't present, and never propagates the
+# invoked subprocess's own exit status — callers that need a fallback path
+# when the registry itself is missing can branch on this function's return
+# code instead (1 = registry not found, 0 = registry was invoked).
+# Usage: printf '%s' "$INPUT" | registry_call <timeout_s> <subcmd> [args...]
+registry_call() {
+    local t="$1" subcmd="$2"
+    shift 2
+    local plugin_dir registry
+    plugin_dir="$(resolve_cc_soul_root 2>/dev/null)"
+    if [[ -z "$plugin_dir" ]]; then
+        plugin_dir="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[1]}" 2>/dev/null || echo "${BASH_SOURCE[1]}")")")"
+    fi
+    registry="$plugin_dir/chitta-mcp/session_registry.py"
+    [[ -f "$registry" ]] || return 1
+    timeout "$t" python3 "$registry" "$subcmd" "$@" >/dev/null 2>&1
+    return 0
+}
+
 # DJB2 hash function (matches C++ implementation in socket_server.hpp)
 djb2_hash() {
     local str="$1"
@@ -150,7 +199,10 @@ except Exception as e:
     sys.stderr.write(f"queue_write fallback: invalid args json: {e}\n"); sys.exit(1)
 sys.stdout.write(json.dumps({"ack_id":os.environ["ACK_ID"],"tool":os.environ["TOOL"],"args":a,"ts":int(os.environ["TS"])},separators=(",",":"))+"\n")
 ' 2>/dev/null); then
-        printf '%s' "$line" >> "$queue_file"
+        # Command substitution strips trailing newlines from Python's output.
+        # Restore the JSONL record boundary explicitly so consecutive fallback
+        # writes cannot be concatenated into one invalid record.
+        printf '%s\n' "$line" >> "$queue_file"
     else
         echo "[queue_write] dropped: no chitta binary and args not valid JSON" >&2
         return 1

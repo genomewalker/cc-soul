@@ -14,7 +14,9 @@ SPANS_DIR="$MIND_PATH/spans"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-# Input: transcript path and last user message
+# Input: bounded Stop snapshot (preferred) or legacy transcript path, plus the
+# last user message. The Stop hook always passes a snapshot so this script does
+# not reopen the complete session transcript.
 TRANSCRIPT_PATH="$1"
 LAST_USER_MSG="$2"
 
@@ -24,23 +26,45 @@ mkdir -p "$SPANS_DIR"
 
 # Generate span file for this exchange
 TIMESTAMP=$(date +%s)
-SESSION_ID=$(basename "$TRANSCRIPT_PATH" .json)
+IS_SNAPSHOT=false
+if jq -e '.format == "cc-soul-stop-snapshot-v1"' "$TRANSCRIPT_PATH" >/dev/null 2>&1; then
+    IS_SNAPSHOT=true
+fi
+if [[ "$IS_SNAPSHOT" == "true" ]]; then
+    # One jq pass over the snapshot instead of three (session_id, tool_uses,
+    # tool_results were each a separate parse of the same file). tostring
+    # collapses the two array outputs to single lines so -r yields exactly
+    # three lines regardless of pretty-printing.
+    mapfile -t _SPAN_PARSED < <(jq -r '
+        (.session_id // "unknown"),
+        ([.tool_spans[]? | {id, tool, input}] | tostring),
+        ([.tool_spans[]? | {id, output, is_error}] | tostring)
+    ' "$TRANSCRIPT_PATH" 2>/dev/null)
+    SESSION_ID="${_SPAN_PARSED[0]:-unknown}"
+    TOOL_USES="${_SPAN_PARSED[1]:-[]}"
+    TOOL_RESULTS="${_SPAN_PARSED[2]:-[]}"
+else
+    SESSION_ID=$(basename "$TRANSCRIPT_PATH" .json)
+fi
+SESSION_ID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9._-' '_')
 SPAN_FILE="$SPANS_DIR/${SESSION_ID}-${TIMESTAMP}.jsonl"
 
 # Extract tool uses and results from transcript
 # Format: array of {tool_use_id, tool_name, input} and {tool_use_id, output, is_error}
 
-TOOL_USES=$(jq -c '
-  [.[] | select(.role == "assistant") | .message.content[]? |
-   select(.type == "tool_use") |
-   {id: .id, tool: .name, input: .input}]
-' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+if [[ "$IS_SNAPSHOT" != "true" ]]; then
+    TOOL_USES=$(jq -c '
+      [.[] | select(.role == "assistant") | .message.content[]? |
+       select(.type == "tool_use") |
+       {id: .id, tool: .name, input: .input}]
+    ' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
 
-TOOL_RESULTS=$(jq -c '
-  [.[] | select(.role == "user") | .message.content[]? |
-   select(.type == "tool_result") |
-   {id: .tool_use_id, output: (.content // .text // "" | tostring | .[0:500]), is_error: (.is_error // false)}]
-' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+    TOOL_RESULTS=$(jq -c '
+      [.[] | select(.role == "user") | .message.content[]? |
+       select(.type == "tool_result") |
+       {id: .tool_use_id, output: (.content // .text // "" | tostring | .[0:500]), is_error: (.is_error // false)}]
+    ' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+fi
 
 # Detect reward signal from user's next message
 detect_reward() {

@@ -7,6 +7,11 @@
 #include <fstream>
 #include <cstdlib>
 #include <cstdint>
+#include <filesystem>
+
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 
 namespace chitta {
 
