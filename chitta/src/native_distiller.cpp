@@ -2,10 +2,14 @@
 #include "../include/chitta/ssl_gloss.hpp"
 #include "../include/chitta/ssl_prompt.hpp"
 #include "../include/chitta/value_fact_extractor.hpp"
+#include "../include/chitta/mdl_gate.hpp"
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <fstream>
 #include <iostream>
 #include <limits>
 
@@ -56,6 +60,43 @@ void NativeDistiller::log(const std::string& msg) {
         log_callback_(msg);
     } else if (config_.verbose) {
         std::cerr << msg << "\n";
+    }
+}
+
+// Shadow tap for the MDL consolidation gate (see mdl_gate.hpp / chitta-mcp/mdl_gate.py).
+// Fail-open: never lets a judging or I/O error touch the caller's storage path.
+void NativeDistiller::log_mdl_shadow(const std::string& mem_id, const std::string& content,
+                                     const std::string& evidence) {
+    try {
+        auto v = mdl::judge(content, evidence);
+
+        std::string mind_path = config_.mind_path;
+        if (mind_path.empty()) {
+            if (const char* db_path = std::getenv("CHITTA_DB_PATH")) {
+                mind_path = db_path;
+            } else if (const char* home = std::getenv("HOME")) {
+                mind_path = std::string(home) + "/.claude/mind";
+            }
+        }
+        if (mind_path.empty()) return;
+
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        nlohmann::json line = {
+            {"ts", ms},
+            {"id", mem_id},
+            {"accept", v.accept},
+            {"saving", v.saving},
+            {"title_head", content.substr(0, 80)},
+            {"source", "native"},
+        };
+
+        std::ofstream out(mind_path + "/mdl_gate_shadow.jsonl", std::ios::app);
+        if (!out) return;
+        out << line.dump() << "\n";
+    } catch (...) {
+        // fail-open: shadow logging must never affect distillation.
     }
 }
 
@@ -125,6 +166,7 @@ void NativeDistiller::store_learnings(
     const std::string& realm,
     uint64_t episode_mem_id,
     const std::vector<LearningPrep>& learning_preps,
+    const std::string& evidence,
     DistillResult& result
 ) {
     for (size_t i = 0; i < ssl_result.learnings.size(); ++i) {
@@ -160,6 +202,8 @@ void NativeDistiller::store_learnings(
 
         if (mem_id == 0) continue;
 
+        log_mdl_shadow(std::to_string(mem_id), full_text, evidence);
+
         result.learnings_stored++;
         log("[distill]   +" + learning.category + ": " +
             learning.title.substr(0, 60) + "...");
@@ -173,13 +217,13 @@ void NativeDistiller::store_learnings(
 
         // Apply structural flags (v0.3: F:FLAG)
         for (const auto& flag : learning.flags) {
-            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag);
+            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag, 1.0f, mem_id);
             log("[distill]     flag: " + flag);
         }
 
         // Apply cross-references (v0.3: →@ref)
         for (const auto& ref : learning.refs) {
-            field_store_->add_triplet(std::to_string(mem_id), "references", ref);
+            field_store_->add_triplet(std::to_string(mem_id), "references", ref, 1.0f, mem_id);
             log("[distill]     ref: →@" + ref);
         }
 
@@ -188,7 +232,7 @@ void NativeDistiller::store_learnings(
             field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);
             field_store_->add_triplet(std::to_string(mem_id),
                                       "derived_from",
-                                      std::to_string(episode_mem_id));
+                                      std::to_string(episode_mem_id), 1.0f, mem_id);
         }
 
         // Code citations
@@ -197,7 +241,7 @@ void NativeDistiller::store_learnings(
             if (cite.line > 0) {
                 cite_target += ":" + std::to_string(cite.line);
             }
-            field_store_->add_triplet(std::to_string(mem_id), "cites", cite_target);
+            field_store_->add_triplet(std::to_string(mem_id), "cites", cite_target, 1.0f, mem_id);
             result.citations_linked++;
             log("[distill]     cite: " + cite_target);
 
@@ -208,7 +252,7 @@ void NativeDistiller::store_learnings(
                     if (sym.line_start <= static_cast<uint32_t>(cite.line) &&
                         static_cast<uint32_t>(cite.line) <= sym.line_end) {
                         std::string sym_ref = "symbol:" + std::to_string(sym.symbol_id);
-                        field_store_->add_triplet(std::to_string(mem_id), "cites", sym_ref);
+                        field_store_->add_triplet(std::to_string(mem_id), "cites", sym_ref, 1.0f, mem_id);
                         log("[distill]     → symbol: " +
                             std::string(reinterpret_cast<const char*>(sym.name)));
                         break;
@@ -220,7 +264,10 @@ void NativeDistiller::store_learnings(
 
     // Store triplets
     for (const auto& triplet : ssl_result.triplets) {
-        field_store_->add_triplet(triplet.subject, triplet.predicate, triplet.object);
+        // Session-level facts belong to the episode memory: without a source id
+        // the analogy signature index (analogy.rs) can't see them at all.
+        field_store_->add_triplet(triplet.subject, triplet.predicate, triplet.object,
+                                  1.0f, episode_mem_id);
         log("[distill]   triplet: " + triplet.subject + "→" +
             triplet.predicate + "→" + triplet.object);
     }
@@ -322,7 +369,7 @@ void NativeDistiller::store_value_facts(
         if (episode_mem_id > 0) {
             field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);
             field_store_->add_triplet(std::to_string(mem_id), "derived_from",
-                                      std::to_string(episode_mem_id));
+                                      std::to_string(episode_mem_id), 1.0f, mem_id);
         }
     }
 }
@@ -442,7 +489,8 @@ DistillResult NativeDistiller::commit_distillation(const PreparedDistillation& p
 
     // Store learnings and triplets (writes only — dedup precomputed in prepare phase)
     store_learnings(prep.ssl_result, prep.realm,
-                    static_cast<uint64_t>(episode_id), prep.learning_preps, result);
+                    static_cast<uint64_t>(episode_id), prep.learning_preps,
+                    prep.conversation, result);
     result.triplets_created = static_cast<int>(prep.ssl_result.triplets.size());
 
     // Value-fact write-back: precomputed (extract+embed+dedup) in prepare_distillation,

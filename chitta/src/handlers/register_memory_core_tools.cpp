@@ -267,6 +267,15 @@ void FieldRpcHandler::register_memory_core_tools() {
     });
     handlers_["nack_memory"] = [this](const json& p) { return tool_nack_memory(p); };
 
+    tools_.push_back({{"name","memory_outcome"},{"description","Record an observed outcome for a memory into its Beta utility posterior (success raises alpha, failure raises beta)"},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"id",{{"type","string"},{"description","Node ID the outcome is about"}}},
+            {"success",{{"type","boolean"},{"description","Did acting on this memory work?"}}},
+            {"weight",{{"type","number"},{"description","Observation weight, capped at 5.0 (default 1.0)"}}}
+        }},{"required",{"id","success"}}}}
+    });
+    handlers_["memory_outcome"] = [this](const json& p) { return tool_memory_outcome(p); };
+
     tools_.push_back({{"name","batch_forget"},{"description","Delete multiple nodes by ID"},
         {"inputSchema",{{"type","object"},{"properties",{
             {"ids",{{"type","array"},{"items",{{"type","string"}}}}},
@@ -561,6 +570,22 @@ void FieldRpcHandler::register_memory_core_tools() {
         }},{"required",{"tool","entity"}}}}
     });
     handlers_["recall_motif_value"] = [this](const json& p) { return tool_recall_motif_value(p); };
+
+    tools_.push_back({{"name","recall_analogy"},{"description","Analogical recall over the triplet lane (vector-symbolic, no LLM/GPU). Two modes embedding similarity cannot express, because both are about structure rather than wording. 'proportional' solves a:b :: c:? — give three entities, get ranked fillers for the fourth. 'structural' finds memories whose relation graph has the same SHAPE as a probe memory, with entity names factored out, so a pattern learned in one project matches the same pattern in another; set exclude_realm (or cross_realm) for that cross-project transfer. Use when you want 'what else looks like this?', not 'what mentions these words?'."},
+        {"inputSchema",{{"type","object"},{"properties",{
+            {"mode",          {{"type","string"},{"description","'proportional' (a:b :: c:?) or 'structural' (shape match). Default: structural"}}},
+            {"a",             {{"type","string"},{"description","proportional: source entity"}}},
+            {"b",             {{"type","string"},{"description","proportional: what a maps to"}}},
+            {"c",             {{"type","string"},{"description","proportional: target entity; the tool returns its counterpart to b"}}},
+            {"memory_id",     {{"type","integer"},{"description","structural: probe memory whose relation shape is matched (excluded from results)"}}},
+            {"text",          {{"type","string"},{"description","structural: free-text probe, used when memory_id is absent; anchors on the entities it mentions"}}},
+            {"realm",         {{"type","string"},{"description","structural: restrict results to this realm"}}},
+            {"exclude_realm", {{"type","string"},{"description","structural: drop results from this realm — the cross-project transfer case"}}},
+            {"cross_realm",   {{"type","boolean"},{"description","structural: shorthand for excluding the probe memory's own realm (default false)"}}},
+            {"limit",         {{"type","integer"},{"description","Max results, 1-100 (default 8)"}}}
+        }}}}
+    });
+    handlers_["recall_analogy"] = [this](const json& p) { return tool_recall_analogy(p); };
 
     tools_.push_back({{"name","span_query"},{"description","Retrieve verbatim transcript atoms (file paths, URLs, file:line locators, bash commands, error signatures) captured across all sessions. No LLM/GPU: exact-substring recall over a deduplicated span index. Realm-scoped by default to prevent cross-project bleed. Use when you need an exact locator you saw before, not a paraphrase."},
         {"inputSchema",{{"type","object"},{"properties",{

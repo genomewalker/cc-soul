@@ -1001,6 +1001,24 @@ def handle_nack_memory(arguments: dict) -> str:
     return json.dumps({"nacked": mem_id})
 
 
+def handle_memory_outcome(arguments: dict) -> str:
+    """
+    Record an outcome observation for a memory's utility posterior
+    (alpha += weight on success, beta += weight on failure).
+    """
+    mem_id = str(arguments.get("id", ""))
+    if not mem_id:
+        return "Error: 'id' parameter required"
+    success = arguments.get("success")
+    if not isinstance(success, bool):
+        return "Error: 'success' (boolean) parameter required"
+    params = {"id": mem_id, "success": success}
+    weight = arguments.get("weight")
+    if weight is not None:
+        params["weight"] = float(weight)
+    return daemon_call("memory_outcome", params)
+
+
 _TYPED_NODE_TYPES = frozenset({
     "digest-node", "symbol-summary", "decision", "open-question", "rollup", "working-brief"
 })
@@ -2098,6 +2116,10 @@ def handle_memory_edit_gateway(arguments: dict) -> str:
     tool = tool_map.get(action)
     if not tool:
         return f"Unknown action: {action}. Use: {', '.join(tool_map.keys())}"
+    # The composite tool exposes the concise public key `id`, while both
+    # daemon editing handlers use `memory_id`. Normalize at the gateway.
+    if "id" in arguments and "memory_id" not in arguments:
+        arguments["memory_id"] = arguments.pop("id")
     return daemon_call(tool, arguments)
 
 
@@ -2161,6 +2183,7 @@ COMPOSITE_HANDLERS = {
     "verify_correction": handle_verify_correction,
     "ack_memory": handle_ack_memory,
     "nack_memory": handle_nack_memory,
+    "memory_outcome": handle_memory_outcome,
     "remember_typed": handle_remember_typed,
     "run_hint_enricher": handle_run_hint_enricher,
 }

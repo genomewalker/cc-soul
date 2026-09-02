@@ -312,22 +312,22 @@ void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& 
 
         // Apply structural flags (v0.3: F:FLAG)
         for (const auto& flag : learning.flags) {
-            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag);
+            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag, 1.0f, mem_id);
         }
 
         // Apply cross-references (v0.3: →@ref)
         for (const auto& ref : learning.refs) {
-            field_store_->add_triplet(std::to_string(mem_id), "references", ref);
+            field_store_->add_triplet(std::to_string(mem_id), "references", ref, 1.0f, mem_id);
         }
 
         // Link to source episode
         if (episode_id > 0) {
             field_store_->add_triplet(std::to_string(mem_id), "derived_from",
-                                      std::to_string(episode_id));
+                                      std::to_string(episode_id), 1.0f, mem_id);
         }
 
         // Source triplet
-        field_store_->add_triplet(std::to_string(mem_id), "ingested_from", source);
+        field_store_->add_triplet(std::to_string(mem_id), "ingested_from", source, 1.0f, mem_id);
 
         log("[ingest]   +" + learning.category + ": " +
             learning.title.substr(0, 60));

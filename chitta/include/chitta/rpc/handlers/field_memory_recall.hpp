@@ -120,6 +120,8 @@
     ToolResult tool_consolidation_pass(const json& params);
     ToolResult tool_refutation_stats(const json& params);
     ToolResult tool_recall_motif_value(const json& params);
+    // Analogy Lane: VSA over the triplet lane — structure, not surface content
+    ToolResult tool_recall_analogy(const json& params);
     // Span Lane: verbatim transcript atoms (realm-scoped, no LLM/GPU on query path)
     ToolResult tool_span_query(const json& params);
     ToolResult tool_span_backfill(const json& params);

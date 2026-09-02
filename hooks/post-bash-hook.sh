@@ -28,6 +28,15 @@ command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
 output=$(echo "$STDIN_DATA" | jq -r '.tool_result.stdout // empty' | head -c 500)
 stderr=$(echo "$STDIN_DATA" | jq -r '.tool_result.stderr // empty' | head -c 500)
 
+# Outcome ledger tap (additive, Phase 1): every bash exit code, for the
+# injected-memory credit join. Fail-open — never blocks the hook.
+if [[ -n "$command" && -f "${SCRIPT_DIR}/outcome-ledger.sh" ]]; then
+    source "${SCRIPT_DIR}/outcome-ledger.sh" 2>/dev/null
+    _lg_sid=$(echo "$STDIN_DATA" | jq -r '.session_id // "unknown"' 2>/dev/null)
+    _lg_cmd=$(printf '%s' "${command:0:80}" | jq -Rs . 2>/dev/null)
+    ledger_append "{\"event\":\"bash_outcome\",\"exit_code\":${exit_code:-0},\"cmd_head\":${_lg_cmd:-\"\"}}" "$_lg_sid" 2>/dev/null || true
+fi
+
 # Normalize command to first word (basename only)
 normalize_cmd() {
     echo "$1" | awk '{print $1}' | sed 's|.*/||'
@@ -96,7 +105,9 @@ if [[ "$exit_code" == "0" && -n "$command" ]]; then
     if is_long_running_launch "$command" || is_analysis_script "$command"; then
         _task_id=$(cat "$MIND_PATH/.pending_task_id" 2>/dev/null || echo "")
         [[ -n "$_task_id" ]] && rm -f "$MIND_PATH/.pending_task_id"
-        _thread_id=$(cat "$MIND_PATH/.current_thread_id" 2>/dev/null || echo "")
+        _pb_sid=$(echo "$STDIN_DATA" | jq -r '.session_id // empty' 2>/dev/null)
+        _thread_id=$(cat "$MIND_PATH/.current_thread_${_pb_sid:-none}" 2>/dev/null \
+            || cat "$MIND_PATH/.current_thread_id" 2>/dev/null || echo "")
         _snap_flag=""
         [[ -n "$_task_id" && -f "$MIND_PATH/.fs_snapshot_${_task_id}" ]] \
             && _snap_flag="--before-snapshot $MIND_PATH/.fs_snapshot_${_task_id}"

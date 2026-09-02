@@ -291,6 +291,17 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"id", "Node ID", true, nullptr},
       {"amount", "Amount to strengthen (0-1)", false, "0.1"}}},
 
+    {"ack_memory", "Record a positive ack signal for a memory (raises its recall score)",
+     {{"id", "Node ID to ack", true, nullptr}}},
+
+    {"nack_memory", "Record a negative nack signal for a memory (lowers its recall score)",
+     {{"id", "Node ID to nack", true, nullptr}}},
+
+    {"memory_outcome", "Record an outcome observation for a memory's utility posterior",
+     {{"id", "Node ID", true, nullptr},
+      {"success", "true|false: did the action following this memory's injection succeed", true, nullptr},
+      {"weight", "Observation weight (0-5]", false, "1.0"}}},
+
     {"weaken", "Decrease confidence of a memory",
      {{"id", "Node ID", true, nullptr},
       {"amount", "Amount to weaken (0-1)", false, "0.1"}}},
@@ -1247,6 +1258,14 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         args.contains("kind") && !args.contains("type")) {
         args["type"] = args["kind"];
         args.erase("kind");
+    }
+
+    // memory_outcome requires a JSON boolean, but the generic arg parser only
+    // types numerics — coerce "true"/"false" so `--success true` works.
+    if (tool == "memory_outcome" && args.contains("success") && args["success"].is_string()) {
+        const std::string& sv = args["success"].get_ref<const std::string&>();
+        if (sv == "true") args["success"] = true;
+        else if (sv == "false") args["success"] = false;
     }
 
     // Send tool call

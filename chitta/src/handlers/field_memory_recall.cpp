@@ -949,7 +949,10 @@ ToolResult FieldRpcHandler::tool_recall(const json& params) {
     set_lexical(results_json, query);
     for (auto& r : results_json) {
         int pct = display_pct(r);
-        ss << "[" << pct << "%] [" << r.value("type", "?") << "]";
+        // Line contract: `#<id> [pct%] ...`. The hooks' SUS exposure block and
+        // the outcome-ledger injected tap parse `^#([0-9]+)`; dropping the id
+        // prefix silently kills exposure/credit tracking (happened once).
+        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "]";
         int64_t ts = r.value("ts_ms", int64_t(0));
         if (ts > 0) {
             std::time_t t = static_cast<std::time_t>(ts / 1000);
@@ -1124,7 +1127,7 @@ ToolResult FieldRpcHandler::tool_recall_keyword(const json& params) {
     set_lexical(results_json, query);
     for (const auto& r : results_json) {
         int pct = display_pct(r);
-        ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
+        ss << "#" << r.value("id", "0") << " [" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
     }
     return ToolResult::ok(ss.str(), {{"results", results_json}});
 }
@@ -1269,7 +1272,7 @@ ToolResult FieldRpcHandler::tool_hybrid_recall(const json& params) {
     set_lexical(merged, query);
     for (const auto& r : merged) {
         int pct = display_pct(r);
-        ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
+        ss << "#" << r.value("id", "0") << " [" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
     }
     auto result = ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
     fire_recall_callback(merged, 1);
@@ -1369,7 +1372,7 @@ ToolResult FieldRpcHandler::tool_smart_recall(const json& params) {
     set_lexical(results, query);
     for (const auto& r : results) {
         int pct = display_pct(r);
-        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
+        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "] "
            << r.value("text", "").substr(0, 400) << "\n";
     }
     auto result = ToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
@@ -1572,7 +1575,7 @@ ToolResult FieldRpcHandler::tool_full_resonate(const json& params) {
     set_lexical(final_merged, query);
     for (const auto& r : final_merged) {
         int pct = display_pct(r);
-        ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
+        ss << "#" << r.value("id", "0") << " [" << pct << "%] [" << r.value("type", "?") << "] "
            << r.value("text", "").substr(0, 400) << "\n";
     }
     return ToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
@@ -1824,6 +1827,96 @@ ToolResult FieldRpcHandler::tool_recall_motif_value(const json& params) {
         ss << "No motif data yet for " << tool << "(" << entity << ") — accumulate more events.";
     }
     return ToolResult::ok(ss.str(), {{"hits", parsed.is_array() ? parsed : json::array()}});
+}
+
+// Hypervector similarity is normalized Hamming: 0.5 is the orthogonal noise
+// floor, not "half a match". Rescale so an unrelated candidate reads 0% and an
+// identical signature reads 100% — printing the raw 0.5 as "50%" would invite
+// the reader to trust pure noise.
+static int analogy_pct(double score) {
+    double norm = (score - 0.5) * 2.0;
+    if (norm < 0.0) norm = 0.0;
+    if (norm > 1.0) norm = 1.0;
+    return static_cast<int>(norm * 100.0);
+}
+
+ToolResult FieldRpcHandler::tool_recall_analogy(const json& params) {
+    const std::string mode = params.value("mode", "structural");
+    json args = json::object();
+    args["mode"]  = mode;
+    args["limit"] = params.value("limit", 8);
+
+    std::string header;
+    if (mode == "proportional") {
+        const std::string a = params.value("a", "");
+        const std::string b = params.value("b", "");
+        const std::string c = params.value("c", "");
+        if (a.empty() || b.empty() || c.empty())
+            return ToolResult::error("proportional mode needs a, b and c (a:b :: c:?)");
+        args["a"] = a;
+        args["b"] = b;
+        args["c"] = c;
+        header = a + ":" + b + " :: " + c + ":?";
+    } else if (mode == "structural") {
+        const uint64_t mid  = params.value("memory_id", uint64_t(0));
+        const std::string q = params.value("text", "");
+        if (mid == 0 && q.empty())
+            return ToolResult::error("structural mode needs memory_id or text");
+        if (mid != 0) {
+            args["memory_id"] = mid;
+            header = "memories shaped like #" + std::to_string(mid);
+        } else {
+            args["text"] = q;
+            header = "memories shaped like \"" + q + "\"";
+        }
+        const std::string realm = params.value("realm", "");
+        const std::string excl  = params.value("exclude_realm", "");
+        if (!realm.empty()) args["realm"] = realm;
+        if (!excl.empty())  args["exclude_realm"] = excl;
+        if (params.value("cross_realm", false)) args["cross_realm"] = true;
+        if (!realm.empty()) header += " [realm=" + realm + "]";
+        if (!excl.empty())  header += " [excluding realm=" + excl + "]";
+    } else {
+        return ToolResult::error("mode must be 'proportional' or 'structural'");
+    }
+
+    auto parsed = json::parse(field_store_->recall_analogy_json(args.dump()), nullptr, false);
+    if (!parsed.is_object() || !parsed.contains("results"))
+        return ToolResult::error("analogy lane unavailable (no triplets indexed, or bad arguments)");
+    const json& results = parsed["results"];
+    const size_t indexed = parsed.value("indexed", size_t(0));
+
+    std::ostringstream ss;
+    if (!results.is_array() || results.empty()) {
+        ss << "No analogy for " << header << " (" << indexed
+           << (mode == "proportional" ? " facts" : " memories") << " indexed)."
+              " The triplet lane needs the probed entities to appear in stored facts.";
+        return ToolResult::ok(ss.str(), {{"results", json::array()}, {"indexed", indexed}});
+    }
+
+    ss << "Analogy [" << mode << "] " << header << " — " << results.size()
+       << " of " << indexed << (mode == "proportional" ? " facts" : " memories indexed") << ":\n";
+    for (const auto& r : results) {
+        const uint64_t id = r.value("id", uint64_t(0));
+        const int pct = analogy_pct(r.value("score", 0.0));
+        // Line contract: `#<id> [pct%] ...` — the hooks' SUS exposure block and the
+        // outcome-ledger tap parse `^#([0-9]+)`. A proportional answer with no
+        // linking fact has no memory to credit, so it is indented instead of
+        // prefixed with a fake `#0` that would book exposure against nothing.
+        if (id != 0) ss << "#" << id << " [" << pct << "%]";
+        else         ss << "   [" << pct << "%]";
+        const std::string realm = r.value("realm", "");
+        if (!realm.empty()) ss << " [" << realm << "]";
+        if (mode == "proportional") {
+            ss << " " << r.value("answer", "");
+            const std::string pred = r.value("predicate", "");
+            if (!pred.empty()) ss << "  (" << pred << ")";
+            ss << "\n";
+        } else {
+            ss << " " << r.value("text", "").substr(0, 300) << "\n";
+        }
+    }
+    return ToolResult::ok(ss.str(), {{"results", results}, {"indexed", indexed}, {"mode", mode}});
 }
 
 ToolResult FieldRpcHandler::tool_span_query(const json& params) {

@@ -45,6 +45,10 @@ struct NativeDistillConfig {
     // BOUND: cap bytes fed to the deterministic value-fact extractor. Independent
     // of the LLM context cap; keeps the lock-free precompute pass finite. 0 = no cap.
     size_t value_fact_max_bytes = 4u * 1024 * 1024;
+    // Base mind dir for the MDL-gate shadow log (<mind_path>/mdl_gate_shadow.jsonl).
+    // Empty = discover via $CHITTA_DB_PATH, else ~/.claude/mind (mirrors
+    // socket_client.hpp's default_mind_path()).
+    std::string mind_path;
 };
 
 struct DistillResult {
@@ -156,13 +160,23 @@ private:
     void precompute_dedup(PreparedDistillation& prep);
 
     // Store learnings using precomputed dedup results — no field_store reads, writes only.
+    // `evidence` is the source transcript chunk (prep.conversation) each learning was
+    // distilled from — used only for the MDL-gate shadow log (see mdl_gate.hpp); never
+    // gates or blocks storage.
     void store_learnings(
         const SSLParser::Result& ssl_result,
         const std::string& realm,
         uint64_t episode_mem_id,
         const std::vector<LearningPrep>& learning_preps,
+        const std::string& evidence,
         DistillResult& result
     );
+
+    // Best-effort append of one MDL-gate shadow verdict line to
+    // <mind_path>/mdl_gate_shadow.jsonl. Fail-open: any exception or I/O error is
+    // swallowed silently — this must never affect the storage path it observes.
+    void log_mdl_shadow(const std::string& mem_id, const std::string& content,
+                         const std::string& evidence);
 
     // Phase 1c (lock-free): extract value-facts from prep.conversation, embed each,
     // and run recall-based dedup — populates prep.value_fact_preps. No field_store

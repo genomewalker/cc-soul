@@ -59,6 +59,8 @@ int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
 int cf_ack_memory(struct CfHandle* h, uint64_t memory_id);
 int cf_nack_memory(struct CfHandle* h, uint64_t memory_id);
+int cf_record_outcome(struct CfHandle* h, uint64_t memory_id, int success, float weight,
+    float* out_alpha, float* out_beta);
 int cf_select_route(struct CfHandle* h, const char* query,
     uint64_t* out_episode_id, uint8_t* out_route);
 int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
@@ -346,6 +348,8 @@ char* cf_span_stats(struct CfHandle* h);
 char* cf_span_for_memory(struct CfHandle* h, uint64_t memory_id, size_t k);
 int64_t cf_span_ingest_memory(struct CfHandle* h, uint64_t memory_id, const char* text, const char* realm);
 char* cf_span_backfill_memories(struct CfHandle* h);
+// Analogy Lane FFI (VSA over the triplet lane; structure, not surface content)
+char* cf_recall_analogy(const struct CfHandle* h, const char* json_in);
 char* cf_densify_backfill(struct CfHandle* h, bool apply);
 char* cf_semantic_backfill(struct CfHandle* h, bool apply, size_t k, float min_cos);
 char* cf_assoc_census(struct CfHandle* h);
@@ -674,6 +678,13 @@ public:
     }
     void nack_memory(uint64_t id) {
         cf_nack_memory(handle_, id);
+    }
+
+    // Accrue one outcome observation into the memory's Beta utility posterior.
+    // Returns false if the memory does not exist; alpha/beta receive the update.
+    bool record_outcome(uint64_t id, bool success, float weight,
+                        float& alpha, float& beta) {
+        return cf_record_outcome(handle_, id, success ? 1 : 0, weight, &alpha, &beta) == 0;
     }
 
     /// Semantic recall — find k most similar memories to query embedding.
@@ -1254,6 +1265,18 @@ public:
     std::string span_for_memory_json(uint64_t memory_id, size_t k = 6) {
         char* raw = cf_span_for_memory(handle_, memory_id, k);
         if (!raw) { cf_soft(-1, __func__); return "[]"; }
+        std::string result(raw);
+        cf_free_string(raw);
+        return result;
+    }
+
+    // Analogy Lane: a:b :: c:? and structural-signature match over the triplet
+    // lane. Args and reply are JSON (see cf_recall_analogy); "{}" on failure,
+    // which the caller distinguishes from a hit-less reply by the absent
+    // "results" key.
+    std::string recall_analogy_json(const std::string& args_json) const {
+        char* raw = cf_recall_analogy(handle_, args_json.c_str());
+        if (!raw) { cf_soft(-1, __func__); return "{}"; }
         std::string result(raw);
         cf_free_string(raw);
         return result;

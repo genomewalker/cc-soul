@@ -61,6 +61,32 @@ ToolResult FieldRpcHandler::tool_nack_memory(const json& params) {
     return ToolResult::ok("Nacked memory #" + std::to_string(id));
 }
 
+ToolResult FieldRpcHandler::tool_memory_outcome(const json& params) {
+    uint64_t id = extract_id(params);
+    if (id == 0) return ToolResult::error("id is required");
+    if (!params.contains("success") || !params["success"].is_boolean()) {
+        return ToolResult::error("success (boolean) is required");
+    }
+    if (field_store_->get_content(id).empty()) {
+        return ToolResult::error("memory not found: " + std::to_string(id));
+    }
+    bool success = params["success"].get<bool>();
+    float weight = params.value("weight", 1.0f);
+    // The store silently ignores non-positive/NaN weight; reject here so the
+    // caller is never told "Recorded" for an observation that never landed.
+    if (!(weight > 0.0f)) {
+        return ToolResult::error("weight must be > 0");
+    }
+    float alpha = 0.0f, beta = 0.0f;
+    if (!field_store_->record_outcome(id, success, weight, alpha, beta)) {
+        return ToolResult::error("failed to record outcome for memory #" + std::to_string(id));
+    }
+    return ToolResult::ok("Recorded " + std::string(success ? "success" : "failure") +
+                          " for memory #" + std::to_string(id) +
+                          " (alpha=" + std::to_string(alpha) +
+                          " beta=" + std::to_string(beta) + ")");
+}
+
 ToolResult FieldRpcHandler::tool_batch_forget(const json& params) {
     size_t count = 0;
     if (params.contains("ids") && params["ids"].is_array()) {

@@ -254,7 +254,9 @@ target_include_directories(chitta INTERFACE
 
 # Find threads
 find_package(Threads REQUIRED)
-target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers)
+# zlib — conditional-compression codelength for the MDL consolidation gate (mdl_gate.hpp)
+find_package(ZLIB REQUIRED)
+target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers ZLIB::ZLIB)
 
 # nlohmann/json for RPC server
 find_package(nlohmann_json CONFIG QUIET)
@@ -467,6 +469,9 @@ if(CHITTA_BUILD_TESTS)
     add_executable(value_fact_extract_test
         src/value_fact_extract_test.cpp src/value_fact_extractor.cpp)
     add_test(NAME value_fact_extract_test COMMAND value_fact_extract_test)
+    add_executable(mdl_gate_test src/mdl_gate_test.cpp)
+    target_link_libraries(mdl_gate_test PRIVATE ZLIB::ZLIB)
+    add_test(NAME mdl_gate_test COMMAND mdl_gate_test)
 endif()
 
 # RPATH configuration for runtime library discovery
