@@ -123,11 +123,11 @@ rather than migrated — no compatibility concern either way.
 
 ```bash
 # 1. Remove the old marketplace, add the renamed one
-claude marketplace remove genomewalker-cc-soul
-claude marketplace add https://github.com/genomewalker/chitta
+claude plugin marketplace remove genomewalker-cc-soul
+claude plugin marketplace add https://github.com/genomewalker/chitta
 
 # 2. Install the renamed plugin
-claude plugin add chitta@genomewalker-chitta
+claude plugin install chitta@genomewalker-chitta
 
 # 3. If you run the dev/editable install from a source checkout, re-point it
 git -C /path/to/chitta remote set-url origin git@github.com:genomewalker/chitta.git
@@ -135,7 +135,7 @@ bash scripts/dev-install.sh
 ```
 
 Verify the exact `claude plugin`/`claude marketplace` subcommand syntax with
-`claude plugin --help` and `claude marketplace --help` first if these have
+`claude plugin --help` and `claude plugin marketplace --help` first if these have
 changed since this was written.
 
 Nothing else to do: your existing `CC_SOUL_*` env vars, `project:cc-soul`

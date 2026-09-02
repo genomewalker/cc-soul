@@ -28,10 +28,10 @@ Persistent memory for Claude Code and Codex. Learns from every session, surfaces
 
 ```bash
 # 1. Register marketplace
-claude marketplace add https://github.com/genomewalker/chitta
+claude plugin marketplace add https://github.com/genomewalker/chitta
 
 # 2. Install plugin
-claude plugin add chitta@genomewalker-chitta
+claude plugin install chitta@genomewalker-chitta
 ```
 
 Or manual installation:
